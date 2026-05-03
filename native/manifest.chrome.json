@@ -1,0 +1,13 @@
+{
+  "name": "com.example.localclassifier",
+  "description": "Local AI classifier bridge (Chrome)",
+  "path": "C:\\Python39\\python.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_EXTENSION_ID/"
+  ],
+  "arguments": [
+    "-u",
+    "native\\echo_host.py"
+  ]
+}

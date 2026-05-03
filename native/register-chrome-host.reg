@@ -1,0 +1,4 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.example.localclassifier]
+@="C:\\Users\\lukea\\Desktop\\Stuff\\School\\Year 3\\Project\\Test Project\\native\\manifest.chrome.json"

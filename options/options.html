@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Extension Options</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main>
+      <img
+        src="../icons/icon.svg"
+        alt="Fire Vs Fire"
+        class="logo"
+        id="status-logo"
+      />
+      <h2>Fire Vs Fire Options</h2>
+      <p class="run-state idle" id="run-state" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="run-state-text">Idle</span>
+      </p>
+
+      <section class="settings-group">
+        <h3>Detection</h3>
+        <label>
+          <input type="checkbox" id="enabled" checked />
+          Enable detection
+        </label>
+
+        <label>
+          <input type="checkbox" id="altTextOnly" />
+          Only process images with alt text (faster, likley to skip unnecesairy
+          images)
+        </label>
+
+        <label>
+          Minimum text length to classify (chars):
+          <input
+            type="number"
+            id="minTextLength"
+            min="50"
+            max="2000"
+            step="10"
+            value="250"
+            style="width: 70px"
+          />
+        </label>
+      </section>
+
+      <section class="settings-group">
+        <h3>Categories</h3>
+        <div id="ensemble-list"></div>
+        <div class="row">
+          <button id="add-ensemble" type="button">New category</button>
+          <button id="refresh-models" type="button">Refresh classifiers</button>
+        </div>
+        <p id="model-status" class="status" hidden></p>
+      </section>
+
+      <section class="settings-group">
+        <h3>Dev</h3>
+        <label>
+          Classification debounce delay (ms):
+          <input
+            type="range"
+            id="classificationDelay"
+            min="0"
+            max="500"
+            step="10"
+            value="100"
+          />
+          <span id="classificationDelayValue">100</span>ms
+        </label>
+
+        <label>
+          Image capture quality:
+          <input
+            type="range"
+            id="imageCaptureQuality"
+            min="0.2"
+            max="1"
+            step="0.05"
+            value="1"
+          />
+          <span id="imageCaptureQualityValue">1.00</span>
+        </label>
+
+        <label>
+          <input type="checkbox" id="verboseLogs" />
+          More log details (split batches, GPU info, timing)
+        </label>
+
+        <label>
+          <input type="checkbox" id="lazyLoad" />
+          Instantly unload models to save memory
+        </label>
+        
+        <div class="row" style="margin-top: 16px;">
+          <button id="reclassify-all" type="button">Reclassify all pages</button>
+        </div>
+      </section>
+    </main>
+    <script src="./options.js" type="module"></script>
+  </body>
+</html>

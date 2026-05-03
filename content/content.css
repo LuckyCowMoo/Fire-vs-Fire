@@ -1,0 +1,24 @@
+html.ff-template-highlight, body.ff-template-highlight { transition: outline-color 0.2s ease-in-out; }
+
+/* AI-detected image styling */
+img.ai-detected {
+  filter: blur(4px) saturate(1) brightness(0.85) !important;
+  transition: all 0.3s ease !important;
+  animation: ai-pulse 2s ease-in-out infinite !important;
+  cursor: help !important;
+}
+
+img.ai-detected:hover,
+a:hover > img.ai-detected {
+  filter: blur(0px) saturate(1) brightness(1) !important;
+  animation: none !important;
+}
+
+@keyframes ai-pulse {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(255, 0, 100, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(255, 0, 100, 0.8);
+  }
+}

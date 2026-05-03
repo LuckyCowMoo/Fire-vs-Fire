@@ -101,6 +101,52 @@ button:hover {
   align-items: center;
 }
 
+.ensemble-row input[type="text"] {
+  min-width: 180px;
+  flex: 1 1 180px;
+}
+
+.ensemble-weight-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.ensemble-weight-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.ensemble-weight-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ensemble-weight-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ensemble-weight-value {
+  font-size: 12px;
+  color: #888;
+  min-width: 42px;
+  text-align: right;
+}
+
+.ensemble-weight-row input[type="number"] {
+  width: 100%;
+}
+
+.ensemble-weight-row input[type="range"] {
+  width: 100%;
+}
+
 .ensemble-actions {
   display: flex;
   gap: 6px;

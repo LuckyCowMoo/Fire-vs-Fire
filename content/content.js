@@ -184,9 +184,12 @@ function computeEnsembleSignature(ensembles, includeStyles) {
       modality: ens.modality || '',
       enabled: ens.enabled !== false,
       classifiers: Array.isArray(ens.classifiers) ? [...ens.classifiers].sort() : [],
-      weights: Array.isArray(ens.weights) ? [...ens.weights] : null
+      // weights are considered a visual-level setting and are included
+      // only when `includeStyles` is true below
     };
     if (includeStyles) {
+      base.weights = Array.isArray(ens.weights) ? [...ens.weights] : null;
+      base.name = typeof ens.name === 'string' ? ens.name.trim() : '';
       base.threshold = typeof ens.threshold === 'number' ? ens.threshold : 0.5;
       base.styles = ens.styles || {};
     }
@@ -1024,6 +1027,79 @@ function getEnsembleById(ensembleId) {
   return getEnsembleConfigs().find((ens) => ens.id === ensembleId);
 }
 
+function getEnsembleDisplayLabel(ensembleCfg) {
+  if (!ensembleCfg) return 'AI generated';
+
+  const name = typeof ensembleCfg.name === 'string' ? ensembleCfg.name.trim() : '';
+  if (name) return name;
+
+  const ensembles = getEnsembleConfigs();
+  const index = ensembles.findIndex((ens) => ens && ens.id === ensembleCfg.id);
+  if (index >= 0) {
+    return `Category ${index + 1}`;
+  }
+
+  return 'AI generated';
+}
+
+function normalizeEnsembleWeight(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return 1;
+  }
+  return numeric;
+}
+
+function recomputeWeightedEnsembleResult(ensembleCfg, result) {
+  if (!ensembleCfg || !result || !result.classifiers || typeof result.classifiers !== 'object') {
+    return result;
+  }
+
+  const classifierIds = Array.isArray(ensembleCfg.classifiers) ? ensembleCfg.classifiers : [];
+  if (classifierIds.length <= 1) {
+    return result;
+  }
+
+  const detailsByClassifier = result.classifiers;
+  const weights = Array.isArray(ensembleCfg.weights) ? ensembleCfg.weights : [];
+  const scoredClassifiers = [];
+
+  classifierIds.forEach((classifierId, index) => {
+    const details = detailsByClassifier[classifierId];
+    const score = details && typeof details.score === 'number' ? details.score : Number(details && details.score);
+    if (!Number.isFinite(score) || score < 0) return;
+    scoredClassifiers.push({
+      score,
+      weight: normalizeEnsembleWeight(weights[index]),
+      label: details && details.label ? details.label : null
+    });
+  });
+
+  if (!scoredClassifiers.length) {
+    return result;
+  }
+
+  const weightSum = scoredClassifiers.reduce((sum, item) => sum + item.weight, 0);
+  if (weightSum <= 0) {
+    return result;
+  }
+
+  const combinedScore = scoredClassifiers.reduce((sum, item) => sum + (item.score * item.weight), 0) / weightSum;
+  const displayLabel = getEnsembleDisplayLabel(ensembleCfg)
+    || scoredClassifiers.find((item) => item.label && item.label !== 'AI generated')?.label
+    || result.display_label
+    || result.displayLabel
+    || 'AI generated';
+
+  return {
+    ...result,
+    score: Math.round(combinedScore * 10000) / 10000,
+    label: combinedScore >= 0.5 ? 'ai' : 'real',
+    display_label: displayLabel,
+    displayLabel
+  };
+}
+
 function applyStylesForItem(itemId) {
   const entry = itemResults.get(itemId);
   if (!entry) return;
@@ -1047,7 +1123,22 @@ function applyStylesForItem(itemId) {
     if (cfg.modality !== modality) return;
     const threshold = typeof cfg.threshold === 'number' ? cfg.threshold : 0.5;
     if (data.score >= threshold) {
-      matched.push({ cfg, score: data.score, displayLabel: data.displayLabel || data.label || 'AI generated' });
+      // For single-classifier ensembles, prefer the classifier's label; otherwise use ensemble name
+      let displayLabel = 'AI generated';
+      const isSingleClassifier = Array.isArray(cfg.classifiers) && cfg.classifiers.length === 1;
+      if (isSingleClassifier) {
+        // Get label from the classifier's detail object
+        const classifierId = cfg.classifiers[0];
+        const classifierDetail = data.classifiers && data.classifiers[classifierId];
+        displayLabel = (classifierDetail && classifierDetail.label) || getEnsembleDisplayLabel(cfg) || 'AI generated';
+      } else {
+        displayLabel = getEnsembleDisplayLabel(cfg) || data.displayLabel || 'AI generated';
+      }
+      matched.push({
+        cfg,
+        score: data.score,
+        displayLabel
+      });
     }
   });
 
@@ -1285,7 +1376,10 @@ function applyStylesForItem(itemId) {
     element.classList.add('ai-detected-text');
     const maxScore = Math.max(...matched.map((m) => m.score));
     element.setAttribute('data-ai-score', maxScore);
-    element.title = `AI-generated text (${(maxScore * 100).toFixed(1)}% confidence)`;
+    const textLabel = matched.find((m) => m.displayLabel && m.displayLabel !== 'AI generated')?.displayLabel
+      || matched[0]?.displayLabel
+      || 'AI-generated text';
+    element.title = `${textLabel} (${(maxScore * 100).toFixed(1)}% confidence)`;
 
     const showBlur = blurMode !== 'off';
     const showStrike = strikeMode !== 'off';
@@ -1399,11 +1493,13 @@ function applyResultChunk(response) {
     const entry = itemResults.get(result.id) || { modality: result.modality, ensembles: {} };
     entry.modality = result.modality || entry.modality;
     const ensembleId = result.ensembleId || response.ensembleId || 'default';
+    const ensembleCfg = getEnsembleById(ensembleId);
+    const finalResult = recomputeWeightedEnsembleResult(ensembleCfg, result);
     entry.ensembles[ensembleId] = {
-      score: typeof result.score === 'number' ? result.score : 0.5,
-      label: result.label || 'uncertain',
-      displayLabel: result.display_label || result.displayLabel || 'AI generated',
-      classifiers: result.classifiers || {}
+      score: typeof finalResult.score === 'number' ? finalResult.score : 0.5,
+      label: finalResult.label || 'uncertain',
+      displayLabel: finalResult.display_label || finalResult.displayLabel || 'AI generated',
+      classifiers: finalResult.classifiers || {}
     };
     itemResults.set(result.id, entry);
     
@@ -1973,6 +2069,16 @@ if (ext && ext.storage && ext.storage.onChanged) {
       }
 
       if (styleChanged) {
+        // Recalculate ensemble scores for all items using stored per-classifier results
+        itemResults.forEach((entry, itemId) => {
+          Object.entries(entry.ensembles || {}).forEach(([ensembleId, storedResult]) => {
+            const cfg = getEnsembleById(ensembleId);
+            if (cfg && storedResult && storedResult.classifiers) {
+              const recalculated = recomputeWeightedEnsembleResult(cfg, storedResult);
+              entry.ensembles[ensembleId] = recalculated;
+            }
+          });
+        });
         reapplyVisualEffects();
       }
 

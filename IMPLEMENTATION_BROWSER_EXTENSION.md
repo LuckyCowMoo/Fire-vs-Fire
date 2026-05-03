@@ -238,7 +238,7 @@ Settings are persisted to `browser.storage.sync` (or `browser.storage.local` as 
 
 The content script listens for `storage.onChanged` events and implements intelligent reload logic:
 - **Classification settings** (thresholds, enabled state): Trigger full page rescan
-- **Visual settings** (blur, colors): Reapply styles to existing results without re-classification
+- **Visual settings** (blur, colors, category names, threshold display state): Reapply styles to existing results without re-classification
 - **Performance settings** (debounce, logging): Update in-memory variables only
 
 This approach eliminates the need for page reloads while ensuring settings changes take effect immediately.
@@ -292,6 +292,10 @@ badge.style.position = 'absolute';
 badge.style.top = '6px';
 badge.style.right = '6px';
 ```
+
+Badge labels are determined by:
+- **Single classifier** (no ensemble or 1-classifier ensemble): Uses the label returned by the classifier (e.g., `get_model_name()`)
+- **Multi-classifier ensemble**: Uses the ensemble name (from options UI) or defaults to `Category N` if name is blank
 
 Multiple ensembles can flag the same image, resulting in stacked badges with decreasing z-index.
 

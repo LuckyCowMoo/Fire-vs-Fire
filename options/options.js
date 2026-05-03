@@ -181,6 +181,160 @@ function generateEnsembleId(modality) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function normalizeWeightValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return 1;
+  return numeric;
+}
+
+function getAlignedWeights(classifierIds, weights) {
+  const sourceWeights = Array.isArray(weights) ? weights : [];
+  return classifierIds.map((_, index) => normalizeWeightValue(sourceWeights[index]));
+}
+
+function normalizeWeightsToSumOne(classifierIds, weights) {
+  const alignedWeights = getAlignedWeights(classifierIds, weights);
+  const total = alignedWeights.reduce((sum, weight) => sum + weight, 0);
+  if (!alignedWeights.length) return [];
+  if (alignedWeights.length === 1) return [1];
+  if (total <= 0) return alignedWeights.map(() => 1 / alignedWeights.length);
+  return alignedWeights.map((weight) => weight / total);
+}
+
+function redistributeLinkedWeights(classifierIds, currentWeights, activeIndex, nextActiveValue) {
+  const count = Array.isArray(classifierIds) ? classifierIds.length : 0;
+  if (count <= 0) return [];
+  if (count === 1) return [1];
+
+  const nextWeights = normalizeWeightsToSumOne(classifierIds, currentWeights);
+  const activeValue = Math.max(0, Math.min(1, Number(nextActiveValue) || 0));
+  const otherIndices = classifierIds.map((_, index) => index).filter((index) => index !== activeIndex);
+
+  nextWeights[activeIndex] = activeValue;
+  const remaining = Math.max(0, 1 - activeValue);
+  const currentOtherTotal = otherIndices.reduce((sum, index) => sum + Math.max(0, nextWeights[index]), 0);
+
+  if (otherIndices.length === 1) {
+    nextWeights[otherIndices[0]] = remaining;
+  } else if (currentOtherTotal > 0) {
+    otherIndices.forEach((index) => {
+      nextWeights[index] = (Math.max(0, nextWeights[index]) / currentOtherTotal) * remaining;
+    });
+  } else {
+    const evenShare = remaining / otherIndices.length;
+    otherIndices.forEach((index) => {
+      nextWeights[index] = evenShare;
+    });
+  }
+
+  const total = nextWeights.reduce((sum, weight) => sum + weight, 0);
+  const correction = 1 - total;
+  if (Math.abs(correction) > 1e-9) {
+    const correctionIndex = otherIndices.length ? otherIndices[otherIndices.length - 1] : activeIndex;
+    nextWeights[correctionIndex] = Math.max(0, nextWeights[correctionIndex] + correction);
+  }
+
+  return nextWeights;
+}
+
+function updateEnsembleClassifiers(ensemble, nextClassifiers) {
+  const currentClassifiers = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
+  const currentWeights = Array.isArray(ensemble.weights) ? ensemble.weights : [];
+  const weightByClassifier = new Map(currentClassifiers.map((classifierId, index) => [classifierId, currentWeights[index]]));
+
+  ensemble.classifiers = nextClassifiers;
+  ensemble.weights = normalizeWeightsToSumOne(nextClassifiers, nextClassifiers.map((classifierId) => weightByClassifier.get(classifierId)));
+}
+
+function renderWeightsEditor(ensemble, classifierIds, classifierLookup) {
+  const section = document.createElement('div');
+  section.className = 'ensemble-weight-editor';
+
+  const title = document.createElement('div');
+  title.className = 'hint';
+  title.textContent = 'Classifier weights:';
+  section.appendChild(title);
+
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = 'Weights are applied in classifier order and normalized when used.';
+  section.appendChild(hint);
+
+  const alignedWeights = normalizeWeightsToSumOne(classifierIds, ensemble.weights);
+  if (!Array.isArray(ensemble.weights) || ensemble.weights.length !== classifierIds.length) {
+    ensemble.weights = alignedWeights.slice();
+  }
+
+  const weightInputs = [];
+  const weightValueEls = [];
+
+  const syncWeights = (nextWeights) => {
+    const normalizedWeights = normalizeWeightsToSumOne(classifierIds, nextWeights);
+    ensemble.weights = normalizedWeights;
+    weightInputs.forEach((slider, index) => {
+      slider.value = String(normalizedWeights[index] ?? 0);
+      updateSliderBackground(slider);
+    });
+    weightValueEls.forEach((valueEl, index) => {
+      valueEl.textContent = `${Math.round((normalizedWeights[index] ?? 0) * 100)}%`;
+    });
+  };
+
+  classifierIds.forEach((classifierId, index) => {
+    const row = document.createElement('div');
+    row.className = 'ensemble-weight-row';
+
+    const rowHeader = document.createElement('div');
+    rowHeader.className = 'ensemble-weight-row-header';
+
+    const name = document.createElement('span');
+    name.className = 'ensemble-weight-name';
+    name.textContent = classifierLookup.get(classifierId) || classifierId;
+
+    const value = document.createElement('span');
+    value.className = 'ensemble-weight-value';
+    value.textContent = `${Math.round((alignedWeights[index] ?? 0) * 100)}%`;
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '0';
+    input.max = '1';
+    input.step = '0.01';
+    input.value = String(alignedWeights[index] ?? 0);
+    updateSliderBackground(input);
+    input.addEventListener('input', () => {
+      syncWeights(redistributeLinkedWeights(classifierIds, ensemble.weights, index, input.value));
+      updateSliderBackground(input);
+      saveEnsembles();
+    });
+
+    rowHeader.appendChild(name);
+    rowHeader.appendChild(value);
+    row.appendChild(rowHeader);
+    row.appendChild(input);
+    section.appendChild(row);
+
+    weightInputs.push(input);
+    weightValueEls.push(value);
+  });
+
+  syncWeights(alignedWeights);
+
+  return section;
+}
+
+function getDefaultEnsembleName(index) {
+  return `Category ${index + 1}`;
+}
+
+function getCategoryLabelForSelection(selectedClassifiers, classifierNamesById, index) {
+  if (selectedClassifiers.length === 1) {
+    return classifierNamesById.get(selectedClassifiers[0]) || selectedClassifiers[0];
+  }
+
+  return getDefaultEnsembleName(index);
+}
+
 function buildDefaultEnsemblesFromSettings() {
   const defaultColor = '#FF0064';
   return [
@@ -249,10 +403,18 @@ function renderEnsembles() {
   availableClassifiers.forEach((m) => {
     modalitiesById.set(m.id, m.modalities || []);
   });
+  const classifierNamesById = new Map();
+  availableClassifiers.forEach((m) => {
+    classifierNamesById.set(m.id, m.name || m.id);
+  });
 
   ensembleConfigs.forEach((ensemble, index) => {
     if (!ensemble.id) {
       ensemble.id = generateEnsembleId(ensemble.modality || 'image');
+      saveEnsembles();
+    }
+    if (typeof ensemble.name !== 'string' || !ensemble.name.trim()) {
+      ensemble.name = getDefaultEnsembleName(index);
       saveEnsembles();
     }
     const card = document.createElement('div');
@@ -262,7 +424,7 @@ function renderEnsembles() {
     header.className = 'ensemble-row';
 
     const title = document.createElement('strong');
-    title.textContent = `Category ${index + 1}`;
+    title.textContent = 'Category name:';
 
     const modalitySelect = document.createElement('select');
     ['image', 'text'].forEach((mod) => {
@@ -290,7 +452,32 @@ function renderEnsembles() {
     enabledLabel.textContent = 'Enabled';
     enabledLabel.prepend(enabledCheckbox);
 
+    const selectedClassifiers = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
+    const categoryLabel = getCategoryLabelForSelection(selectedClassifiers, classifierNamesById, index);
+
+    let nameControl;
+    if (selectedClassifiers.length >= 2) {
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.value = typeof ensemble.name === 'string' ? ensemble.name : '';
+      nameInput.placeholder = categoryLabel;
+      nameInput.addEventListener('input', () => {
+        ensemble.name = nameInput.value.trim();
+        saveEnsembles();
+      });
+      nameControl = nameInput;
+    } else {
+      if (ensemble.name !== categoryLabel) {
+        ensemble.name = categoryLabel;
+        saveEnsembles();
+      }
+      const nameValue = document.createElement('span');
+      nameValue.textContent = categoryLabel;
+      nameControl = nameValue;
+    }
+
     header.appendChild(title);
+    header.appendChild(nameControl);
     header.appendChild(modalitySelect);
     header.appendChild(enabledLabel);
     card.appendChild(header);
@@ -336,10 +523,11 @@ function renderEnsembles() {
       const modalities = model.modalities || [];
       checkbox.disabled = modalities.length > 0 && !modalities.includes(supported);
       checkbox.addEventListener('change', () => {
-        const list = new Set(Array.isArray(ensemble.classifiers) ? ensemble.classifiers : []);
-        if (checkbox.checked) list.add(model.id);
-        else list.delete(model.id);
-        ensemble.classifiers = Array.from(list);
+        const currentClassifiers = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
+        const nextClassifiers = currentClassifiers.filter((classifierId) => classifierId !== model.id);
+        if (checkbox.checked) nextClassifiers.push(model.id);
+        updateEnsembleClassifiers(ensemble, nextClassifiers);
+        renderEnsembles();
         saveEnsembles();
       });
       label.appendChild(checkbox);
@@ -347,6 +535,10 @@ function renderEnsembles() {
       classifierList.appendChild(label);
     });
     card.appendChild(classifierList);
+
+    if (selectedClassifiers.length > 1) {
+      card.appendChild(renderWeightsEditor(ensemble, selectedClassifiers, classifierNamesById));
+    }
 
     const styleGrid = document.createElement('div');
     styleGrid.className = 'ensemble-grid';

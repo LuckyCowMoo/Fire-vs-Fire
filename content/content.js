@@ -1877,6 +1877,20 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
       return Promise.resolve({ success: true });
     }
 
+    if (message.type === 'CANCEL_ALL_CLASSIFICATIONS') {
+      // Cancel all in-flight classifications
+      activeJobIds.clear();
+      classificationInFlight = false;
+      pendingClassification = [];
+      pendingTextSections = [];
+      if (classificationTimeout) {
+        clearTimeout(classificationTimeout);
+        classificationTimeout = null;
+      }
+      console.log('[AI Detector] All classifications cancelled');
+      return Promise.resolve({ success: true });
+    }
+
     if (message.type === 'TOGGLE_BLUR') {
       const srcUrl = message.srcUrl;
       const selectionText = message.selectionText;

@@ -2,6 +2,7 @@
 const ext = typeof browser !== 'undefined' ? browser : chrome;
 
 const toggleBtn = document.getElementById('toggle');
+const cancelBtn = document.getElementById('cancelBtn');
 const statusEl = document.getElementById('status');
 
 // Use PointerEvent instead of MouseEvent to avoid deprecated properties like mozInputSource
@@ -30,6 +31,27 @@ toggleBtn.addEventListener('pointerdown', async (ev) => {
     }
   } catch (e) {
     statusEl.textContent = 'Could not talk to this page. Is this URL permitted?';
+    statusEl.style.display = 'block';
+    console.warn(e);
+  }
+});
+
+// Cancel all in-flight classifications
+cancelBtn.addEventListener('pointerdown', async (ev) => {
+  if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+  console.log('Cancel button clicked');
+  try {
+    const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.id != null) {
+      await ext.tabs.sendMessage(tab.id, { type: 'CANCEL_ALL_CLASSIFICATIONS' });
+      statusEl.textContent = 'All classifications cancelled';
+      statusEl.style.display = 'block';
+      setTimeout(() => {
+        statusEl.style.display = 'none';
+      }, 2000);
+    }
+  } catch (e) {
+    statusEl.textContent = 'Could not cancel classifications';
     statusEl.style.display = 'block';
     console.warn(e);
   }

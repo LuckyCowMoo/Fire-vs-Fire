@@ -29,6 +29,9 @@ def log(msg):
 
 log(f"[START] Echo Host V2 starting")
 
+# Global set to track cancelled jobs
+cancelled_jobs = set()
+
 # Import classifier registry
 from model_registry import get_registry
 
@@ -472,6 +475,21 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
     per-ensemble as soon as each ensemble completes.
     """
     req_id = envelope.get('requestId')
+    job_key = job_id or req_id
+    
+    # Check if job was cancelled before starting
+    if job_key in cancelled_jobs:
+        log(f"[classify_items] Job {job_key} was cancelled; aborting")
+        cancelled_jobs.discard(job_key)
+        return {
+            'version': 2,
+            'type': 'classifyResult',
+            'requestId': req_id,
+            'timestamp': int(time.time() * 1000),
+            'results': [],
+            'errors': [{'type': 'cancelled', 'message': 'Classification was cancelled'}]
+        }
+    
     payload = envelope.get('payload') or {}
     items = payload.get('items') or []
     model_config = payload.get('model') or {}
@@ -576,6 +594,12 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
             device_logged = False
 
             for batch_start in range(0, total_images, mini_batch_size):
+                # Check if job was cancelled before processing this batch
+                if job_key in cancelled_jobs:
+                    log(f"[classify_items] Image batch cancelled for job {job_key}; stopping")
+                    cancelled_jobs.discard(job_key)
+                    break
+                
                 batch_end = min(batch_start + mini_batch_size, total_images)
                 batch_slice = image_results[batch_start:batch_end]
                 batch_ids = [item_id for item_id, _, _, _ in batch_slice]
@@ -646,6 +670,12 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
             device_logged = False
 
             for batch_start in range(0, total_text, mini_batch_size):
+                # Check if job was cancelled before processing this batch
+                if job_key in cancelled_jobs:
+                    log(f"[classify_items] Text batch cancelled for job {job_key}; stopping")
+                    cancelled_jobs.discard(job_key)
+                    break
+                
                 batch_end = min(batch_start + mini_batch_size, total_text)
                 batch_slice = text_results[batch_start:batch_end]
                 batch_ids = [item_id for item_id, _, _, _ in batch_slice]
@@ -787,6 +817,20 @@ def main():
             elif mtype == 'listModels':
                 log("[Main] Listing available models")
                 send_message(list_models(msg.get('requestId')))
+            
+            elif mtype == 'cancelJob':
+                job_key = msg.get('jobId') or msg.get('requestId')
+                log(f"[Main] Received cancel request for job {job_key}")
+                if job_key:
+                    cancelled_jobs.add(job_key)
+                    send_message({
+                        'ok': True,
+                        'type': 'jobCancelled',
+                        'jobId': job_key,
+                        'timestamp': int(time.time() * 1000)
+                    })
+                else:
+                    send_message({'ok': False, 'error': 'No jobId provided'})
             
             else:
                 log(f"[Main] Unknown message type: {mtype}")

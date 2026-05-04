@@ -1878,7 +1878,8 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
     }
 
     if (message.type === 'CANCEL_ALL_CLASSIFICATIONS') {
-      // Cancel all in-flight classifications
+      // Cancel all in-flight classifications (both browser-side and native host-side)
+      const jobCount = activeJobIds.size;
       activeJobIds.clear();
       classificationInFlight = false;
       pendingClassification = [];
@@ -1887,7 +1888,13 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
         clearTimeout(classificationTimeout);
         classificationTimeout = null;
       }
-      console.log('[AI Detector] All classifications cancelled');
+      
+      // Send cancel request to background script to cancel native host jobs
+      ext.runtime.sendMessage({
+        type: 'CANCEL_ALL'
+      }).catch(() => {});
+      
+      console.log('[AI Detector] All classifications cancelled ('+jobCount+' jobs)');
       return Promise.resolve({ success: true });
     }
 

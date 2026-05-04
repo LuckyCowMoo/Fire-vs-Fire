@@ -156,6 +156,14 @@ function ensureNativePort() {
     const resType = response && response.type;
     const reqId = response && response.requestId;
 
+    // Handle job cancellation confirmation
+    if (resType === 'jobCancelled') {
+      const jobId = response.jobId;
+      console.log(`[Native] Job ${jobId} cancellation confirmed`);
+      pendingJobs.delete(jobId);
+      return;
+    }
+
     if (resType === 'classifyResultChunk' || resType === 'classifyJobComplete') {
       const jobId = response.jobId;
       const jobInfo = jobId ? pendingJobs.get(jobId) : null;
@@ -491,6 +499,29 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message && message.type === 'GET_MODEL') {
     sendResponse({ ok: true, selected: selectedImageModel });
+    return false;
+  }
+
+  if (message && message.type === 'CANCEL_ALL') {
+    // Cancel all active native host jobs
+    for (let jobId of pendingJobs.keys()) {
+      try {
+        const port = ensureNativePort();
+        if (port) {
+          port.postMessage({
+            type: 'cancelJob',
+            jobId: jobId,
+            timestamp: Date.now()
+          });
+        }
+      } catch (e) {
+        console.warn(`[Background] Failed to cancel job ${jobId}:`, e);
+      }
+    }
+    pendingJobs.clear();
+    activeClassifyCount = 0;
+    updateToolbarState();
+    sendResponse({ ok: true });
     return false;
   }
 

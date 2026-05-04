@@ -25,6 +25,7 @@ const statusLogoEl = document.getElementById('status-logo');
 let availableClassifiers = [];
 let ensembleConfigs = [];
 let runStateTimer = null;
+let classifierTimings = {};
 
 function setRunState(isLoading, activeCount = 0) {
   if (runStateEl) {
@@ -179,6 +180,15 @@ function createColorSliders(labelText, initialColor, onChange) {
 function generateEnsembleId(modality) {
   const prefix = modality === 'text' ? 'text' : 'image';
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function formatClassifierRate(classifierId, modalities) {
+  const t = classifierTimings && classifierTimings[classifierId];
+  if (!t || !t.avgMs || t.avgMs <= 0) return '—';
+  const perSec = 1000 / t.avgMs;
+  const unit = (modalities && modalities.includes && modalities.includes('image')) ? 'img/s'
+    : (modalities && modalities.includes && modalities.includes('text')) ? 'txt/s' : '/s';
+  return perSec >= 1 ? `${Math.round(perSec)} ${unit}` : `${perSec.toFixed(2)} ${unit}`;
 }
 
 function normalizeWeightValue(value) {
@@ -532,6 +542,11 @@ function renderEnsembles() {
       });
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(` ${model.name || model.id}`));
+
+      const rateEl = document.createElement('div');
+      rateEl.className = 'classifier-rate';
+      rateEl.textContent = formatClassifierRate(model.id, modalities);
+      label.appendChild(rateEl);
       classifierList.appendChild(label);
     });
     card.appendChild(classifierList);
@@ -801,6 +816,9 @@ async function load() {
       ensembleConfigs = buildDefaultEnsemblesFromSettings();
       await saveEnsembles();
     }
+    if (res && res.classifierTimings && typeof res.classifierTimings === 'object') {
+      classifierTimings = res.classifierTimings;
+    }
     updateDisplays();
     renderEnsembles();
   } catch {}
@@ -856,6 +874,16 @@ minTextLengthInput.addEventListener('change', async () => {
 load();
 refreshRunState();
 runStateTimer = setInterval(refreshRunState, 800);
+
+// Listen for timing updates so UI can refresh in real-time
+if (ext && ext.storage && ext.storage.onChanged) {
+  ext.storage.onChanged.addListener((changes) => {
+    if (Object.prototype.hasOwnProperty.call(changes, 'classifierTimings')) {
+      classifierTimings = changes.classifierTimings.newValue || {};
+      renderEnsembles();
+    }
+  });
+}
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {

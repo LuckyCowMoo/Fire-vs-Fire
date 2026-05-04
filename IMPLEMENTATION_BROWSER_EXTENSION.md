@@ -427,38 +427,224 @@ The mode is stored in `element.dataset.aiImageStyle` as JSON, allowing the hover
 
 ---
 
-## 4.5 Technical Challenges and Solutions
+## 4.5 Client-Side Ensemble Management
 
-### 4.5.1 CORS and Canvas Tainting
+While the server performs the computationally expensive weighted averaging of classifier scores, the browser extension manages ensemble configurations, thresholds, and visual styling, providing a flexible system for creating custom detection categories.
+
+### 4.5.1 Ensemble Configuration Structure
+
+Each ensemble (called a "Category" in the UI) defines a complete detection pipeline:
+
+```javascript
+{
+  id: 'ai_images',
+  name: 'AI Images',
+  modality: 'image',
+  enabled: true,
+  threshold: 0.5,  // 50% confidence required to flag
+  classifiers: ['resnet50_fft', 'convnext_large_artifact'],
+  weights: [0.6, 0.4],  // Optional: ResNet50 60%, ConvNeXt 40%
+  styles: {
+    image: {
+      blurAmount: 4,
+      blurMode: 'hover',
+      borderColor: '#ff0064',
+      borderMode: 'hover',
+      badgeMode: 'hover'
+    }
+  }
+}
+```
+
+The extension stores these configurations in `browser.storage.sync` under the key `ensembleConfigsV2`, allowing synchronization across devices.
+
+### 4.5.2 Ensemble Transmission to Server
+
+When sending classification requests, the extension packages ensemble configurations into the model config:
+
+```javascript
+const ensemblesByModality = getEnsemblesByModality();
+const modelConfig = {
+  ensemblesByModality: {
+    image: ensemblesByModality.image.map((ens) => ({
+      id: ens.id,
+      classifiers: ens.classifiers || [],
+      weights: ens.weights || null
+    })),
+    text: ensemblesByModality.text.map((ens) => ({
+      id: ens.id,
+      classifiers: ens.classifiers || [],
+      weights: ens.weights || null
+    }))
+  },
+  lazyLoad: settings.lazyLoad,
+  streamResults: true
+};
+```
+
+The server receives this configuration and creates `EnsembleClassifier` instances for each ensemble, running them sequentially and returning results tagged with `ensembleId`.
+
+### 4.5.3 Result Accumulation and Threshold Application
+
+As results stream back from the server, the extension accumulates them in a `Map<itemId, ResultData>` structure:
+
+```javascript
+const entry = itemResults.get(itemId) || { modality: 'image', ensembles: {} };
+entry.ensembles[ensembleId] = {
+  score: result.score,  // Weighted average from server
+  label: result.label,
+  displayLabel: result.displayLabel,
+  classifiers: result.classifiers  // Individual classifier scores
+};
+itemResults.set(itemId, entry);
+```
+
+When applying visual effects, the extension checks each ensemble's score against its configured threshold:
+
+```javascript
+const matched = [];
+Object.entries(entry.ensembles).forEach(([ensembleId, data]) => {
+  const cfg = getEnsembleById(ensembleId);
+  if (!cfg || cfg.enabled === false) return;
+  
+  const threshold = cfg.threshold ?? 0.5;
+  if (data.score >= threshold) {
+    matched.push({ cfg, score: data.score, displayLabel: data.displayLabel });
+  }
+});
+```
+
+This allows different ensembles to have different sensitivity levels—e.g., a "High Confidence AI" ensemble with 80% threshold and a "Possible AI" ensemble with 30% threshold.
+
+### 4.5.4 Multi-Ensemble Visual Merging
+
+When multiple ensembles flag the same content, the extension merges their visual styles using a priority system:
+
+**Mode Resolution**: If any ensemble uses "always" mode, the combined mode is "always". Otherwise, if any uses "hover", the combined mode is "hover":
+
+```javascript
+const resolveCombinedMode = (candidates) => {
+  if (candidates.some((c) => c.mode === 'always')) return 'always';
+  if (candidates.some((c) => c.mode === 'hover')) return 'hover';
+  return 'off';
+};
+```
+
+**Value Averaging**: Numeric values (blur amount, border multiplier) are averaged across all matching ensembles:
+
+```javascript
+const blurAmounts = matched
+  .map(({ cfg }) => cfg.styles?.image?.blurAmount ?? 4)
+  .filter((_, idx) => matched[idx].cfg.styles?.image?.blurMode !== 'off');
+const blurAmount = blurAmounts.reduce((a, b) => a + b, 0) / blurAmounts.length;
+```
+
+**Color Averaging**: Border and badge colors are averaged in RGB space:
+
+```javascript
+function averageColors(colors) {
+  let r = 0, g = 0, b = 0, count = 0;
+  colors.forEach((hex) => {
+    const rgb = hexToRgb(hex);
+    r += rgb.r; g += rgb.g; b += rgb.b; count++;
+  });
+  return rgbToHex({ r: r / count, g: g / count, b: b / count });
+}
+```
+
+This creates a smooth visual blend when multiple detection strategies agree on the same content.
+
+### 4.5.5 Per-Classifier Badge Stacking
+
+When an ensemble contains multiple classifiers, the extension can display individual confidence badges for each:
+
+```javascript
+const badgeEntries = [];
+matched.forEach(({ cfg, score, classifiers }) => {
+  if (classifiers && typeof classifiers === 'object') {
+    Object.entries(classifiers).forEach(([clfId, clfData]) => {
+      badgeEntries.push({
+        label: clfData.label || 'AI generated',
+        score: clfData.score,
+        color: cfg.styles?.image?.borderColor
+      });
+    });
+  }
+});
+
+// Create stacked badges
+badgeEntries.forEach((entry, index) => {
+  const badge = document.createElement('span');
+  badge.style.top = `${6 + (index * 28)}px`;  // Stack vertically
+  badge.textContent = `${entry.label} ${Math.round(entry.score * 100)}%`;
+  container.appendChild(badge);
+});
+```
+
+This provides transparency into which specific models contributed to the detection, useful for debugging false positives.
+
+### 4.5.6 Ensemble Signature Tracking
+
+To optimize settings updates, the extension computes signatures of ensemble configurations:
+
+```javascript
+function computeEnsembleSignature(ensembles, includeStyles) {
+  const normalized = ensembles.map((ens) => ({
+    id: ens.id,
+    modality: ens.modality,
+    enabled: ens.enabled !== false,
+    threshold: includeStyles ? ens.threshold : undefined,
+    classifiers: [...ens.classifiers].sort(),
+    weights: ens.weights,
+    styles: includeStyles ? ens.styles : undefined
+  }));
+  return JSON.stringify(normalized);
+}
+```
+
+When settings change, the extension compares signatures to determine the appropriate action:
+- **Classifier/weight change**: Full page rescan (re-classify all content)
+- **Style/threshold change**: Reapply visual effects only (no re-classification)
+- **Performance setting change**: Update in-memory variables only
+
+This minimizes unnecessary work and provides instant visual feedback for style changes.
+
+---
+
+## 4.6 Technical Challenges and Solutions
+
+### 4.6.1 CORS and Canvas Tainting
 
 Cross-origin images cannot be drawn to canvas without CORS headers, causing `toDataURL()` to throw a security exception. The extension handles this gracefully by catching the exception and falling back to URL-based fetching in the backend.
 
-### 4.5.2 Infinite Scroll and Memory Management
+### 4.6.2 Infinite Scroll and Memory Management
 
 Websites like Twitter and Reddit continuously inject new content while removing off-screen elements. The extension implements garbage collection in the periodic scan, removing disconnected elements from `processedImages` and `processedTextElements` sets to prevent memory leaks.
 
-### 4.5.3 YouTube and Dynamic Platforms
+### 4.6.3 YouTube and Dynamic Platforms
 
 YouTube's heavy use of JavaScript and shadow DOM requires special handling. The extension:
 - Exempts YouTube thumbnails (`i.ytimg.com`) from alt-text filtering
 - Uses `MutationObserver` with `subtree: true` to catch content injected into shadow roots
 - Implements a 3-second fallback scan to catch content loaded via non-standard frameworks
 
-### 4.5.4 Message Size Limits
+### 4.6.4 Message Size Limits
 
 Native messaging enforces a 1MB message size limit. The extension implements automatic batch splitting at 900KB (leaving 100KB margin for JSON overhead), sending chunks in parallel and reassembling them in the backend using `jobId` and `chunkIndex` metadata.
 
 ---
 
-## 4.6 Summary
+## 4.7 Summary
 
 The browser extension implements a sophisticated content discovery and flagging system that handles both static and dynamic web content. Key innovations include:
 
 1. **Multi-observer architecture** combining MutationObserver, IntersectionObserver, and ResizeObserver for comprehensive content detection
 2. **Canvas-based image extraction** to eliminate redundant network requests and preserve artifact data
 3. **Streaming classification results** for immediate user feedback
-4. **Category-based configuration** allowing users to define multiple independent detection filters
-5. **Mode-based visual effects** (Off/Hover/Always) providing flexible content flagging
-6. **Intelligent batch splitting** to respect native messaging constraints while maximizing throughput
+4. **Client-side ensemble management** allowing users to define multiple independent detection categories with custom thresholds and visual styles
+5. **Hybrid ensemble system** where the server performs weighted averaging of classifier scores while the browser manages configuration, threshold application, and visual merging
+6. **Mode-based visual effects** (Off/Hover/Always) providing flexible content flagging
+7. **Intelligent batch splitting** to respect native messaging constraints while maximizing throughput
+8. **Ensemble signature tracking** to minimize unnecessary re-classification when settings change
 
-The extension achieves its design goal of fully automatic, real-time detection without requiring user interaction, while providing extensive customization options for power users.
+The extension achieves its design goal of fully automatic, real-time detection without requiring user interaction, while providing extensive customization options for power users through the category-based ensemble system.

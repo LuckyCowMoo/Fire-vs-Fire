@@ -302,103 +302,128 @@ This standardization allows the ensemble system to combine scores from heterogen
 
 ---
 
-## 5.5 Ensemble Classification System
+## 5.5 Classification Orchestration
 
-The `EnsembleClassifier` class implements weighted averaging of multiple classifiers, allowing users to combine complementary detection strategies.
+The `classify_items()` function orchestrates the entire classification pipeline, handling modality routing, mini-batch processing, and result streaming.
 
-### 5.5.1 Initialization and Weight Normalization
+### 5.5.1 Item Segregation
 
-Ensembles are configured with a list of classifier IDs and optional weights:
+Items are first segregated by modality:
 
 ```python
-ensemble = EnsembleClassifier(
-    classifier_ids=['resnet50_fft', 'convnext_large_artifact'],
-    weights=[0.6, 0.4],  # ResNet50 weighted 60%, ConvNeXt 40%
-    lazy_load=True
-)
+image_items = [it for it in items if it.get('modality') == 'image' and it.get('url')]
+text_items = [it for it in items if it.get('modality') == 'text' and it.get('text')]
+other_items = [it for it in items if it not in image_items and it not in text_items]
 ```
 
-If weights are omitted, equal weighting is applied. Weights are automatically normalized to sum to 1.0:
+This allows parallel processing of different modalities (though currently sequential due to GPU memory constraints).
+
+### 5.5.2 Ensemble Configuration Parsing
+
+The server receives ensemble configurations from the browser and extracts the classifier IDs to run:
 
 ```python
-if weights is None:
-    self.weights = [1.0 / len(classifier_ids)] * len(classifier_ids)
-else:
-    total = sum(weights)
-    self.weights = [w / total for w in weights]
-```
-
-### 5.5.2 Parallel Classification
-
-The ensemble runs each classifier sequentially (not parallel) to avoid GPU memory contention:
-
-```python
-def classify_batch(self, inputs: List[Any], modality: str) -> tuple:
-    all_scores = []  # List of (classifier_id, weight, scores_list, label)
+def _normalize_ensembles(model_config: Dict[str, Any], modality: str) -> List[Dict[str, Any]]:
+    ensembles_by_modality = model_config.get('ensemblesByModality') or {}
+    ensembles = ensembles_by_modality.get(modality) or []
     
-    for clf_id, weight in zip(self.classifier_ids, self.weights):
-        classifier = self.registry.get_classifier(clf_id, lazy_load=not self.lazy_load)
-        
-        # Check modality support
-        if modality not in classifier.get_supported_modalities():
-            continue
-        
-        # Load model if needed
-        if not classifier.is_loaded():
-            success, error = classifier.load_model()
-            if not success:
-                continue
-        
-        # Classify batch
-        scores = classifier.process_batch(inputs, modality)
-        all_scores.append((clf_id, weight, scores, classifier.get_label()))
-        
-        # Unload if lazy loading enabled
-        if self.lazy_load:
-            classifier.unload_model()
+    if ensembles:
+        return ensembles
+    
+    # Back-compat: single ensemble from legacy classifiers list
+    classifier_ids = model_config.get('classifiers', [])
+    return [{
+        'id': f'default_{modality}',
+        'classifiers': classifier_ids,
+        'weights': None
+    }]
 ```
 
-### 5.5.3 Weighted Averaging
+This supports both modern multi-ensemble configs and legacy single-classifier configs.
 
-After all classifiers complete, scores are combined using weighted averaging:
+### 5.5.3 Per-Ensemble Classification
+
+For each ensemble configuration, the server runs all specified classifiers and returns their individual scores:
 
 ```python
-for i in range(n_items):
-    item_scores = []
-    item_weights = []
+for ensemble_cfg in image_ensembles:
+    ensemble_id = ensemble_cfg.get('id') or 'image_ensemble'
+    classifier_ids = ensemble_cfg.get('classifiers') or []
     
-    for clf_id, weight, scores, label in all_scores:
-        score = scores[i]
-        if score >= 0:  # Valid score (not error)
-            item_scores.append(score)
-            item_weights.append(weight)
-    
-    # Normalize weights (in case some classifiers failed)
-    weight_sum = sum(item_weights)
-    normalized_weights = [w / weight_sum for w in item_weights]
-    avg_score = sum(s * w for s, w in zip(item_scores, normalized_weights))
+    for batch_start in range(0, total_images, mini_batch_size):
+        batch_images = [img for _, img, _, _ in batch_slice]
+        
+        # Run each classifier in the ensemble
+        classifier_results = {}
+        for clf_id in classifier_ids:
+            classifier = registry.get_classifier(clf_id)
+            scores = classifier.process_batch(batch_images, modality='image')
+            classifier_results[clf_id] = {
+                'score': scores[i],
+                'label': classifier.get_label()
+            }
+        
+        # Return results with ensemble ID and individual classifier scores
+        chunk_results.append({
+            'id': item_id,
+            'ensembleId': ensemble_id,
+            'classifiers': classifier_results
+        })
 ```
 
-This approach is robust to partial failures—if one classifier crashes, the ensemble continues with the remaining classifiers and renormalizes weights accordingly.
+The server does NOT perform weighted averaging—it simply runs each classifier and returns the raw scores. The browser is responsible for combining these scores according to ensemble weights and thresholds.
 
-### 5.5.4 Inactivity Timeout
+### 5.5.4 Mini-Batch Processing
 
-To prevent idle models from consuming VRAM, the ensemble tracks the last activity timestamp and automatically unloads models after 15 minutes of inactivity (configurable):
+Large jobs are split into mini-batches (default 1000 items) to prevent GPU memory exhaustion:
 
 ```python
-def check_inactivity_timeout(self):
-    elapsed_minutes = (time.time() - self.last_activity_time) / 60
-    if elapsed_minutes > self.inactivity_timeout_minutes:
-        return True
-    return False
-
-# In classify_batch():
-should_unload = self.lazy_load or self.check_inactivity_timeout()
-if should_unload:
-    classifier.unload_model()
+for batch_start in range(0, total_images, mini_batch_size):
+    batch_end = min(batch_start + mini_batch_size, total_images)
+    batch_slice = image_results[batch_start:batch_end]
+    batch_images = [img for _, img, _, _ in batch_slice]
+    
+    # Process batch...
 ```
 
-This provides a middle ground between aggressive lazy loading (unload after every batch) and persistent loading (never unload).
+This approach allows classification of arbitrarily large jobs (e.g., 10,000 images) without running out of VRAM.
+
+### 5.5.5 Result Streaming
+
+When `streamResults: true` is enabled (default), the server sends results incrementally via `classifyResultChunk` messages:
+
+```python
+def emit_chunk(ensemble_id: str, modality: str, chunk_results: List[Dict], chunk_errors: List[Dict]):
+    if send_chunk and stream_results:
+        send_chunk({
+            'type': 'classifyResultChunk',
+            'jobId': job_id,
+            'ensembleId': ensemble_id,
+            'modality': modality,
+            'results': chunk_results,
+            'errors': chunk_errors
+        })
+```
+
+This provides immediate user feedback—images are flagged as soon as their ensemble completes, rather than waiting for the entire job to finish.
+
+### 5.5.6 Device Information Logging
+
+On the first mini-batch of each ensemble, the server logs hardware information to the extension console:
+
+```python
+if batch_start == 0 and device_info and not device_logged:
+    device_msg = f"[Native Host V2] Processing {total_images} image(s) with {len(classifier_ids)} model(s) | "
+    device_msg += f"{device_info['backend']}: {device_info['name']}"
+    chunk_errors.append({'type': 'info', 'message': device_msg})
+```
+
+This appears in the browser console as:
+```
+[Native Host V2] Processing 47 image(s) with 1 model(s) | DirectML: AMD Radeon RX 7900 XTX
+```
+
+Providing transparency about which hardware is being used for classification.
 
 ---
 
@@ -470,107 +495,11 @@ This allows developers to inspect the exact pixel data received by classifiers, 
 
 ---
 
-## 5.7 Classification Orchestration
-
-The `classify_items()` function orchestrates the entire classification pipeline, handling modality routing, ensemble execution, and result streaming.
-
-### 5.7.1 Item Segregation
-
-Items are first segregated by modality:
-
-```python
-image_items = [it for it in items if it.get('modality') == 'image' and it.get('url')]
-text_items = [it for it in items if it.get('modality') == 'text' and it.get('text')]
-other_items = [it for it in items if it not in image_items and it not in text_items]
-```
-
-This allows parallel processing of different modalities (though currently sequential due to GPU memory constraints).
-
-### 5.7.2 Ensemble Configuration Normalization
-
-The server supports both legacy single-ensemble configs and modern multi-ensemble configs:
-
-**Legacy format** (single ensemble per modality):
-```json
-{
-  "classifiers": ["resnet50_fft"],
-  "weights": null
-}
-```
-
-**Modern format** (multiple ensembles per modality):
-```json
-{
-  "ensemblesByModality": {
-    "image": [
-      {"id": "ai_images", "classifiers": ["resnet50_fft"], "weights": null},
-      {"id": "spiders", "classifiers": ["resnet50_spider"], "weights": null}
-    ]
-  }
-}
-```
-
-The `_normalize_ensembles()` function converts legacy configs to modern format for uniform processing.
-
-### 5.7.3 Mini-Batch Processing
-
-Large jobs are split into mini-batches (default 1000 items) to prevent GPU memory exhaustion:
-
-```python
-for batch_start in range(0, total_images, mini_batch_size):
-    batch_end = min(batch_start + mini_batch_size, total_images)
-    batch_slice = image_results[batch_start:batch_end]
-    batch_images = [img for _, img, _, _ in batch_slice]
-    
-    batch_results, device_info = ensemble.classify_batch(batch_images, modality='image')
-```
-
-This approach allows classification of arbitrarily large jobs (e.g., 10,000 images) without running out of VRAM.
-
-### 5.7.4 Result Streaming
-
-When `streamResults: true` is enabled (default), the server sends results incrementally via `classifyResultChunk` messages:
-
-```python
-def emit_chunk(ensemble_id: str, modality: str, chunk_results: List[Dict], chunk_errors: List[Dict]):
-    if send_chunk and stream_results:
-        send_chunk({
-            'type': 'classifyResultChunk',
-            'jobId': job_id,
-            'ensembleId': ensemble_id,
-            'modality': modality,
-            'results': chunk_results,
-            'errors': chunk_errors
-        })
-```
-
-This provides immediate user feedback—images are flagged as soon as their ensemble completes, rather than waiting for the entire job to finish.
-
-### 5.7.5 Device Information Logging
-
-On the first mini-batch of each ensemble, the server logs hardware information to the extension console:
-
-```python
-if batch_start == 0 and device_info and not device_logged:
-    device_msg = f"[Native Host V2] Processing {total_images} image(s) with {len(classifier_ids)} model(s) | "
-    device_msg += f"{device_info['backend']}: {device_info['name']}"
-    chunk_errors.append({'type': 'info', 'message': device_msg})
-```
-
-This appears in the browser console as:
-```
-[Native Host V2] Processing 47 image(s) with 1 model(s) | DirectML: AMD Radeon RX 7900 XTX
-```
-
-Providing transparency about which hardware is being used for classification.
-
----
-
-## 5.8 Error Handling and Resilience
+## 5.7 Error Handling and Resilience
 
 The server implements multiple layers of error handling to ensure graceful degradation.
 
-### 5.8.1 Fetch Failures
+### 5.7.1 Fetch Failures
 
 If an image fails to fetch (CORS error, 404, timeout), the server returns a placeholder result with `score: 0.5` and `label: 'uncertain'`:
 
@@ -587,7 +516,7 @@ if fetch_err:
 
 This prevents a single broken image from blocking the entire batch.
 
-### 5.8.2 Classifier Failures
+### 5.7.2 Classifier Failures
 
 If a classifier crashes during inference, the ensemble continues with remaining classifiers:
 
@@ -601,7 +530,7 @@ except Exception as e:
 
 The weighted averaging logic automatically excludes `-1.0` scores and renormalizes weights.
 
-### 5.8.3 Main Loop Exception Handling
+### 5.7.3 Main Loop Exception Handling
 
 The main message loop catches all exceptions to prevent the host from crashing:
 
@@ -619,9 +548,9 @@ This ensures the native host remains responsive even if a single request trigger
 
 ---
 
-## 5.9 Performance Optimizations
+## 5.8 Performance Optimizations
 
-### 5.9.1 Lazy Imports
+### 5.8.1 Lazy Imports
 
 Classifiers use lazy imports to avoid loading heavy dependencies (PyTorch, NumPy, PIL) during host startup:
 
@@ -634,7 +563,7 @@ def load_model(self):
 
 This reduces startup time from ~5 seconds to <100ms, improving perceived responsiveness.
 
-### 5.9.2 GPU Memory Management
+### 5.8.2 GPU Memory Management
 
 The lazy loading system (`lazyLoad: true`) unloads models immediately after classification:
 
@@ -645,7 +574,7 @@ if self.lazy_load:
 
 This allows multiple large models to coexist on GPUs with limited VRAM (e.g., 8GB) by ensuring only one model is loaded at a time.
 
-### 5.9.3 Batch Processing
+### 5.8.3 Batch Processing
 
 All classifiers process items in batches rather than one-at-a-time, leveraging GPU parallelism:
 
@@ -663,7 +592,7 @@ This provides a **10-50x speedup** on GPUs compared to sequential processing.
 
 ---
 
-## 5.10 Summary
+## 5.9 Summary
 
 The local classification server implements a sophisticated pipeline for multi-modal AI detection:
 
@@ -671,10 +600,10 @@ The local classification server implements a sophisticated pipeline for multi-mo
 2. **Job Reconstruction**: Automatic reassembly of chunked requests with garbage collection
 3. **Classifier Registry**: Dynamic discovery and lazy loading of detection models
 4. **Base Classifier Interface**: Standardized API for multi-modal detection with helper utilities
-5. **Ensemble System**: Weighted averaging of multiple classifiers with automatic failure handling
+5. **Per-Classifier Execution**: Runs each classifier independently and returns raw scores to the browser
 6. **Data Fetching**: Dual-source image loading (base64/HTTP) with error tracking
 7. **Classification Orchestration**: Modality routing, mini-batch processing, and result streaming
 8. **Error Handling**: Multi-layer resilience ensuring graceful degradation
 9. **Performance Optimizations**: Lazy imports, GPU memory management, and batch processing
 
-The modular architecture allows new classifiers to be added by simply dropping a Python file into the `classifiers/` folder, with automatic discovery, GUI integration, and ensemble support—no code changes required in the orchestrator or extension.
+The modular architecture allows new classifiers to be added by simply dropping a Python file into the `classifiers/` folder, with automatic discovery, GUI integration, and ensemble support—no code changes required in the orchestrator or extension. The server focuses on efficient model execution while delegating ensemble logic (weighted averaging, threshold application, visual styling) to the browser for maximum flexibility.

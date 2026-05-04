@@ -1100,6 +1100,88 @@ function recomputeWeightedEnsembleResult(ensembleCfg, result) {
   };
 }
 
+// Update per-classifier timing statistics stored in extension storage.
+// Expects an array of result objects (from native host) where each result may
+// include `durationMs` and a `classifiers` map. Heuristics:
+// - For single-classifier ensembles, attribute duration to that classifier.
+// - For multi-classifier results, split duration evenly across participating classifiers.
+// - Ignore apparent model-load outliers: if a sample is >5x existing avg (and avg exists), skip it.
+async function updateClassifierTimings(results) {
+  if (!Array.isArray(results) || results.length === 0) return;
+  try {
+    const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+    if (!storageArea || !storageArea.get || !storageArea.set) return;
+
+    const res = await storageArea.get(['classifierTimings']);
+    const timings = (res && res.classifierTimings) ? res.classifierTimings : {};
+
+    // Collect samples per classifier
+    const samples = new Map();
+    results.forEach((result) => {
+      if (!result) return;
+      const duration = typeof result.durationMs === 'number' ? result.durationMs : (result.duration || null);
+      if (!Number.isFinite(duration) || duration <= 0) return;
+
+      // If classifiers map exists, use its keys; else, attempt to attribute from ensembleId
+      const clsMap = result.classifiers && typeof result.classifiers === 'object' ? Object.keys(result.classifiers) : [];
+      if (clsMap.length === 1) {
+        const id = clsMap[0];
+        if (!samples.has(id)) samples.set(id, []);
+        samples.get(id).push(duration);
+      } else if (clsMap.length > 1) {
+        // split evenly across participating classifiers
+        const per = duration / clsMap.length;
+        clsMap.forEach((id) => {
+          if (!samples.has(id)) samples.set(id, []);
+          samples.get(id).push(per);
+        });
+      } else {
+        // No classifiers map (legacy/ensemble-level only). Try to use ensembleId when single-classifier in config
+        const ensembleId = result.ensembleId || (result.ensemble || null);
+        if (ensembleId) {
+          const cfg = getEnsembleById(ensembleId);
+          if (cfg && Array.isArray(cfg.classifiers) && cfg.classifiers.length === 1) {
+            const id = cfg.classifiers[0];
+            if (!samples.has(id)) samples.set(id, []);
+            samples.get(id).push(duration);
+          }
+        }
+      }
+    });
+
+    // Merge samples into timings with simple running average and outlier filtering
+    samples.forEach((vals, classifierId) => {
+      if (!vals || !vals.length) return;
+      for (const sample of vals) {
+        const prev = timings[classifierId] || { avgMs: 0, count: 0, lastMs: 0, updatedAt: 0 };
+
+        // If we have history, treat very large samples as load-time outliers and skip them
+        if (prev.count > 0 && sample > (prev.avgMs * 5 + 1e-6)) {
+          // skip this sample assuming it includes model load
+          continue;
+        }
+
+        // If no history and sample is extremely large (>10s), assume it's a load and skip
+        if (prev.count === 0 && sample > 10000) {
+          continue;
+        }
+
+        const newCount = prev.count + 1;
+        const newAvg = prev.count === 0 ? sample : ((prev.avgMs * prev.count + sample) / newCount);
+        timings[classifierId] = {
+          avgMs: Math.round(newAvg),
+          count: newCount,
+          lastMs: Math.round(sample),
+          updatedAt: Date.now()
+        };
+      }
+    });
+
+    await storageArea.set({ classifierTimings: timings });
+  } catch (e) {
+    if (settings.verboseLogs) console.warn('[AI Detector] Failed to update classifier timings:', e);
+  }
+}
 function applyStylesForItem(itemId) {
   const entry = itemResults.get(itemId);
   if (!entry) return;
@@ -1512,6 +1594,12 @@ function applyResultChunk(response) {
       skippedCount++;
     }
   });
+  // Update classifier timing stats (async - don't block rendering)
+  try {
+    updateClassifierTimings(response.results);
+  } catch (e) {
+    if (settings.verboseLogs) console.warn('[AI Detector] updateClassifierTimings failed to start', e);
+  }
   
   if (settings.verboseLogs && skippedCount > 0) {
     console.log(`[AI Detector] Applied ${appliedCount} results, skipped ${skippedCount} (elements no longer in DOM)`);

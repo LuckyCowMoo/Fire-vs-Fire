@@ -2,44 +2,25 @@
 .venv/
 .venv311/
 .venv_sys/
-native/.venv311/
 venv/
 env/
+ENV/
 
-# Model weights and training artifacts
+# Model weights - DO NOT COMMIT
 *.pt
 *.pth
 *.pkl
 *.ckpt
-*.h5
-*.bin
-*.dll
-*.lib
-native/classifiers/
-training/checkpoint.pt
-training/models/
-Immage Models/
 
-# Datasets and training data
-AI dataset smol/
-AI texts/
-outside traning stuf/
-
-# Python and cache
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
-native_host_v2.log
 
-# Dependencies
-node_modules/
-
-# System and editor
-.DS_Store
+# Logs
 *.log
+
+# System files
+.DS_Store
+Thumbs.db
 .env
-*.crx
-*.pem
-*.zip
-.vscode/
-.idea/

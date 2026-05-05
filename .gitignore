@@ -1,9 +1,12 @@
+# Virtual environments
 .venv/
 .venv311/
 .venv_sys/
 native/.venv311/
 venv/
 env/
+
+# Model weights and training artifacts
 *.pt
 *.pth
 *.pkl
@@ -16,11 +19,22 @@ native/classifiers/
 training/checkpoint.pt
 training/models/
 Immage Models/
-native_host_v2.log
+
+# Datasets and training data
+AI dataset smol/
+AI texts/
+outside traning stuf/
+
+# Python and cache
 __pycache__/
 *.pyc
 *.pyo
+native_host_v2.log
+
+# Dependencies
 node_modules/
+
+# System and editor
 .DS_Store
 *.log
 .env

@@ -37,8 +37,8 @@ the extensions drop down in the top right corner:
   
 You may need to remove any default categories and make new ones to make it work.
 
-#######################################################################################################################################
-#######################################################################################################################################
+###########################################################################################################
+###########################################################################################################
 
 THIS REPOSOTORY DOES NOT CONTAIN THE MODEL WEIGHT FILES, THEY ARE TO BIG FOR GIT HUB, AND ARE HOSTED SEPERATLEY AT:
 
@@ -46,8 +46,8 @@ https://drive.google.com/drive/folders/1x_4QxOmiIc3xp4xFyGPpL9fF-KeWcP7a?usp=sha
 
 move the classifier weight files into Fire vs Fire/native/classifiers, they will now be recognised by the system
 
-#######################################################################################################################################
-#######################################################################################################################################
+###########################################################################################################
+###########################################################################################################
 
 
 Fire vs Fire will be available to install permanently to your browser via the official Firefox extension store in the

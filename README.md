@@ -42,9 +42,12 @@ Open PowerShell in the root Fire vs Fire folder, then run:
 
 powershell -ExecutionPolicy Bypass -File .\native\install-firefox.ps1
 
-This creates and installs the python virtual environment and all dependencies, it also creates the 
-link between the Firefox browser and the Echo host V2 file, be aware that this involves editing two 
-registry entries on your computer, you can revert this by running the uninstall script:
+This creates and installs the python virtual environment and all dependencies, 
+it also creates the link between the Firefox browser and the Echo host V2 file, 
+be aware that this involves editing two registry entries on your computer that 
+create a channel for messages to be sent between this specific Firefox extension 
+and the specific local server python file, i am not qualified to ensure that this 
+link cannot be exploited, you can revert the registry changes by running the uninstall script:
 
 powershell -ExecutionPolicy Bypass -File .\native\uninstall-firefox.ps1
 

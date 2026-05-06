@@ -13,7 +13,7 @@ https://1drv.ms/w/c/3e7335be94f967ac/IQB7488XHN9mS7t6emHDvZ4jAfCdAYI1SlWUjTnl4B1
 
 ## Limitations
 
-all features of Fire vs Fire are currently prototypes, with many improvements planned, while many have 
+All features of Fire vs Fire are currently prototypes, with many improvements planned, while many have 
 expressed great interest in this project, please consider waiting until the end of May, by which 
 point a more polished and accurate experience will likely be ready, thank you for your patience.
 

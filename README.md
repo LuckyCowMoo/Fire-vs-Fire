@@ -1,131 +1,58 @@
 # Fire v Fire
 
-A browser extension that detects AI-generated images and text in real-time using deep learning classifiers.
+A browser extension that detects and handles unwanted content.
 
 ## Overview
 
-Fire v Fire is a Firefox/Chrome extension that automatically scans web pages for AI-generated content and applies visual indicators (blur, borders, badges) to flag suspicious content. It uses native Python classifiers with PyTorch for on-device inference.
+Fire v Fire is currently in development, it is currently only available for FireFox
+and cannot be permanently added to Firefox yet, you must re enable it every session.
 
-## Features
+this project was developed as my 3rd year project for my computer science degree ad Edge Hill University,
+for detailed architecture guide, justifications and design process, please see the artefact report:
+https://1drv.ms/w/c/3e7335be94f967ac/IQB7488XHN9mS7t6emHDvZ4jAfCdAYI1SlWUjTnl4B16fzg?e=8bVVBt
 
-- **Real-time Detection**: Automatically scans images and text as pages load
-- **Multi-Model Ensemble**: Supports multiple classifiers with weighted averaging
-- **Visual Indicators**: Configurable blur, borders, badges, and strikethrough effects
-- **Smart Caching**: Remembers classifications to avoid redundant processing
-- **Lazy Loading**: Unloads models when idle to conserve VRAM
-- **Context Menu**: Right-click images/text to manually toggle blur
-- **Streaming Results**: Progressive UI updates as classifications complete
+## Instillation
 
-## Architecture
+instillation instructions:
+Download this repository
 
-### Browser Extension (JavaScript)
-- **background.js**: Manages native messaging and classification requests
-- **content.js**: Scans DOM, extracts content, applies visual effects
-- **options.js**: Settings UI for thresholds, styles, and ensemble configuration
+Open PowerShell in the root Fire vs Fire folder, then run:
 
-### Native Host (Python)
-- **echo_host_V2.py**: Native messaging bridge between browser and classifiers
-- **model_registry.py**: Manages classifier loading/unloading
-- **classifiers/**: PyTorch model implementations (ResNet-50, ConvNeXt, etc.)
+powershell -ExecutionPolicy Bypass -File .\native\install-firefox.ps1
 
-## Installation
+This creates and installs the python virtual environment and all dependencies, it also creates the 
+link between the Firefox browser and the Echo host V2 file, be aware that this involves edits two 
+registers on your computer, you can revert this by running the uninstall script:
 
-### Prerequisites
-- Python 3.11+ with GPU support (torch-directml for AMD/Intel, CUDA for NVIDIA)
-- Firefox or Chrome browser
-- Windows (registry-based native host registration)
+powershell -ExecutionPolicy Bypass -File .\native\uninstall-firefox.ps1
 
-### Setup
+Once you have installed the local server, add the extension temporarily to Firefox by 
+visiting this address In the Firefox address bar:
 
-1. **Install Python dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+about:debugging#/runtime/this-firefox
 
-2. **Register native host**:
-   - Firefox: Run `install-firefox.ps1` or import `register-firefox-host.reg`
-   - Chrome: Import `register-chrome-host.reg`
+Then click the load temporary add on button and select the manifest file that is in the root
+Fire vs Fire file. Then pin the extension to your taskbar for the best experience in using 
+the extensions drop down in the top right corner:
+  
+You may need to remove any default categories and make new ones to make it work.
 
-3. **Load extension**:
-   - Firefox: `about:debugging` → Load Temporary Add-on → Select `manifest.json`
-   - Chrome: `chrome://extensions` → Load unpacked → Select project folder
+#######################################################################################################################################
+#######################################################################################################################################
 
-## Configuration
+THIS REPOSOTORY DOES NOT CONTAIN THE MODEL WEIGHT FILES, THEY ARE TO BIG FOR GIT HUB, AND ARE HOSTED SEPERATLEY AT:
 
-### Ensemble Configuration
-Edit `native/ensemble_config.json` to customize classifier ensembles:
+https://drive.google.com/drive/folders/1x_4QxOmiIc3xp4xFyGPpL9fF-KeWcP7a?usp=sharing
 
-```json
-{
-  "classifiers": ["resnet50_fft"],
-  "weights": [1.0],
-  "miniBatchSize": 10,
-  "lazyLoad": true
-}
-```
+move the classifier weight files into Fire vs Fire/native/classifiers, they will now be recognised by the system
 
-### Extension Settings
-Access via browser toolbar icon:
-- **Detection Thresholds**: Adjust AI confidence thresholds (0-100%)
-- **Visual Effects**: Configure blur amount, border color, badge display
-- **Performance**: Mini-batch size, lazy loading, classification delay
-- **Filters**: Minimum image size, text length, alt-text requirements
+#######################################################################################################################################
+#######################################################################################################################################
 
-## Models
 
-Supported classifiers (in `native/classifiers/`):
-- **resnet50_fft**: ResNet-50 with FFT artifact detection
-- **convnext_large**: ConvNeXt-Large for high-accuracy classification
-- **text**: Text-based AI detection (placeholder)
+Fire vs Fire will be available to install permanently to your browser via the official Firefox extension store in the
+coming weeks/months, and later to additional platforms
 
-Models are loaded on-demand and cached in VRAM. Lazy loading automatically unloads models after 15 minutes of inactivity.
-
-## Usage
-
-1. **Automatic Scanning**: Browse normally - extension scans pages automatically
-2. **Manual Blur**: Right-click image/text → "Toggle AI blur"
-3. **View Results**: Hover over flagged content to reveal original
-4. **Adjust Settings**: Click extension icon to open options panel
-
-## Development
-
-### Project Structure
-```
-Fire v Fire/
-├── background/          # Background script (native messaging)
-├── content/            # Content script (DOM scanning, visual effects)
-├── options/            # Settings UI
-├── native/             # Python native host
-│   ├── classifiers/    # PyTorch model implementations
-│   ├── echo_host_V2.py # Main native messaging loop
-│   └── model_registry.py # Classifier registry
-├── icons/              # Extension icons
-└── manifest.json       # Extension manifest
-```
-
-### Building
-```bash
-npm run build  # Creates .zip for distribution
-```
-
-### Debugging
-- Browser console: Extension logs prefixed with `[AI Detector]`
-- Native host logs: `native_host_v2.log`
-- Enable verbose logging in extension settings
-
-## Performance
-
-- **Image Classification**: ~100-500ms per image (GPU-dependent)
-- **Text Classification**: ~50-200ms per section
-- **Memory Usage**: ~2-4GB VRAM per loaded model
-- **Cache Hit Rate**: ~80-90% on typical browsing
-
-## Limitations
-
-- Requires local GPU for acceptable performance
-- Only supports Firefox/Chrome on Windows
-- Models may produce false positives on artistic/stylized content
-- Text detection is experimental and less accurate than image detection
 
 ## License
 
@@ -133,18 +60,14 @@ Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC B
 
 Copyright (c) 2026 Leah (Luke) Armstrong (LuckyCowMoo)
 
+You must first aquire my express permision to use this code as a component of any project
+that will make money.
+
 See [LICENSE](LICENSE) for full terms.
 
 ## Credits
 
+- Project art by Beti Meredith Gray (certified human)
 - PyTorch and torchvision for deep learning framework
 - ResNet-50 architecture from Microsoft Research
 - ConvNeXt architecture from Meta AI Research
-- Browser extension template from Mozilla
-
-## Support
-
-For issues or questions, check the logs:
-1. Browser console (F12) for extension errors
-2. `native_host_v2.log` for classifier errors
-3. Enable verbose logging in settings for detailed diagnostics

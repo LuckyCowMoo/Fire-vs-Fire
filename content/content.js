@@ -58,12 +58,11 @@ let scanIntervalId = null;       // Periodic scan interval
 let classificationInFlight = false; // Prevent overlapping classification requests
 
 /**
- * STABLE ID COUNTERS - Ensure each image/text gets a unique, persistent ID
- * These increment globally and never reset, preventing ID collisions on scroll
- * Used by: buildClassificationBatches()
+ * ID SYSTEM - Uses content-based IDs that persist across page reloads
+ * Images: Use their URL as the ID
+ * Text: Use first 500 characters as the ID
+ * The native host will remember classifications, browser just re-discovers content
  */
-let nextImageId = 0;  // Counter for image IDs (img-0, img-1, img-2...)
-let nextTextId = 0;   // Counter for text IDs (text-0, text-1, text-2...)
 let processedTextElements = new Set(); // Set of text elements already added to cachedTextSections
 
 function computeBorderWidth(el, multiplier = 1) {
@@ -783,23 +782,13 @@ function buildClassificationBatches(images = cachedImages, textSections = cached
   
   // DO NOT clear elementMap - preserve mappings from previous batches
   // Only add new entries for images we haven't seen yet
-  
-  // Track which images we've already assigned IDs to
-  const assignedIds = new Map();  // img element -> itemId
-  for (let [itemId, element] of elementMap) {
-    if (itemId.startsWith('img-')) {
-      assignedIds.set(element, itemId);
-    }
-  }
 
   images.forEach((img) => {
-    let itemId = assignedIds.get(img.element);
-    if (!itemId) {
-      // New image, assign a fresh stable ID
-      itemId = 'img-' + (nextImageId++);
-      elementMap.set(itemId, img.element);
-      assignedIds.set(img.element, itemId);
-    }
+    // Use URL as the ID (persistent across page reloads)
+    const itemId = img.src || 'img-unknown-' + Math.random();
+    
+    // Update elementMap to track this element
+    elementMap.set(itemId, img.element);
     
     // Try to get base64 from DOM first (avoids network fetch)
     let imageData = null;
@@ -854,20 +843,12 @@ function buildClassificationBatches(images = cachedImages, textSections = cached
 
   // Add text sections to FIRST batch only (they're small)
   textSections.forEach((section) => {
-    let itemId = null;
-    // Check if this text element already has an ID
-    for (let [id, element] of elementMap) {
-      if (id.startsWith('text-') && element === section.element) {
-        itemId = id;
-        break;
-      }
-    }
+    // Use first 500 characters of text as the ID (persistent across page reloads)
+    const textPreview = section.text.substring(0, 500);
+    const itemId = textPreview;
     
-    if (!itemId) {
-      // New text section, assign a fresh stable ID
-      itemId = 'text-' + (nextTextId++);
-      elementMap.set(itemId, section.element);
-    }
+    // Update elementMap to track this element
+    elementMap.set(itemId, section.element);
     
     currentBatch.push({
       id: itemId,
@@ -1907,14 +1888,8 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
         const images = Array.from(document.querySelectorAll('img'));
         const targetImage = images.find(img => img.src === srcUrl);
         if (targetImage) {
-          // Find the itemId for this image
-          let itemId = null;
-          for (let [id, element] of elementMap) {
-            if (element === targetImage && id.startsWith('img-')) {
-              itemId = id;
-              break;
-            }
-          }
+          // Use URL as the itemId
+          const itemId = targetImage.src;
           
           // Check if image has visible AI styling (ai-detected class)
           const hasVisibleAiStyling = targetImage.classList.contains('ai-detected');
@@ -1944,10 +1919,7 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
             return Promise.resolve({ hasAiTags: false, label: badgeLabel, modality: 'image' });
           } else {
             // No tags - add manual blur
-            if (!itemId) {
-              itemId = 'img-' + (nextImageId++);
-              elementMap.set(itemId, targetImage);
-            }
+            elementMap.set(itemId, targetImage);
             
             itemResults.set(itemId, {
               modality: 'image',
@@ -2008,14 +1980,9 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
         // Check if it's a valid text element
         if (['p', 'li', 'pre', 'blockquote', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag) || 
             targetText.classList.contains('ai-detected-text')) {
-          // Find the itemId for this text
-          let itemId = null;
-          for (let [id, element] of elementMap) {
-            if (element === targetText && id.startsWith('text-')) {
-              itemId = id;
-              break;
-            }
-          }
+          // Use first 500 characters of text as the itemId
+          const text = (targetText.innerText || targetText.textContent || '').replace(/\s+/g, ' ').trim();
+          const itemId = text.substring(0, 500);
           
           const hasVisibleAiStyling = targetText.classList.contains('ai-detected-text');
           
@@ -2034,10 +2001,7 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
             return Promise.resolve({ hasAiTags: false, label: label, modality: 'text' });
           } else {
             // No tags - add manual blur
-            if (!itemId) {
-              itemId = 'text-' + (nextTextId++);
-              elementMap.set(itemId, targetText);
-            }
+            elementMap.set(itemId, targetText);
             
             itemResults.set(itemId, {
               modality: 'text',

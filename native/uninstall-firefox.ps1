@@ -1,38 +1,50 @@
-# Uninstall script for Firefox native host messaging
-# Removes registry entries created by install-firefox.ps1
+# Requires Windows PowerShell 5.1 or PowerShell 7+
+# Removes the Firefox Native Messaging registry registration.
+# Usage:
+#   pwsh -File ./uninstall-firefox.ps1
+#   powershell -ExecutionPolicy Bypass -File .\uninstall-firefox.ps1
 
-$ErrorActionPreference = "Stop"
+param(
+  [string]$HostName
+)
 
-# Get the host name from manifest
-$manifestPath = Join-Path $PSScriptRoot "manifest.firefox.json"
-if (-not (Test-Path $manifestPath)) {
-    Write-Host "Error: manifest.firefox.json not found"
-    exit 1
-}
+$ErrorActionPreference = 'Stop'
 
-$manifest = Get-Content $manifestPath | ConvertFrom-Json
-$hostName = $manifest.name
-Write-Host "Uninstalling native host: $hostName"
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$manifestPath = Join-Path $scriptRoot 'manifest.firefox.json'
 
-# Registry paths
-$hkcuPath = "HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName"
-$hklmPath = "HKLM:\Software\Mozilla\NativeMessagingHosts\$hostName"
-
-# Remove registry entries
-if (Test-Path $hkcuPath) {
-    Remove-Item -Path $hkcuPath -Force -ErrorAction SilentlyContinue
-    Write-Host "Removed HKCU registry entry"
-}
-
-if (Test-Path $hklmPath) {
-    # Requires admin
-    if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
-        Write-Host "Warning: HKLM entry requires admin. Run with elevated privileges to remove system-wide registry entry."
+if (-not $HostName -and (Test-Path $manifestPath)) {
+  try {
+    $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+    if ($manifest.name) {
+      $HostName = $manifest.name
     }
-    else {
-        Remove-Item -Path $hklmPath -Force -ErrorAction SilentlyContinue
-        Write-Host "Removed HKLM registry entry"
-    }
+  } catch {
+    # Ignore malformed manifest; fall back to default.
+  }
 }
 
-Write-Host "Uninstall complete"
+if (-not $HostName) {
+  $HostName = 'com.aidetector.classifier'
+}
+
+$targets = @(
+  @{ Path = "HKCU:\Software\Mozilla\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName" },
+  @{ Path = "HKLM:\Software\Mozilla\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Mozilla\NativeMessagingHosts\$HostName" }
+)
+
+foreach ($target in $targets) {
+  if (Test-Path $target.Path) {
+    try {
+      reg delete $target.Reg /f | Out-Null
+      Write-Host "Removed: $($target.Reg)" -ForegroundColor Green
+    } catch {
+      Write-Host "Failed to remove: $($target.Reg)" -ForegroundColor Yellow
+      Write-Host $_.Exception.Message -ForegroundColor Yellow
+    }
+  } else {
+    Write-Host "Not found: $($target.Reg)" -ForegroundColor DarkGray
+  }
+}
+
+Write-Host "Done. Verify with: reg query HKCU\Software\Mozilla\NativeMessagingHosts\$HostName"

@@ -24,7 +24,6 @@ function Resolve-PythonPath {
     if ($resolved) { return $resolved }
   }
   catch {}
-  # Try python.exe on PATH
   try {
     $cmd = Get-Command python -ErrorAction Stop
     return $cmd.Source
@@ -46,6 +45,22 @@ function Resolve-ExtensionId {
   return $null
 }
 
+function Ensure-Venv {
+  param([string]$BasePython, [string]$VenvPath)
+  if (!(Test-Path $VenvPath)) {
+    Write-Host "Creating virtual environment at: $VenvPath"
+    & $BasePython -m venv $VenvPath
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to create virtual environment at $VenvPath"
+    }
+  }
+  $venvPython = Join-Path $VenvPath 'Scripts\python.exe'
+  if (!(Test-Path $venvPython)) {
+    throw "Venv python not found at $venvPython"
+  }
+  return $venvPython
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $manifestPath = Join-Path $scriptRoot 'manifest.firefox.json'
 $echoHostPath = Join-Path $scriptRoot 'echo_host_V2.py'
@@ -53,6 +68,7 @@ $runHostPath = Join-Path $scriptRoot 'run_host.bat'
 $repoRoot = Split-Path -Parent $scriptRoot
 $extensionManifestPath = Join-Path $repoRoot 'manifest.json'
 $requirementsPath = Join-Path $repoRoot 'requirements.txt'
+$venvRoot = Join-Path $repoRoot '.venv'
 
 if (!(Test-Path $manifestPath)) { throw "Manifest not found: $manifestPath" }
 if (!(Test-Path $echoHostPath)) { throw "Host script not found: $echoHostPath" }
@@ -60,18 +76,21 @@ if (!(Test-Path $runHostPath)) { throw "Host runner not found: $runHostPath" }
 if (!(Test-Path $requirementsPath)) { throw "Requirements file not found: $requirementsPath" }
 
 $pythonExe = Resolve-PythonPath -ExplicitPath $PythonPath
+$venvPython = Ensure-Venv -BasePython $pythonExe -VenvPath $venvRoot
 $resolvedExtensionId = Resolve-ExtensionId -ManifestPath $extensionManifestPath -ExplicitId $ExtensionId
 if (-not $resolvedExtensionId) {
   throw "Extension ID not found. Pass -ExtensionId or set browser_specific_settings.gecko.id in $extensionManifestPath"
 }
 Write-Host "Using Python: $pythonExe"
+Write-Host "Venv Python: $venvPython"
 Write-Host "Host script: $echoHostPath"
 Write-Host "Manifest: $manifestPath"
 
 # Install Python dependencies
 Write-Host "`n=== Installing Python dependencies ==="
 Write-Host "Installing from: $requirementsPath"
-& $pythonExe -m pip install --default-timeout=1000 -r $requirementsPath
+& $venvPython -m pip install --upgrade pip
+& $venvPython -m pip install --default-timeout=1000 -r $requirementsPath
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Warning: pip install exited with code $LASTEXITCODE. Some dependencies may not have installed." -ForegroundColor Yellow
 } else {
@@ -99,7 +118,6 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $regKey = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName"
 $escapedManifest = $manifestPath -replace '\\', '\\\\'
 Write-Host "Registering: $regKey -> $manifestPath"
-# Use reg.exe to set default value
 reg add $regKey /ve /d "$manifestPath" /f | Out-Null
 
 Write-Host "Done. Verify with: reg query $regKey"

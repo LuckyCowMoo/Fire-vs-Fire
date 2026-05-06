@@ -1,7 +1,7 @@
 {
     "name":  "com.aidetector.classifier",
     "description":  "Local AI classifier bridge (Firefox)",
-    "path":  "C:\\Users\\lukea\\Desktop\\Stuff\\School\\Year 3\\Project\\Fire v Fire\\native\\run_host.bat",
+    "path":  "C:\\Users\\lukea\\Desktop\\Stuff\\School\\Year 3\\Project\\Fire v Fire - For submission\\native\\run_host.bat",
     "type":  "stdio",
     "allowed_extensions":  [
                                "template@example.com"

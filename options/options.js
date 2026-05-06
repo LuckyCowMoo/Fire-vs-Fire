@@ -935,6 +935,38 @@ if (reclassifyBtn) {
   });
 }
 
+const cancelAllBtn = document.getElementById('cancel-all');
+if (cancelAllBtn) {
+  cancelAllBtn.addEventListener('click', async () => {
+    try {
+      cancelAllBtn.disabled = true;
+      cancelAllBtn.textContent = 'Cancelling...';
+      
+      // Send cancel message to background script
+      await ext.runtime.sendMessage({ type: 'CANCEL_ALL' });
+      
+      // Also send cancel message to all tabs
+      const tabs = await ext.tabs.query({});
+      await Promise.all(
+        tabs.map(tab => 
+          ext.tabs.sendMessage(tab.id, { type: 'CANCEL_ALL_CLASSIFICATIONS' })
+            .catch(() => {}) // Ignore tabs that don't have content script
+        )
+      );
+      
+      cancelAllBtn.textContent = 'Cancelled!';
+      setTimeout(() => {
+        cancelAllBtn.disabled = false;
+        cancelAllBtn.textContent = 'Cancel all classifications';
+      }, 2000);
+    } catch (err) {
+      console.error('Cancel error:', err);
+      cancelAllBtn.disabled = false;
+      cancelAllBtn.textContent = 'Cancel all classifications';
+    }
+  });
+}
+
 // ============ Model List Logic ============
 
 function setModelStatus(text, type = 'info') {

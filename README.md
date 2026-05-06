@@ -37,6 +37,7 @@ the extensions drop down in the top right corner:
   
 You may need to remove any default categories and make new ones to make it work.
 
+##
 ###########################################################################################################
 ###########################################################################################################
 
@@ -48,6 +49,7 @@ move the classifier weight files into Fire vs Fire/native/classifiers, they will
 
 ###########################################################################################################
 ###########################################################################################################
+##
 
 
 Fire vs Fire will be available to install permanently to your browser via the official Firefox extension store in the

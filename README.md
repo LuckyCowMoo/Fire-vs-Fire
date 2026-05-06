@@ -7,7 +7,7 @@ A browser extension that detects and handles unwanted content.
 Fire v Fire is currently in development, it is currently only available for FireFox
 and cannot be permanently added to Firefox yet, you must re enable it every session.
 
-this project was developed as my 3rd year project for my computer science degree ad Edge Hill University,
+this project was developed as my 3rd year project for my computer science degree at Edge Hill University,
 for detailed architecture guide, justifications and design process, please see the artefact report:
 https://1drv.ms/w/c/3e7335be94f967ac/IQB7488XHN9mS7t6emHDvZ4jAfCdAYI1SlWUjTnl4B16fzg?e=8bVVBt
 
@@ -17,10 +17,25 @@ All features of Fire vs Fire are currently prototypes, with many improvements pl
 expressed great interest in this project, please consider waiting until the end of May, by which 
 point a more polished and accurate experience will likely be ready, thank you for your patience.
 
+## Disclaimer
 
-## Instillation
+**USE AT YOUR OWN RISK**
 
-instillation instructions:
+This software is provided "as is" without warranty of any kind, express or implied. The author accepts 
+no liability for any damages, losses, or issues arising from the use of this extension, including but 
+not limited to:
+
+- False positives or false negatives in AI detection
+- System performance impacts
+- Registry modifications during installation
+- Any consequences of blocking or flagging content
+
+This is an experimental academic project. Users are responsible for verifying the accuracy of 
+detections and using the software responsibly.
+
+## Installation
+
+Installation instructions:
 Download this repository
 
 Open PowerShell in the root Fire vs Fire folder, then run:
@@ -28,8 +43,8 @@ Open PowerShell in the root Fire vs Fire folder, then run:
 powershell -ExecutionPolicy Bypass -File .\native\install-firefox.ps1
 
 This creates and installs the python virtual environment and all dependencies, it also creates the 
-link between the Firefox browser and the Echo host V2 file, be aware that this involves edits two 
-registers on your computer, you can revert this by running the uninstall script:
+link between the Firefox browser and the Echo host V2 file, be aware that this involves editing two 
+registry entries on your computer, you can revert this by running the uninstall script:
 
 powershell -ExecutionPolicy Bypass -File .\native\uninstall-firefox.ps1
 

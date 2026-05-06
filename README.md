@@ -62,7 +62,7 @@ Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC B
 
 Copyright (c) 2026 Leah (Luke) Armstrong (LuckyCowMoo)
 
-You must first aquire my express permision to use this code as a component of any project
+You must first acquire my express permission to use this code as a component of any project
 that will make money.
 
 See [LICENSE](LICENSE) for full terms.

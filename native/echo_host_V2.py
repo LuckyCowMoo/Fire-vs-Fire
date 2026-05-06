@@ -33,7 +33,7 @@ log(f"[START] Echo Host V2 starting")
 cancelled_jobs = set()
 
 # Global classification cache (RAM-based, max 5000 items)
-# Maps item_id -> {score, label, display_label, classifiers, timestamp}
+# Maps (item_id, ensemble_id) -> {score, label, display_label, classifiers, timestamp}
 classification_cache = {}
 MAX_CACHE_SIZE = 5000
 
@@ -550,48 +550,76 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
     cached_results = []
     cache_hits = 0
     
+    # Get ensemble IDs for cache lookup
+    image_ensemble_ids = [e.get('id', 'image_ensemble') for e in _normalize_ensembles(model_config, 'image')]
+    text_ensemble_ids = [e.get('id', 'text_ensemble') for e in _normalize_ensembles(model_config, 'text')]
+    
     # Filter out cached items from image_items
     uncached_image_items = []
     for item in image_items:
         item_id = item.get('id')
-        if item_id and item_id in classification_cache:
-            cached_data = classification_cache[item_id]
-            cached_results.append({
-                'id': item_id,
-                'modality': 'image',
-                'ensembleId': cached_data.get('ensembleId', 'cached'),
-                'label': cached_data.get('label', 'uncertain'),
-                'score': cached_data.get('score', 0.5),
-                'display_label': cached_data.get('display_label', 'AI generated'),
-                'classifiers': cached_data.get('classifiers', {}),
-                'model': cached_data.get('model', 'cached'),
-                'durationMs': 0,
-                'cached': True
-            })
-            cache_hits += 1
-        else:
+        if not item_id:
+            uncached_image_items.append(item)
+            continue
+        
+        # Check if ALL requested ensembles have cached results for this item
+        all_ensembles_cached = True
+        for ensemble_id in image_ensemble_ids:
+            cache_key = (item_id, ensemble_id)
+            if cache_key in classification_cache:
+                cached_data = classification_cache[cache_key]
+                cached_results.append({
+                    'id': item_id,
+                    'modality': 'image',
+                    'ensembleId': ensemble_id,
+                    'label': cached_data.get('label', 'uncertain'),
+                    'score': cached_data.get('score', 0.5),
+                    'display_label': cached_data.get('display_label', 'AI generated'),
+                    'classifiers': cached_data.get('classifiers', {}),
+                    'model': cached_data.get('model', 'cached'),
+                    'durationMs': 0,
+                    'cached': True
+                })
+                cache_hits += 1
+            else:
+                all_ensembles_cached = False
+        
+        # Only skip processing if ALL ensembles have cached results
+        if not all_ensembles_cached:
             uncached_image_items.append(item)
     
     # Filter out cached items from text_items
     uncached_text_items = []
     for item in text_items:
         item_id = item.get('id')
-        if item_id and item_id in classification_cache:
-            cached_data = classification_cache[item_id]
-            cached_results.append({
-                'id': item_id,
-                'modality': 'text',
-                'ensembleId': cached_data.get('ensembleId', 'cached'),
-                'label': cached_data.get('label', 'uncertain'),
-                'score': cached_data.get('score', 0.5),
-                'display_label': cached_data.get('display_label', 'AI generated'),
-                'classifiers': cached_data.get('classifiers', {}),
-                'model': cached_data.get('model', 'cached'),
-                'durationMs': 0,
-                'cached': True
-            })
-            cache_hits += 1
-        else:
+        if not item_id:
+            uncached_text_items.append(item)
+            continue
+        
+        # Check if ALL requested ensembles have cached results for this item
+        all_ensembles_cached = True
+        for ensemble_id in text_ensemble_ids:
+            cache_key = (item_id, ensemble_id)
+            if cache_key in classification_cache:
+                cached_data = classification_cache[cache_key]
+                cached_results.append({
+                    'id': item_id,
+                    'modality': 'text',
+                    'ensembleId': ensemble_id,
+                    'label': cached_data.get('label', 'uncertain'),
+                    'score': cached_data.get('score', 0.5),
+                    'display_label': cached_data.get('display_label', 'AI generated'),
+                    'classifiers': cached_data.get('classifiers', {}),
+                    'model': cached_data.get('model', 'cached'),
+                    'durationMs': 0,
+                    'cached': True
+                })
+                cache_hits += 1
+            else:
+                all_ensembles_cached = False
+        
+        # Only skip processing if ALL ensembles have cached results
+        if not all_ensembles_cached:
             uncached_text_items.append(item)
     
     # Replace with uncached items only
@@ -600,30 +628,28 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
     
     if cache_hits > 0:
         log(f"[Cache] {cache_hits} items found in cache, {len(image_items)} images and {len(text_items)} text items need classification")
-        # Send cached results immediately if streaming
-        if send_chunk and stream_results and cached_results:
-            send_chunk({
-                'version': 2,
-                'type': 'classifyResultChunk',
-                'jobId': job_id or req_id,
-                'ensembleId': 'cached',
-                'modality': 'mixed',
-                'timestamp': int(time.time() * 1000),
-                'results': cached_results,
-                'errors': [{'type': 'info', 'message': f'Returned {cache_hits} cached results'}]
-            })
+        # Send cached results as chunk if streaming, otherwise add to results array
+        if send_chunk and stream_results:
+            # Send cached results in batches to avoid overwhelming the browser
+            batch_size = 20
+            for i in range(0, len(cached_results), batch_size):
+                batch = cached_results[i:i+batch_size]
+                send_chunk({
+                    'version': 2,
+                    'type': 'classifyResultChunk',
+                    'jobId': job_id or req_id,
+                    'ensembleId': 'cached',
+                    'modality': 'mixed',
+                    'timestamp': int(time.time() * 1000),
+                    'results': batch,
+                    'errors': []
+                })
         else:
             results.extend(cached_results)
 
     if not image_items and not text_items:
-        return {
-            'version': 2,
-            'type': 'classifyResult',
-            'requestId': req_id,
-            'timestamp': int(time.time() * 1000),
-            'results': [],
-            'errors': [{'type': 'info', 'message': 'No images or text to classify'}]
-        }
+        # All items cached - add info message
+        errors.append({'type': 'info', 'message': f'All {cache_hits} items returned from cache'})
 
     image_results = []
     if image_items:
@@ -712,7 +738,6 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                         result = {
                             'id': item_id,
                             'modality': 'image',
-                            'ensembleId': ensemble_id,
                             'label': 'uncertain',
                             'score': 0.5,
                             'display_label': 'AI generated',
@@ -723,7 +748,6 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                         result = {
                             'id': item_id,
                             'modality': 'image',
-                            'ensembleId': ensemble_id,
                             'label': result_data['label'],
                             'score': result_data['score'],
                             'display_label': result_data.get('display_label', 'AI generated'),
@@ -733,8 +757,8 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                         }
                         # Cache successful classification
                         if item_id:
-                            classification_cache[item_id] = {
-                                'ensembleId': ensemble_id,
+                            cache_key = (item_id, ensemble_id)
+                            classification_cache[cache_key] = {
                                 'label': result_data['label'],
                                 'score': result_data['score'],
                                 'display_label': result_data.get('display_label', 'AI generated'),
@@ -801,7 +825,6 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                         result = {
                             'id': item_id,
                             'modality': 'text',
-                            'ensembleId': ensemble_id,
                             'label': 'uncertain',
                             'score': 0.5,
                             'display_label': 'AI generated',
@@ -812,7 +835,6 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                         result = {
                             'id': item_id,
                             'modality': 'text',
-                            'ensembleId': ensemble_id,
                             'label': result_data['label'],
                             'score': result_data['score'],
                             'display_label': result_data.get('display_label', 'AI generated'),
@@ -822,8 +844,8 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                         }
                         # Cache successful classification
                         if item_id:
-                            classification_cache[item_id] = {
-                                'ensembleId': ensemble_id,
+                            cache_key = (item_id, ensemble_id)
+                            classification_cache[cache_key] = {
                                 'label': result_data['label'],
                                 'score': result_data['score'],
                                 'display_label': result_data.get('display_label', 'AI generated'),

@@ -11,6 +11,11 @@ this project was developed as my 3rd year project for my computer science degree
 for detailed architecture guide, justifications and design process, please see the artefact report:
 https://1drv.ms/w/c/3e7335be94f967ac/IQB7488XHN9mS7t6emHDvZ4jAfCdAYI1SlWUjTnl4B16fzg?e=8bVVBt
 
+see a demonstration video here:
+https://drive.google.com/file/d/1KiV8BoDedtRiSCtTxeWaV_HGD5Qx4AB8/view?usp=drive_link
+the version seen here is already slightly outdated, the long pauses are models loading, this only
+needs to happen once and can be optimised.
+
 ## Limitations
 
 All features of Fire vs Fire are currently prototypes, with many improvements planned, while many have 

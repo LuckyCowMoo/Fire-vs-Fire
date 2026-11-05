@@ -1,0 +1,13 @@
+{
+  "name": "firefox-extension-template",
+  "version": "0.1.0",
+  "private": true,
+  "devDependencies": {
+    "web-ext": "^7.11.0"
+  },
+  "scripts": {
+    "dev": "web-ext run -f firefox --source-dir .",
+    "lint": "web-ext lint",
+    "build": "web-ext build --overwrite-dest"
+  }
+}

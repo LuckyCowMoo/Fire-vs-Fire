@@ -1,0 +1,4 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Mozilla\NativeMessagingHosts\com.aidetector.classifier]
+@="C:\\Users\\lukea\\Desktop\\Stuff\\School\\Year 3\\Project\\Fire v Fire\\native\\manifest.firefox.json"

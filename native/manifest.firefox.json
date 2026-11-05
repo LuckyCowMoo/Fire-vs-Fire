@@ -1,0 +1,9 @@
+{
+    "name":  "com.aidetector.classifier",
+    "description":  "Local AI classifier bridge (Firefox)",
+    "path":  "C:\\Users\\lukea\\Downloads\\Fire-vs-Fire-FVF-clean\\Fire-vs-Fire-FVF-clean\\native\\run_host.bat",
+    "type":  "stdio",
+    "allowed_extensions":  [
+                               "template@example.com"
+                           ]
+}

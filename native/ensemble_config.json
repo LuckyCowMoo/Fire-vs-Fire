@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ensemble Configuration",
+  "description": "Configuration for multi-model ensemble classification",
+  
+  "presets": {
+    "single_resnet50": {
+      "description": "Single ResNet-50 with FFT (default)",
+      "classifiers": ["resnet50_fft"],
+      "weights": [1.0],
+      "miniBatchSize": 10,
+      "lazyLoad": true
+    },
+    
+    "balanced_ensemble": {
+      "description": "Equal weighting of all available models",
+      "classifiers": ["resnet50_fft"],
+      "weights": [1.0],
+      "miniBatchSize": 5,
+      "lazyLoad": true
+    },
+    
+    "confidence_weighted": {
+      "description": "Weight models by their training accuracy (example)",
+      "classifiers": ["resnet50_fft"],
+      "weights": [1.0],
+      "miniBatchSize": 5,
+      "lazyLoad": true,
+      "notes": "Update weights based on validation performance"
+    }
+  },
+  
+  "settings": {
+    "miniBatchSize": {
+      "description": "Number of images to process before sending intermediate results",
+      "type": "integer",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "notes": "Lower values = more responsive UX but slower overall. Higher values = faster batch processing."
+    },
+    
+    "lazyLoad": {
+      "description": "Unload models from memory after use to save VRAM",
+      "type": "boolean",
+      "default": true,
+      "notes": "Enable when using multiple large models. Disable for faster repeated classifications."
+    },
+    
+    "weights": {
+      "description": "Relative weights for each classifier (must match classifiers array length)",
+      "type": "array",
+      "notes": "Weights are automatically normalized to sum to 1.0. Higher weight = more influence on final score."
+    }
+  },
+  
+  "usage": {
+    "browser_extension": "Send 'model' object in payload with desired configuration",
+    "example_request": {
+      "type": "classify",
+      "payload": {
+        "items": ["..."],
+        "model": {
+          "classifiers": ["resnet50_fft"],
+          "weights": [1.0],
+          "miniBatchSize": 10,
+          "lazyLoad": true
+        }
+      }
+    }
+  }
+}

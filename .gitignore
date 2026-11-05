@@ -1,0 +1,26 @@
+# Virtual environments
+.venv/
+.venv311/
+.venv_sys/
+venv/
+env/
+ENV/
+
+# Model weights - DO NOT COMMIT
+*.pt
+*.pth
+*.pkl
+*.ckpt
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# System files
+.DS_Store
+Thumbs.db
+.env

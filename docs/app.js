@@ -557,22 +557,9 @@ function refreshAllTilts() {
 }
 
 function initVolumetric3DEffects() {
-  const portal = document.getElementById('portal-assembly');
-  const orbRig = document.getElementById('orb-3d-rig');
-
   window.addEventListener(
     'pointermove',
     (e) => {
-      const nx = (e.clientX / window.innerWidth - 0.5) * 2;
-      const ny = (e.clientY / window.innerHeight - 0.5) * 2;
-
-      if (portal) {
-        portal.style.transform = `rotateY(${nx * 8}deg) rotateX(${-ny * 6}deg) translateZ(0)`;
-      }
-      if (orbRig) {
-        orbRig.style.transform = `rotateY(${nx * 16}deg) rotateX(${-ny * 14}deg) translate3d(${nx * -18}px, ${ny * -14}px, 0)`;
-      }
-
       document.querySelectorAll('.glass-card-3d').forEach((card) => {
         const rect = card.getBoundingClientRect();
         const mx = e.clientX - rect.left;

@@ -97,6 +97,26 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "Dependencies installed successfully." -ForegroundColor Green
 }
 
+# Hardware-aware accelerator detection (NVIDIA CUDA vs DirectML / NPU)
+try {
+  $gpus = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+  $hasNvidia = ($gpus | Where-Object { $_ -match 'NVIDIA' }) -ne $null
+  if ($hasNvidia) {
+    $cudaAvailable = & $venvPython -c "import torch; print(torch.cuda.is_available())" 2>$null
+    if ($cudaAvailable -ne 'True') {
+      Write-Host "Detected NVIDIA GPU ($($gpus -join ', ')). Installing CUDA-enabled PyTorch (cu128)..." -ForegroundColor Cyan
+      & $venvPython -m pip install --default-timeout=1000 torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    } else {
+      Write-Host "NVIDIA CUDA PyTorch already active." -ForegroundColor Green
+    }
+  } else {
+    Write-Host "Non-NVIDIA GPU/NPU detected ($($gpus -join ', ')). Ensuring ONNX Runtime DirectML is available..." -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null
+  }
+} catch {
+  Write-Host "Hardware acceleration auto-detection skipped: $_" -ForegroundColor Yellow
+}
+
 # Update manifest JSON
 $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
 if (-not $HostName) {

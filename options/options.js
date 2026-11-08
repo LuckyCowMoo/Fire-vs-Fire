@@ -1647,6 +1647,12 @@ async function fetchModels() {
 
 if (refreshBtn) {
   refreshBtn.addEventListener('click', () => fetchModels());
+  const openOnboardingBtn = document.getElementById('open-onboarding');
+  if (openOnboardingBtn) {
+    openOnboardingBtn.addEventListener('click', () => {
+      ext.runtime.sendMessage({ type: 'OPEN_ONBOARDING' }).catch(() => {});
+    });
+  }
 }
 
 (async () => {

@@ -6,21 +6,45 @@ venv/
 env/
 ENV/
 
-# Model weights - DO NOT COMMIT
+# Model binary weights - DO NOT COMMIT (Upload to GitHub Releases / Hugging Face)
 *.pt
 *.pth
 *.pkl
 *.ckpt
+*.onnx
+*.safetensors
+*.tar.gz
 
 # Python cache
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 
 # Logs
 *.log
+native_host_v2.log
 
-# System files
+# System & IDE files
 .DS_Store
 Thumbs.db
 .env
+.idea/
+.vscode/
+
+# Build & packaging artifacts
+dist/
+build/
+*.zip
+*.xpi
+*.crx
+
+# Training pipeline & datasets - Internal Research Only (Do not commit to public repo)
+training/
+checkpoints/
+channel_extractions/
+run_monitor.bat
+run_review_gui.bat
+test_image.py
+*.csv
+datasets/
+raw_images/
+disputed_images.json

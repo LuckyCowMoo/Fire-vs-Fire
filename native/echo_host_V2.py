@@ -66,7 +66,7 @@ def send_message(message):
 # ============================================================================
 
 class JobAssembler:
-    def __init__(self, ttl_seconds: int = 120, max_bytes: int = 30 * 1024 * 1024):
+    def __init__(self, ttl_seconds: int = 300, max_bytes: int = 250 * 1024 * 1024):
         self.ttl_seconds = ttl_seconds
         self.max_bytes = max_bytes
         self.jobs = {}
@@ -512,7 +512,10 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
     model_config = payload.get('model') or {}
 
     weights = model_config.get('weights', None)
-    mini_batch_size = model_config.get('miniBatchSize', 1000)
+    raw_mini_batch = model_config.get('miniBatchSize', 16)
+    # Cap image mini-batch size to 16 when streaming so pages with 80+ images
+    # stream badges progressively to the browser every ~100ms instead of blocking.
+    mini_batch_size = max(1, min(int(raw_mini_batch or 16), 16))
     lazy_load = model_config.get('lazyLoad', True)
     stream_results = model_config.get('streamResults', True)
 
@@ -906,6 +909,276 @@ def list_models(request_id: Optional[str] = None):
 # Main Loop
 # ----------------------------------------------------------------------------
 
+OFFICIAL_CATALOG_URL = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json"
+ALLOWED_GITHUB_PREFIXES = (
+    "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/",
+    "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/",
+)
+
+
+def _is_allowed_official_url(url: str) -> bool:
+    if not isinstance(url, str):
+        return False
+    return any(url.startswith(prefix) for prefix in ALLOWED_GITHUB_PREFIXES)
+
+
+def _resolve_safe_repo_path(relative_path: str) -> Optional[Path]:
+    """Ensure target path stays strictly inside repo_root."""
+    if not relative_path or ".." in relative_path:
+        return None
+    repo_root = Path(__file__).resolve().parent.parent
+    target = (repo_root / relative_path).resolve()
+    try:
+        target.relative_to(repo_root)
+    except ValueError:
+        return None
+    return target
+
+
+def _load_official_catalog() -> Dict[str, Any]:
+    """Load official first-party model catalog from GitHub with local fallback."""
+    local_catalog_path = Path(__file__).resolve().parent / "official_models.json"
+    catalog = None
+
+    try:
+        req = Request(
+            OFFICIAL_CATALOG_URL,
+            headers={"User-Agent": "FireVsFire-NativeHost/2.0", "Cache-Control": "no-cache"}
+        )
+        with urlopen(req, timeout=4) as resp:
+            raw = resp.read().decode("utf-8")
+            candidate = json.loads(raw)
+            if isinstance(candidate, dict) and isinstance(candidate.get("models"), list):
+                catalog = candidate
+                log("[Catalog] Loaded latest official_models.json from GitHub")
+    except Exception as exc:
+        log(f"[Catalog] Remote GitHub fetch fell back to local catalog: {exc}")
+
+    if catalog is None and local_catalog_path.exists():
+        try:
+            with open(local_catalog_path, "r", encoding="utf-8") as fh:
+                catalog = json.load(fh)
+        except Exception as exc:
+            log(f"[Catalog] Failed to load local official_models.json: {exc}")
+
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list):
+        catalog = {"catalog_version": 2, "repository": "LuckyCowMoo/Fire-vs-Fire", "models": []}
+
+    installed_ids = []
+    for model in catalog.get("models", []):
+        files = model.get("files") or []
+        if model.get("status") != "available" or not files:
+            model["installed"] = False
+            continue
+        all_present = True
+        for f_entry in files:
+            rel_path = f_entry.get("relative_path", "")
+            safe_path = _resolve_safe_repo_path(rel_path)
+            if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:
+                all_present = False
+                break
+        model["installed"] = all_present
+        if all_present:
+            installed_ids.append(model.get("id"))
+
+    catalog["installed_models"] = installed_ids
+    return catalog
+
+
+def get_official_catalog_response(request_id: Optional[str] = None) -> Dict[str, Any]:
+    catalog = _load_official_catalog()
+    registry = get_registry()
+    registry.discover_classifiers(force=True)
+    resp = {
+        "ok": True,
+        "type": "officialCatalog",
+        "catalog": catalog,
+        "installedModels": catalog.get("installed_models", []),
+        "classifiers": registry.list_available_details(),
+        "timestamp": int(time.time() * 1000),
+    }
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
+def download_official_model(model_id: str, request_id: Optional[str] = None, force_download: bool = False) -> Dict[str, Any]:
+    """
+    Security-hardened downloader for first-party Fire vs Fire classifiers.
+    Accepts ONLY a model_id (never arbitrary URLs/repositories from the browser),
+    validates against the official LuckyCowMoo/Fire-vs-Fire catalog, and downloads
+    both the .py classifier module(s) and .pt model weights.
+    """
+    if not model_id or not isinstance(model_id, str):
+        resp = {"ok": False, "error": "Invalid modelId"}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    catalog = _load_official_catalog()
+    target_model = next((m for m in catalog.get("models", []) if m.get("id") == model_id), None)
+    if target_model is None:
+        resp = {"ok": False, "error": f"Model '{model_id}' is not in the official Fire vs Fire catalog."}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    if target_model.get("status") != "available":
+        resp = {"ok": False, "error": f"Model '{model_id}' is not yet released ({target_model.get('status')})."}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    files = target_model.get("files") or []
+    if not files:
+        resp = {"ok": False, "error": f"Model '{model_id}' has no downloadable files configured."}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    total_files = len(files)
+    downloaded_files = []
+
+    for file_idx, f_entry in enumerate(files):
+        rel_path = f_entry.get("relative_path", "")
+        primary_url = f_entry.get("url", "")
+        fallback_url = f_entry.get("fallback_url", "")
+
+        dest_path = _resolve_safe_repo_path(rel_path)
+        if dest_path is None:
+            resp = {"ok": False, "error": f"Unsafe target path rejected: {rel_path}"}
+            if request_id:
+                resp["requestId"] = request_id
+            return resp
+
+        if not _is_allowed_official_url(primary_url):
+            resp = {"ok": False, "error": f"Untrusted download URL rejected: {primary_url}"}
+            if request_id:
+                resp["requestId"] = request_id
+            return resp
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not force_download and dest_path.exists() and dest_path.stat().st_size > 0:
+            file_size = dest_path.stat().st_size
+            overall_pct = int(((file_idx + 1) / total_files) * 100)
+            send_message({
+                "version": 2,
+                "type": "downloadProgress",
+                "requestId": request_id,
+                "modelId": model_id,
+                "file": dest_path.name,
+                "fileIndex": file_idx + 1,
+                "totalFiles": total_files,
+                "bytesDownloaded": file_size,
+                "totalBytes": file_size,
+                "percent": overall_pct,
+                "status": f"Verified {dest_path.name}"
+            })
+            downloaded_files.append(rel_path)
+            continue
+
+        urls_to_try = [primary_url]
+        if fallback_url and _is_allowed_official_url(fallback_url) and fallback_url != primary_url:
+            urls_to_try.append(fallback_url)
+
+        last_err = None
+        success = False
+        tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
+
+        for candidate_url in urls_to_try:
+            try:
+                log(f"[Downloader] Fetching {model_id} file {rel_path} from {candidate_url}")
+                req = Request(candidate_url, headers={"User-Agent": "FireVsFire-NativeHost/2.0"})
+                with urlopen(req, timeout=30) as response:
+                    total_bytes = int(response.headers.get("Content-Length") or 0)
+                    bytes_so_far = 0
+                    chunk_size = 256 * 1024
+                    last_emit = 0.0
+
+                    with open(tmp_path, "wb") as out_fh:
+                        while True:
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
+                            out_fh.write(chunk)
+                            bytes_so_far += len(chunk)
+                            now = time.time()
+                            if now - last_emit >= 0.12:
+                                last_emit = now
+                                file_frac = (bytes_so_far / total_bytes) if total_bytes > 0 else 0.5
+                                overall_pct = int(((file_idx + file_frac) / total_files) * 100)
+                                send_message({
+                                    "version": 2,
+                                    "type": "downloadProgress",
+                                    "requestId": request_id,
+                                    "modelId": model_id,
+                                    "file": dest_path.name,
+                                    "fileIndex": file_idx + 1,
+                                    "totalFiles": total_files,
+                                    "bytesDownloaded": bytes_so_far,
+                                    "totalBytes": total_bytes,
+                                    "percent": min(99, max(1, overall_pct)),
+                                    "status": f"Downloading {dest_path.name}..."
+                                })
+
+                if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                    os.replace(tmp_path, dest_path)
+                    success = True
+                    downloaded_files.append(rel_path)
+                    send_message({
+                        "version": 2,
+                        "type": "downloadProgress",
+                        "requestId": request_id,
+                        "modelId": model_id,
+                        "file": dest_path.name,
+                        "fileIndex": file_idx + 1,
+                        "totalFiles": total_files,
+                        "bytesDownloaded": dest_path.stat().st_size,
+                        "totalBytes": dest_path.stat().st_size,
+                        "percent": int(((file_idx + 1) / total_files) * 100),
+                        "status": f"Installed {dest_path.name}"
+                    })
+                    break
+            except Exception as exc:
+                last_err = str(exc)
+                log(f"[Downloader] Error downloading {candidate_url}: {exc}")
+                try:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                except Exception:
+                    pass
+
+        if not success:
+            if dest_path.exists() and dest_path.stat().st_size > 0:
+                downloaded_files.append(rel_path)
+                continue
+            resp = {
+                "ok": False,
+                "modelId": model_id,
+                "error": f"Failed to download {dest_path.name} from official GitHub: {last_err}"
+            }
+            if request_id:
+                resp["requestId"] = request_id
+            return resp
+
+    registry = get_registry()
+    registry.discover_classifiers(force=True)
+    available = registry.list_available_details()
+
+    resp = {
+        "ok": True,
+        "type": "downloadComplete",
+        "modelId": model_id,
+        "files": downloaded_files,
+        "classifiers": available,
+        "timestamp": int(time.time() * 1000)
+    }
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
 job_assembler = JobAssembler()
 
 def main():
@@ -953,6 +1226,16 @@ def main():
             elif mtype == 'listModels':
                 log("[Main] Listing available models")
                 send_message(list_models(msg.get('requestId')))
+
+            elif mtype == 'getOfficialCatalog':
+                log("[Main] Getting official first-party catalog")
+                send_message(get_official_catalog_response(msg.get('requestId')))
+
+            elif mtype == 'downloadOfficialModel':
+                model_id = msg.get('modelId')
+                force_dl = bool(msg.get('forceDownload', False))
+                log(f"[Main] Downloading official model: {model_id}")
+                send_message(download_official_model(model_id, msg.get('requestId'), force_dl))
             
             elif mtype == 'cancelJob':
                 job_key = msg.get('jobId') or msg.get('requestId')

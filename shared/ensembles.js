@@ -15,11 +15,11 @@
     return [
       {
         id: 'ai_images',
-        name: 'AI Images',
+        name: 'FvF Heimdall 02',
         modality: 'image',
         enabled: true,
         threshold: settings.imageAiThreshold ?? 0.5,
-        classifiers: ['res_net50_fft'],
+        classifiers: ['fvf_heimdall02'],
         weights: null,
         styles: {
           image: {

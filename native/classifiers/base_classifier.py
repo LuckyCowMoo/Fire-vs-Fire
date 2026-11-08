@@ -228,7 +228,23 @@ class BaseClassifier(ABC):
                 self._log_to_stderr("torch not available")
                 return None
         
-        # Try DirectML (Windows GPU)
+        # Try CUDA first (NVIDIA GPUs)
+        if lib_torch.cuda.is_available():
+            device = lib_torch.device('cuda')
+            try:
+                device_name = lib_torch.cuda.get_device_name(0)
+            except Exception:
+                device_name = 'CUDA GPU'
+            if hasattr(self, '_device_info'):
+                self._device_info = {
+                    'device': 'cuda',
+                    'name': device_name,
+                    'backend': 'CUDA'
+                }
+            self._log_to_stderr(f"✓ Using GPU (CUDA): {device_name}")
+            return device
+
+        # Try DirectML (AMD/Intel GPU & Windows NPU)
         try:
             import torch_directml
             device = torch_directml.device()
@@ -245,22 +261,6 @@ class BaseClassifier(ABC):
             pass
         except Exception as e:
             self._log_to_stderr(f"DirectML failed: {e}")
-        
-        # Try CUDA
-        if lib_torch.cuda.is_available():
-            device = lib_torch.device('cuda')
-            try:
-                device_name = lib_torch.cuda.get_device_name(0)
-            except Exception:
-                device_name = 'CUDA GPU'
-            if hasattr(self, '_device_info'):
-                self._device_info = {
-                    'device': 'cuda',
-                    'name': device_name,
-                    'backend': 'CUDA'
-                }
-            self._log_to_stderr(f"✓ Using GPU (CUDA): {device_name}")
-            return device
         
         # Fallback to CPU
         device = lib_torch.device('cpu')

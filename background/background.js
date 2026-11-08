@@ -5,6 +5,8 @@ console.log('[Background] Script loaded, ext:', ext ? 'Available' : 'Unavailable
 
 // Name of the native messaging host (update to match your installed host manifest)
 const HOST_NAME = 'com.aidetector.classifier';
+const GITHUB_PAGES_ONBOARDING_URL = 'https://luckycowmoo.github.io/Fire-vs-Fire/?onboarding=1';
+const RAW_GITHUB_CATALOG_URL = 'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json';
 
 let activeClassifyCount = 0;
 
@@ -116,6 +118,14 @@ function ensureNativePort() {
       return;
     }
 
+    if (resType === 'downloadProgress') {
+      const reqEntry = reqId ? pendingNativeRequests.get(reqId) : null;
+      if (reqEntry && typeof reqEntry.onProgress === 'function') {
+        reqEntry.onProgress(response);
+      }
+      return;
+    }
+
     if (resType === 'classifyResultChunk' || resType === 'classifyJobComplete') {
       const jobId = response.jobId;
       const jobInfo = jobId ? pendingJobs.get(jobId) : null;
@@ -168,7 +178,7 @@ function ensureNativePort() {
   return nativePort;
 }
 
-function sendToNative(message) {
+function sendToNative(message, options = {}) {
   if (ENABLE_FAKE_NATIVE) {
     return Promise.resolve({
       version: 2,
@@ -176,6 +186,9 @@ function sendToNative(message) {
       classifiers: []
     });
   }
+
+  const timeoutMs = options.timeoutMs || 60000;
+  const onProgress = options.onProgress || null;
 
   const port = ensureNativePort();
   if (port) {
@@ -188,16 +201,16 @@ function sendToNative(message) {
           pendingNativeRequests.delete(requestId);
           reject(new Error('Native host timeout'));
         }
-      }, 60000);
+      }, timeoutMs);
 
-      pendingNativeRequests.set(requestId, { resolve, reject, timeoutId });
+      pendingNativeRequests.set(requestId, { resolve, reject, timeoutId, onProgress });
       port.postMessage(message);
     });
   }
 
   const canSend = ext && ext.runtime && typeof ext.runtime.sendNativeMessage === 'function';
   if (!canSend) {
-    return Promise.reject(new Error('Native messaging API unavailable: ext.runtime.connectNative/sendNativeMessage not available. Ensure nativeMessaging permission, MV2 background page, and a supported browser.'));
+    return Promise.reject(new Error('Native messaging API unavailable: ext.runtime.connectNative/sendNativeMessage not available.'));
   }
 
   return new Promise((resolve, reject) => {
@@ -264,8 +277,195 @@ function handleClassifyJobChunk(message, sender) {
   return { ok, jobId };
 }
 
-ext.runtime.onInstalled.addListener(() => {
-  console.log('Extension installed');
+async function openOnboardingExperience() {
+  const localOnboardingUrl = ext.runtime.getURL('docs/index.html?onboarding=1');
+  let targetUrl = localOnboardingUrl;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1800);
+    const resp = await fetch('https://luckycowmoo.github.io/Fire-vs-Fire/official_models.json', {
+      method: 'HEAD',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (resp && resp.ok) {
+      targetUrl = GITHUB_PAGES_ONBOARDING_URL;
+    }
+  } catch (_) {
+    // GitHub Pages not yet published or offline; use built-in docs/index.html seamlessly
+    targetUrl = localOnboardingUrl;
+  }
+
+  if (ext.tabs && ext.tabs.create) {
+    ext.tabs.create({ url: targetUrl });
+  }
+}
+
+async function fetchFallbackCatalog() {
+  try {
+    const resp = await fetch(RAW_GITHUB_CATALOG_URL, { cache: 'no-store' });
+    if (resp && resp.ok) {
+      return await resp.json();
+    }
+  } catch (_) {}
+
+  try {
+    const localUrl = ext.runtime.getURL('docs/official_models.json');
+    const resp = await fetch(localUrl);
+    if (resp && resp.ok) {
+      return await resp.json();
+    }
+  } catch (_) {}
+
+  return { catalog_version: 2, repository: 'LuckyCowMoo/Fire-vs-Fire', models: [] };
+}
+
+async function buildAndSaveAutoCategories(downloadedModelIds = [], customThreshold = 0.75) {
+  const catalog = await fetchFallbackCatalog();
+  const models = Array.isArray(catalog.models) ? catalog.models : [];
+  const selectedSet = new Set(Array.isArray(downloadedModelIds) ? downloadedModelIds : []);
+
+  // If no explicit list was passed, check native host for installed models
+  if (selectedSet.size === 0) {
+    try {
+      const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2 }, { timeoutMs: 8000 });
+      if (catResp && Array.isArray(catResp.installedModels)) {
+        catResp.installedModels.forEach((id) => selectedSet.add(id));
+      }
+    } catch (_) {}
+  }
+
+  // Always fallback to at least fvf_heimdall02 if nothing was reported
+  if (selectedSet.size === 0) {
+    selectedSet.add('fvf_heimdall02');
+  }
+
+  const threshold = typeof customThreshold === 'number'
+    ? Math.max(0.05, Math.min(0.99, customThreshold))
+    : 0.75;
+
+  const newEnsembles = [];
+  const modalities = ['image', 'text', 'video', 'audio'];
+
+  // 1. One category per top recommended AI model downloaded for each modality
+  for (const mod of modalities) {
+    const topModel = models.find(
+      (m) => m.modality === mod && m.recommended === true && m.is_ai_detector !== false && selectedSet.has(m.id)
+    ) || models.find(
+      (m) => m.modality === mod && m.is_ai_detector !== false && selectedSet.has(m.id)
+    );
+
+    if (!topModel) continue;
+
+    const borderColor = topModel.default_color || '#FF4D1C';
+    const ensemble = {
+      id: `auto_${mod}_${topModel.id}`,
+      name: topModel.category_name || topModel.name || `AI ${mod}`,
+      modality: mod === 'text' ? 'text' : 'image',
+      enabled: true,
+      threshold,
+      classifiers: [topModel.id],
+      weights: [1],
+      styles: mod === 'text'
+        ? {
+            text: {
+              applyBlur: true,
+              blurMode: 'hover',
+              blurAmount: 2,
+              applyStrikethrough: true,
+              strikethroughMode: 'hover',
+              strikethroughColor: borderColor,
+              applyUnderline: false,
+              underlineMode: 'off',
+              underlineColor: borderColor,
+              applyHighlight: false,
+              highlightMode: 'off',
+              highlightColor: '#fff3a1'
+            }
+          }
+        : {
+            image: {
+              applyBlur: true,
+              blurAmount: 6,
+              applyBorder: true,
+              borderMultiplier: 1.2,
+              borderColor,
+              applyBadge: true,
+              blurMode: 'hover',
+              borderMode: 'hover',
+              badgeMode: 'hover'
+            }
+          }
+    };
+    newEnsembles.push(ensemble);
+  }
+
+  // 2. Also create a dedicated Spider category at 75% sensitivity if ResNet 50 - Spider was downloaded
+  if (selectedSet.has('res_net50_spider')) {
+    const spiderModel = models.find((m) => m.id === 'res_net50_spider');
+    const spiderColor = (spiderModel && spiderModel.default_color) || '#FFB020';
+    newEnsembles.push({
+      id: 'auto_image_res_net50_spider',
+      name: (spiderModel && spiderModel.category_name) || 'ResNet50 Spider',
+      modality: 'image',
+      enabled: true,
+      threshold,
+      classifiers: ['res_net50_spider'],
+      weights: [1],
+      styles: {
+        image: {
+          applyBlur: true,
+          blurAmount: 8,
+          applyBorder: true,
+          borderMultiplier: 1.2,
+          borderColor: spiderColor,
+          applyBadge: true,
+          blurMode: 'hover',
+          borderMode: 'hover',
+          badgeMode: 'hover'
+        }
+      }
+    });
+  }
+
+  const storagePayload = {
+    enabled: true,
+    imageAiThreshold: threshold,
+    textAiThreshold: threshold,
+    ensembleConfigsV2: newEnsembles,
+    onboardingCompleted: true,
+    onboardingCompletedAt: Date.now()
+  };
+
+  const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+  if (storageArea && storageArea.set) {
+    await storageArea.set(storagePayload);
+  }
+  if (ext.storage && ext.storage.local && ext.storage.local !== storageArea) {
+    try {
+      await ext.storage.local.set(storagePayload);
+    } catch (_) {}
+  }
+
+  // Trigger reclassify on open tabs
+  if (ext.tabs && ext.tabs.query) {
+    try {
+      const tabs = await ext.tabs.query({});
+      tabs.forEach((tab) => {
+        if (tab && tab.id != null) {
+          ext.tabs.sendMessage(tab.id, { type: 'RECLASSIFY_ALL' }).catch(() => {});
+        }
+      });
+    } catch (_) {}
+  }
+
+  return newEnsembles;
+}
+
+ext.runtime.onInstalled.addListener((details) => {
+  console.log('Extension installed:', details && details.reason);
   updateToolbarState();
   if (ext.contextMenus && ext.contextMenus.create) {
     try {
@@ -277,6 +477,10 @@ ext.runtime.onInstalled.addListener(() => {
     } catch (e) {
       console.warn('Context menu create failed:', e);
     }
+  }
+
+  if (!details || details.reason === 'install') {
+    openOnboardingExperience();
   }
 });
 
@@ -312,8 +516,121 @@ if (ext.contextMenus && ext.contextMenus.onClicked) {
 
 ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'PING') {
-    sendResponse({ ok: true, time: Date.now() });
+    sendResponse({ ok: true, time: Date.now(), extensionVersion: ext.runtime.getManifest?.()?.version || '0.1.0' });
     return false;
+  }
+
+  if (message && message.type === 'OPEN_ONBOARDING') {
+    openOnboardingExperience();
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'CHECK_NATIVE_HOST') {
+    sendToNative({ type: 'ping', version: 2 }, { timeoutMs: 4000 })
+      .then((res) => {
+        sendResponse({ ok: true, connected: Boolean(res && res.ok), hostResponse: res });
+      })
+      .catch((err) => {
+        sendResponse({ ok: true, connected: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'GET_OFFICIAL_CATALOG') {
+    sendToNative({ type: 'getOfficialCatalog', version: 2 }, { timeoutMs: 8000 })
+      .then((res) => {
+        sendResponse({
+          ok: true,
+          nativeConnected: true,
+          catalog: res.catalog,
+          installedModels: res.installedModels || [],
+          classifiers: res.classifiers || []
+        });
+      })
+      .catch(async (err) => {
+        const fallbackCatalog = await fetchFallbackCatalog();
+        sendResponse({
+          ok: true,
+          nativeConnected: false,
+          catalog: fallbackCatalog,
+          installedModels: [],
+          classifiers: [],
+          nativeError: err.message || String(err)
+        });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'DOWNLOAD_OFFICIAL_MODEL') {
+    const modelId = message.modelId;
+    const forceDownload = Boolean(message.forceDownload);
+    const tabId = sender && sender.tab ? sender.tab.id : null;
+
+    sendToNative(
+      {
+        type: 'downloadOfficialModel',
+        version: 2,
+        modelId,
+        forceDownload
+      },
+      {
+        timeoutMs: 10 * 60 * 1000,
+        onProgress: (progressMsg) => {
+          if (tabId != null && ext.tabs && ext.tabs.sendMessage) {
+            ext.tabs.sendMessage(tabId, {
+              type: 'ONBOARDING_DOWNLOAD_PROGRESS',
+              payload: progressMsg
+            }).catch(() => {});
+          }
+          try {
+            ext.runtime.sendMessage({
+              type: 'ONBOARDING_DOWNLOAD_PROGRESS',
+              payload: progressMsg
+            }).catch(() => {});
+          } catch (_) {}
+        }
+      }
+    )
+      .then((res) => {
+        sendResponse(res);
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, modelId, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'AUTO_SETUP_CATEGORIES') {
+    const downloadedModels = Array.isArray(message.downloadedModels) ? message.downloadedModels : [];
+    const threshold = typeof message.threshold === 'number' ? message.threshold : 0.75;
+    buildAndSaveAutoCategories(downloadedModels, threshold)
+      .then((ensembles) => {
+        sendResponse({ ok: true, ensembles });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'SAVE_ONBOARDING_ENSEMBLES') {
+    const ensembles = Array.isArray(message.ensembles) ? message.ensembles : [];
+    const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+    const payload = {
+      enabled: true,
+      ensembleConfigsV2: ensembles,
+      onboardingCompleted: true,
+      onboardingCompletedAt: Date.now()
+    };
+    Promise.resolve(storageArea && storageArea.set ? storageArea.set(payload) : null)
+      .then(() => {
+        sendResponse({ ok: true, ensembles });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      });
+    return true;
   }
 
   if (message && message.type === 'UPDATE_CONTEXT_MENU') {

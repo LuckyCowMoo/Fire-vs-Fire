@@ -515,7 +515,9 @@
     badge.style.whiteSpace = 'nowrap';
     badge.style.boxSizing = 'border-box';
     badge.className = 'ai-badge';
-    badge.textContent = `${entry.label} ${Math.round(entry.score * 100)}%`;
+    const pct = entry.score * 100;
+    const pctText = (pct > 0 && pct < 1) ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`;
+    badge.textContent = `${entry.label} ${pctText}`;
     const badgeRgb = hexToRgb(entry.color || fallbackColor) || { r: 255, g: 0, b: 100 };
     badge.style.background = `rgba(${badgeRgb.r}, ${badgeRgb.g}, ${badgeRgb.b}, 0.9)`;
     return badge;

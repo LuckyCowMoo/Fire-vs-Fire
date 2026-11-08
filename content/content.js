@@ -20,7 +20,7 @@ let settings = {
   blurAmount: 4,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
-  miniBatchSize: 1000,              // Batch size for native host mini-batches
+  miniBatchSize: 16,              // Batch size for native host progressive streaming mini-batches
   classificationDelay: 100,       // Debounce delay (ms) before batching and sending for classification
   imageCaptureQuality: 1,         // JPEG quality (0.2-1) for image capture
   textBlurAmount: 2,              // Blur radius (px) for flagged text
@@ -147,8 +147,22 @@ function getEnsembleById(ensembleId) {
 
 function trackElement(itemId, element) {
   if (!itemId || !element) return;
-  elementMap.set(itemId, element);
+  const existing = elementMap.get(itemId);
+  if (!existing) {
+    elementMap.set(itemId, new Set([element]));
+  } else if (existing instanceof Set) {
+    existing.add(element);
+  } else {
+    elementMap.set(itemId, new Set([existing, element]));
+  }
   elementToItemId.set(element, itemId);
+}
+
+function getElementsForItem(itemId) {
+  const entry = elementMap.get(itemId);
+  if (!entry) return [];
+  if (entry instanceof Set) return Array.from(entry);
+  return [entry];
 }
 
 function hasResultsForElement(el) {
@@ -174,7 +188,13 @@ function releaseElementTracking(el) {
 
   const itemId = elementToItemId.get(el);
   if (itemId) {
-    elementMap.delete(itemId);
+    const tracked = elementMap.get(itemId);
+    if (tracked instanceof Set) {
+      tracked.delete(el);
+      if (tracked.size === 0) elementMap.delete(itemId);
+    } else if (tracked === el) {
+      elementMap.delete(itemId);
+    }
     // Keep itemResults so styles can be re-applied if the element re-enters the DOM
   }
 
@@ -229,8 +249,13 @@ function pruneItemResults() {
 }
 
 function cleanupStaleEntries() {
-  for (const [itemId, el] of elementMap) {
-    if (!el?.isConnected) {
+  for (const [itemId, entry] of elementMap) {
+    if (entry instanceof Set) {
+      for (const el of entry) {
+        if (!el?.isConnected) entry.delete(el);
+      }
+      if (entry.size === 0) elementMap.delete(itemId);
+    } else if (!entry?.isConnected) {
       elementMap.delete(itemId);
     }
   }
@@ -688,7 +713,8 @@ function imageToBase64(imgElement) {
 // Build classification batches - splits into multiple requests if needed to stay under message size limit
 function buildClassificationBatches(images = cachedImages, textSections = cachedTextSections) {
   const batches = [];
-  const MAX_MESSAGE_SIZE = 50000000;  // 50MB (well under 4GB limit, but reasonable for performance)
+  const MAX_MESSAGE_SIZE = 6000000;  // 6MB per chunk (prevents browser Native Messaging pipe disconnect on image-heavy pages)
+  const MAX_ITEMS_PER_CHUNK = 16;    // Keep chunks compact so streaming starts immediately
   let currentBatch = [];
   let currentSize = 1000;  // Start with overhead estimate
   
@@ -724,7 +750,7 @@ function buildClassificationBatches(images = cachedImages, textSections = cached
     }
     
     // If adding this item would exceed limit, save current batch and start new one
-    if (currentSize + itemSize > MAX_MESSAGE_SIZE && currentBatch.length > 0) {
+    if ((currentSize + itemSize > MAX_MESSAGE_SIZE || currentBatch.length >= MAX_ITEMS_PER_CHUNK) && currentBatch.length > 0) {
       batches.push(currentBatch);
       currentBatch = [];
       currentSize = 1000;
@@ -1053,15 +1079,22 @@ function queueClassifierTimings(results) {
 function applyStylesForItem(itemId) {
   const entry = itemResults.get(itemId);
   if (!entry) return;
-  const element = elementMap.get(itemId);
-  if (!element) return;
-  
-  // Check if element is still in the document
-  if (!element.isConnected) {
-    if (settings.verboseLogs) {
-      console.log(`[AI Detector] Element ${itemId} no longer in DOM, skipping style application`);
+  const elements = getElementsForItem(itemId).filter((el) => el && el.isConnected);
+  if (!elements.length) {
+    // Fallback: if DOM element was recreated with same src on a dynamic page, re-link it
+    if (entry.modality === 'image') {
+      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => img.src === itemId);
+      if (liveImgs.length) {
+        liveImgs.forEach((img) => trackElement(itemId, img));
+        elements.push(...liveImgs);
+      }
     }
-    return;
+    if (!elements.length) {
+      if (settings.verboseLogs) {
+        console.log(`[AI Detector] Element ${itemId} no longer in DOM, skipping style application`);
+      }
+      return;
+    }
   }
 
   const modality = entry.modality;
@@ -1094,28 +1127,32 @@ function applyStylesForItem(itemId) {
   });
 
   if (modality === 'image') {
-    const wasDetected = element.classList.contains('ai-detected');
-    if (!matched.length) {
-      if (wasDetected) aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
-      VE.clearImageStyles(element);
-      updateHoverHandlerAttachment();
-      return;
-    }
+    elements.forEach((element) => {
+      const wasDetected = element.classList.contains('ai-detected');
+      if (!matched.length) {
+        if (wasDetected) aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
+        VE.clearImageStyles(element);
+        updateHoverHandlerAttachment();
+        return;
+      }
 
-    VE.applyImageMatchedStyles(element, matched, settings);
-    if (!wasDetected) aiDetectedImageCount += 1;
-    updateHoverHandlerAttachment();
+      VE.applyImageMatchedStyles(element, matched, settings);
+      if (!wasDetected) aiDetectedImageCount += 1;
+      updateHoverHandlerAttachment();
+    });
     return;
   }
 
   if (modality === 'text') {
-    if (!matched.length) {
-      VE.clearTextStyles(element);
-      return;
-    }
+    elements.forEach((element) => {
+      if (!matched.length) {
+        VE.clearTextStyles(element);
+        return;
+      }
 
-    VE.applyTextMatchedStyles(element, matched, settings, {
-      onMouseLeave: () => applyStylesForItem(itemId)
+      VE.applyTextMatchedStyles(element, matched, settings, {
+        onMouseLeave: () => applyStylesForItem(itemId)
+      });
     });
   }
 }
@@ -1146,8 +1183,8 @@ function applyResultChunk(response) {
     itemResults.set(result.id, entry);
     
     // Check if element still exists before applying styles
-    const element = elementMap.get(result.id);
-    if (element && element.isConnected) {
+    const elements = getElementsForItem(result.id);
+    if (elements.some((el) => el && el.isConnected) || result.modality === 'image') {
       applyStylesForItem(result.id);
       appliedCount++;
     } else {
@@ -1259,6 +1296,9 @@ function initAutoExtract() {
 }
 
 function startDynamicDetection() {
+  if (document.documentElement && document.documentElement.dataset.fvfOnboarding === 'true') {
+    return;
+  }
   if (!settings.enabled) return;
   initMutationObserver();
   initIntersectionObserver();
@@ -1287,6 +1327,9 @@ function startDynamicDetection() {
 }
 
 function performInitialExtraction() {
+  if (document.documentElement && document.documentElement.dataset.fvfOnboarding === 'true') {
+    return;
+  }
   if (!settings.enabled) {
     console.log('[AI Detector] Disabled in options; skipping scan');
     return;
@@ -1311,6 +1354,58 @@ function performInitialExtraction() {
 
 // Initialize
 initAutoExtract();
+
+// Onboarding Web-to-Extension Bridge (allows the GitHub Pages /docs onboarding app to communicate with the extension)
+const ALLOWED_ONBOARDING_ACTIONS = new Set([
+  'PING',
+  'CHECK_NATIVE_HOST',
+  'GET_OFFICIAL_CATALOG',
+  'DOWNLOAD_OFFICIAL_MODEL',
+  'AUTO_SETUP_CATEGORIES',
+  'SAVE_ONBOARDING_ENSEMBLES'
+]);
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== 'fvf-onboarding-page') return;
+
+  const action = data.action;
+  const requestId = data.requestId;
+  if (!ALLOWED_ONBOARDING_ACTIONS.has(action)) {
+    window.postMessage({
+      source: 'fvf-extension-bridge',
+      requestId,
+      response: { ok: false, error: `Unsupported action: ${action}` }
+    }, '*');
+    return;
+  }
+
+  const payload = Object.assign({}, data.payload || {}, { type: action });
+  try {
+    ext.runtime.sendMessage(payload)
+      .then((response) => {
+        window.postMessage({
+          source: 'fvf-extension-bridge',
+          requestId,
+          response: response || { ok: true }
+        }, '*');
+      })
+      .catch((err) => {
+        window.postMessage({
+          source: 'fvf-extension-bridge',
+          requestId,
+          response: { ok: false, error: err?.message || String(err) }
+        }, '*');
+      });
+  } catch (err) {
+    window.postMessage({
+      source: 'fvf-extension-bridge',
+      requestId,
+      response: { ok: false, error: err?.message || String(err) }
+    }, '*');
+  }
+});
 
 // Track last right-clicked element for context menu
 let lastContextMenuTarget = null;
@@ -1401,6 +1496,15 @@ document.addEventListener('contextmenu', (evt) => {
 if (ext && ext.runtime && ext.runtime.onMessage) {
   ext.runtime.onMessage.addListener((message) => {
     if (!message || !message.type) return false;
+
+    if (message.type === 'ONBOARDING_DOWNLOAD_PROGRESS') {
+      window.postMessage({
+        source: 'fvf-extension-bridge',
+        type: 'ONBOARDING_DOWNLOAD_PROGRESS',
+        payload: message.payload
+      }, '*');
+      return false;
+    }
 
     if (message.type === 'CLASSIFY_RESULT_CHUNK') {
       const payload = message.payload;

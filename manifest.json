@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Fire Vs Fire",
-  "description": "A starter template for a Firefox WebExtension.",
+  "description": "Local, hardware-accelerated AI & custom content detector powered by Fire vs Fire classifiers.",
   "version": "0.1.0",
   "icons": {
     "128": "icons/icon.svg"
@@ -14,7 +14,8 @@
   "web_accessible_resources": [
     "icons/icon.svg",
     "icons/icon-loading.svg",
-    "options/preview-fire.jpg"
+    "options/preview-fire.jpg",
+    "docs/*"
   ],
 "background": {
     "scripts": ["background/background.js"]

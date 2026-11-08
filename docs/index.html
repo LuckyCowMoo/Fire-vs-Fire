@@ -37,58 +37,13 @@
 
     <div class="site-shell">
       <!-- Top Glassmorphic Navigation & Live Wizard Stepper -->
-      <header class="top-nav">
-        <a href="#top" class="brand-cluster" id="brand-home-link">
-          <div class="brand-logo-wrap">
-            <img src="./assets/icon-red.svg" alt="Fire vs Fire Logo" class="brand-logo" id="nav-flame-logo" />
-          </div>
-          <div>
-            <div class="brand-title">Fire vs Fire</div>
-          </div>
-          <span class="brand-tag">Local AI Shield</span>
-        </a>
-
-        <nav class="wizard-stepper" aria-label="Onboarding progress">
-          <button type="button" class="step-pill active" data-step="1">
-            <span class="step-num">1</span>
-            <span>Native Host</span>
-          </button>
-          <button type="button" class="step-pill" data-step="2">
-            <span class="step-num">2</span>
-            <span>4 Modality Models</span>
-          </button>
-          <button type="button" class="step-pill" data-step="3">
-            <span class="step-num">3</span>
-            <span>Configure</span>
-          </button>
-          <button type="button" class="step-pill" data-step="4">
-            <span class="step-num">4</span>
-            <span>5-Min Tutorial</span>
-          </button>
-          <button type="button" class="step-pill" data-step="5">
-            <span class="step-num">5</span>
-            <span>Ready</span>
-          </button>
-        </nav>
-
-        <div class="bridge-status-Cluster">
-          <div class="status-badge" id="ext-bridge-status" title="Browser Extension Status">
-            <span class="status-dot"></span>
-            <span id="ext-bridge-text">Checking Extension…</span>
-          </div>
-          <div class="status-badge" id="native-bridge-status" title="Local Native Host Status">
-            <span class="status-dot"></span>
-            <span id="native-bridge-text">Native Host: Checking…</span>
-          </div>
-        </div>
-      </header>
+      
 
       <!-- ==================================================================
            SCREEN 1: INSTALL NATIVE HOST (HARDWARE-ACCELERATED AI ENVIRONMENT)
            ================================================================== -->
       <section class="wizard-screen active" id="screen-1" data-screen="1">
         <div class="screen-header">
-          <div class="eyebrow-pill">Step 1 of 4 • Extension Installed Successfully</div>
           <h1 class="display-title">Install the Local Native Host</h1>
           <p class="lead-subtitle">
             You’ve installed the <strong>Fire vs Fire</strong> browser extension! Next, install the
@@ -96,133 +51,37 @@
           </p>
         </div>
 
-        <div class="native-grid">
-          <div class="glass-card-3d native-hero-card" data-tilt>
-            <div>
-              <h2 style="font-size: 1.55rem; font-weight: 800; margin-bottom: 12px;">
-                Why is the Native Host separate from the browser?
-              </h2>
-              <p style="color: var(--text-secondary); margin-bottom: 22px;">
-                Web browsers run inside a restricted sandbox with limited hardware access. Real forensic AI
-                classification—like extracting 20 signal channels across 5 image crops and running deep PyTorch/ONNX
-                neural networks—needs <strong>direct hardware &amp; GPU acceleration</strong> to run fast enough to
-                keep up with live web browsing.
-              </p>
-
-              <div class="why-native-boxes">
-                <div class="why-box">
-                  <div class="why-box-icon">⚡</div>
-                  <h4>Direct GPU &amp; NPU Speed</h4>
-                  <p>
-                    Unlocks NVIDIA CUDA, DirectML, and hardware accelerators so pages classify in milliseconds while you
-                    scroll.
-                  </p>
-                </div>
-                <div class="why-box">
-                  <div class="why-box-icon">🔒</div>
-                  <h4>100% On Your Computer</h4>
-                  <p>
-                    Nothing you browse is ever sent to a cloud server. Every model runs privately on your own machine.
-                  </p>
-                </div>
-                <div class="why-box">
-                  <div class="why-box-icon">🧩</div>
-                  <h4>Open Classifier Plugin Engine</h4>
-                  <p>
-                    Drop official or custom <code>.py</code> + <code>.pt</code> models straight into your local
-                    <code>native/classifiers/</code> folder.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div class="native-action-bar">
-                <a
-                  href="https://github.com/LuckyCowMoo/Fire-vs-Fire/archive/refs/heads/main.zip"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="btn-fire"
-                  id="download-native-host-btn"
-                >
-                  <span>⬇ Download Native Host from GitHub</span>
-                </a>
-                <button type="button" class="btn-ember-outline" id="skip-to-models-btn">
-                  <span>I’ve Installed It — Choose Models →</span>
-                </button>
-              </div>
-              <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 12px;" id="native-detect-hint">
-                💡 Already downloaded? Run <code>Install-FireVsFire-NativeHost.bat</code> inside the folder—this page
-                will automatically detect the connection!
-              </p>
-            </div>
+        <div class="glass-card-3d native-hero-card" data-tilt style="max-width: 820px;">
+          <div>
+            <h2 style="font-size: 1.45rem; font-weight: 800; margin-bottom: 12px;">
+              Why is the Native Host separate from the browser?
+            </h2>
+            <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 1.05rem; line-height: 1.6;">
+              Web browsers run inside a restricted sandbox with limited hardware access. Real AI classification needs direct hardware &amp; GPU acceleration to run fast enough to keep up with live web browsing.
+            </p>
           </div>
 
-          <div class="glass-card-3d native-diagram-card" data-tilt>
-            <div>
-              <h3 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 14px;">
-                How the Local Bridge Works
-              </h3>
-              <div class="hardware-bridge-visual">
-                <div class="bridge-node">
-                  <div>
-                    <strong style="font-size: 0.92rem;">🌐 Browser Extension</strong>
-                    <div style="font-size: 0.78rem; color: var(--text-muted);">
-                      Captures visible images &amp; text in viewport
-                    </div>
-                  </div>
-                  <span class="brand-tag">Installed</span>
-                </div>
-                <div class="bridge-beam"></div>
-                <div class="bridge-node">
-                  <div>
-                    <strong style="font-size: 0.92rem;">🔥 Native Host (Python + PyTorch)</strong>
-                    <div style="font-size: 0.78rem; color: var(--text-muted);">
-                      Runs 20-channel forensic + neural inference on GPU
-                    </div>
-                  </div>
-                  <span class="brand-tag" id="diagram-host-pill">Local STDIO</span>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <h4 style="font-size: 0.92rem; font-weight: 700; margin-bottom: 10px; color: #ffdfc9;">
-                Quick 3-Step Native Host Setup:
-              </h4>
-              <ol class="install-steps-mini">
-                <li>
-                  <span>1.</span>
-                  <span>
-                    Click <strong>Download Native Host from GitHub</strong> and extract the ZIP anywhere on your PC.
-                  </span>
-                </li>
-                <li>
-                  <span>2.</span>
-                  <span>
-                    Double-click <code>Install-FireVsFire-NativeHost.bat</code> (or run
-                    <code>native/install-firefox.ps1</code>) to auto-configure Python, GPU PyTorch, and the browser
-                    bridge.
-                  </span>
-                </li>
-                <li>
-                  <span>3.</span>
-                  <span>
-                    Click <strong>Choose Models →</strong> to pick which first-party classifiers to download!
-                  </span>
-                </li>
-              </ol>
-            </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-              <button type="button" class="btn-ember-outline" id="recheck-native-btn" style="padding: 10px 18px; font-size: 0.84rem;">
-                ↻ Check Native Host Connection
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="native-action-bar">
+              <a
+                href="https://github.com/LuckyCowMoo/Fire-vs-Fire/archive/refs/heads/main.zip"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn-fire"
+                id="download-native-host-btn"
+              >
+                <span>Download Native Host</span>
+              </a>
+              <button type="button" class="btn-ember-outline" id="skip-to-models-btn">
+                <span>I’ve Installed It — Choose Models →</span>
               </button>
+            </div>
+            <div>
               <a
                 href="https://github.com/LuckyCowMoo/Fire-vs-Fire"
                 target="_blank"
                 rel="noopener noreferrer"
-                style="font-size: 0.82rem; color: #ffb38a; text-decoration: none;"
+                style="font-size: 0.88rem; color: #ffb38a; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;"
               >
                 View Source on GitHub ↗
               </a>
@@ -885,120 +744,9 @@ class MyCustomClassifier(BaseClassifier):
         </div>
       </section>
 
-      <!-- ==================================================================
-           INTERACTIVE FORENSIC SHOWCASE: HOW HEIMDALL V2 SEES AI VS REAL
-           (Real Polar Bear vs. AI Balenciaga Pope + 5-Crop Overlay)
-           ================================================================== -->
-      <section class="forensic-showcase-section" id="forensic-xray-showcase">
-        <div class="screen-header">
-          <div class="eyebrow-pill">Under the Hood • FvF Heimdall V2 Forensic X-Ray</div>
-          <h2 class="display-title" style="font-size: clamp(1.8rem, 3.4vw, 2.8rem);">
-            See What Humans Can’t: Real Polar Bear vs. AI Balenciaga Pope
-          </h2>
-          <p class="lead-subtitle">
-            Instead of looking at an image once, <strong>FvF Heimdall V2</strong> extracts
-            <strong>5 spatial crops</strong> (Center, Corners, and Edges) and decomposes each crop into
-            <strong>20 forensic signal channels</strong>. Click any forensic channel below to see the hidden structural
-            difference between a real camera sensor and an AI diffusion generator!
-          </p>
-        </div>
-
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
-          <div class="channel-pill-bar" id="forensic-channel-selector">
-            <button type="button" class="channel-btn active" data-channel="original">
-              00 • Original RGB
-            </button>
-            <button type="button" class="channel-btn" data-channel="prnu_noise_residual">
-              04 • PRNU Sensor Noise Residual
-            </button>
-            <button type="button" class="channel-btn" data-channel="res_native_srm_kv">
-              09 • SRM KV Edge Residual
-            </button>
-            <button type="button" class="channel-btn" data-channel="dct8_diag_checker_energy">
-              14 • DCT 8×8 Checkerboard Energy
-            </button>
-            <button type="button" class="channel-btn" data-channel="lbp_microtexture">
-              17 • LBP Micro-Texture Map
-            </button>
-            <button type="button" class="channel-btn" data-channel="wavelet_db4_HH">
-              20 • Wavelet db4 Diagonal HH
-            </button>
-          </div>
-
-          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 0.86rem; cursor: pointer; color: #ffdfc9;">
-            <input type="checkbox" id="toggle-5crop-overlay" checked />
-            <span>Show 5-Crop Scanner Regions (Center + Corners + Edges)</span>
-          </label>
-        </div>
-
-        <div class="xray-comparison-grid">
-          <!-- Real Polar Bear Panel -->
-          <div class="glass-card-3d xray-panel" data-tilt>
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-              <div>
-                <span class="brand-tag" style="background: rgba(24, 163, 74, 0.22); border-color: rgba(52, 211, 153, 0.5); color: #a7f3d0;">
-                  REAL PHOTOGRAPH
-                </span>
-                <h3 style="font-size: 1.2rem; font-weight: 800; margin-top: 6px;">Sleeping Polar Bear</h3>
-              </div>
-              <div style="text-align: right;">
-                <div style="font-size: 0.76rem; color: var(--text-muted);">Heimdall V2 AI Confidence</div>
-                <strong style="font-size: 1.25rem; color: var(--emerald-glow);">0.62% AI (99.38% Real)</strong>
-              </div>
-            </div>
-
-            <div class="xray-Viewport">
-              <img src="./assets/real_original.png" alt="Real Polar Bear Forensic Channel" id="xray-real-img" />
-              <div class="crop-overlays-group">
-                <div class="crop-overlay-box" style="top: 6%; left: 6%; width: 28%; height: 28%;">Top-Left Corner</div>
-                <div class="crop-overlay-box" style="top: 6%; left: 36%; width: 28%; height: 28%;">Top Edge</div>
-                <div class="crop-overlay-box" style="top: 36%; left: 36%; width: 28%; height: 28%; border-color: #ff6218;">Center Crop</div>
-                <div class="crop-overlay-box" style="top: 36%; right: 6%; width: 28%; height: 28%;">Right Edge</div>
-                <div class="crop-overlay-box" style="bottom: 6%; right: 6%; width: 28%; height: 28%;">Bottom-Right</div>
-              </div>
-            </div>
-
-            <p style="font-size: 0.85rem; color: var(--text-secondary);" id="xray-real-caption">
-              Natural optical depth-of-field and organic sensor grain across both the out-of-focus sky corners and the
-              sharp ice foreground.
-            </p>
-          </div>
-
-          <!-- AI Balenciaga Pope Panel -->
-          <div class="glass-card-3d xray-panel" data-tilt>
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-              <div>
-                <span class="brand-tag" style="background: rgba(243, 65, 66, 0.25); border-color: rgba(243, 65, 66, 0.6); color: #fecaca;">
-                  AI GENERATED (DIFFUSION)
-                </span>
-                <h3 style="font-size: 1.2rem; font-weight: 800; margin-top: 6px;">Balenciaga Pope</h3>
-              </div>
-              <div style="text-align: right;">
-                <div style="font-size: 0.76rem; color: var(--text-muted);">Heimdall V2 AI Confidence</div>
-                <strong style="font-size: 1.25rem; color: var(--flame-crimson);">99.78% AI Flagged</strong>
-              </div>
-            </div>
-
-            <div class="xray-Viewport">
-              <img src="./assets/ai_original.png" alt="AI Balenciaga Pope Forensic Channel" id="xray-ai-img" />
-              <div class="crop-overlays-group">
-                <div class="crop-overlay-box" style="top: 6%; left: 6%; width: 28%; height: 28%;">Top-Left Corner</div>
-                <div class="crop-overlay-box" style="top: 6%; left: 36%; width: 28%; height: 28%;">Top Edge</div>
-                <div class="crop-overlay-box" style="top: 36%; left: 36%; width: 28%; height: 28%; border-color: #ff6218;">Center Crop</div>
-                <div class="crop-overlay-box" style="top: 36%; right: 6%; width: 28%; height: 28%;">Right Edge</div>
-                <div class="crop-overlay-box" style="bottom: 6%; right: 6%; width: 28%; height: 28%;">Bottom-Right</div>
-              </div>
-            </div>
-
-            <p style="font-size: 0.85rem; color: var(--text-secondary);" id="xray-ai-caption">
-              Synthetic diffusion smoothing on the puffer coat contrasted with hallucinated high-frequency upscaling
-              grid artifacts in the background corners.
-            </p>
-          </div>
-        </div>
-      </section>
+      
     </div>
 
-    <script src="./app.js" type="module"></script>
+    <script src="./app.js"></script>
   </body>
 </html>

@@ -1,5 +1,5 @@
 /**
- * Fire vs Fire — Interactive Onboarding, Model Hub & Forensic Showcase
+ * Fire vs Fire — Interactive Onboarding & Model Hub
  * Connects seamlessly to the Browser Extension & Local Native Host (V2)
  */
 
@@ -7,6 +7,106 @@ const ext = typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undef
 
 const RAW_GITHUB_CATALOG_URL =
   'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json';
+
+// Embedded Fallback Catalog: Guarantees full UI works immediately offline or on file:/// URLs
+const FALLBACK_CATALOG = {
+  catalog_version: 2,
+  repository: 'LuckyCowMoo/Fire-vs-Fire',
+  branch: 'main',
+  author: 'LuckyCowMoo',
+  updated_at: '2026-11-08T18:00:00Z',
+  models: [
+    {
+      id: 'fvf_heimdall02',
+      name: 'FvF Heimdall V2',
+      version: '2.1.0',
+      modality: 'image',
+      status: 'available',
+      recommended: true,
+      is_ai_detector: true,
+      category_name: 'FvF Heimdall V2',
+      label: 'AI generated',
+      default_threshold: 0.75,
+      default_color: '#FF4D1C',
+      size_mb: 463.4,
+      architecture: '5-Crop 20-Channel SRNet + ConvNeXt-Small Fusion',
+      tagline: 'Flagship AI Image Detector • 20 Forensic Channels × 5 Spatial Crops',
+      description: 'Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels (FFT spectra, DCT residuals, SRM filters, chromatic aberration, and noise variance) across 5 spatial crops (center, corners, and edges) fused with a ConvNeXt-Small semantic backbone.'
+    },
+    {
+      id: 'res_net50_spider',
+      name: 'ResNet 50 - Spider',
+      version: '1.0.0',
+      modality: 'image',
+      status: 'available',
+      recommended: false,
+      is_ai_detector: false,
+      special_badge: 'Detects Spiders • NOT AI',
+      category_name: 'ResNet50 Spider',
+      label: 'Spider',
+      default_threshold: 0.75,
+      default_color: '#FFB020',
+      size_mb: 90.0,
+      architecture: 'ResNet-50 Binary Vision Classifier',
+      tagline: 'Arachnophobia Shield • Detects Spiders, NOT AI Images',
+      description: 'Demonstrates that Fire vs Fire can classify any visual concept—not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.'
+    },
+    {
+      id: 'fvf_mimir_02',
+      name: 'Mímir V2',
+      version: '2.0.0-preview',
+      modality: 'text',
+      status: 'coming_next',
+      recommended: true,
+      is_ai_detector: true,
+      special_badge: 'Coming Next',
+      category_name: 'Mímir V2',
+      label: 'AI text',
+      default_threshold: 0.75,
+      default_color: '#FF6218',
+      size_mb: 280.0,
+      architecture: 'Bi-Directional Token Burstiness & Syntactic Transformer',
+      tagline: 'Next in Queue • Local AI Text & Article Classifier',
+      description: 'Local neural language model trained to flag LLM-generated prose, essays, fake reviews, and synthetic comments using token burstiness variance and perplexity signatures.'
+    },
+    {
+      id: 'fvf_huginn_01',
+      name: 'Huginn V1',
+      version: '1.0.0-preview',
+      modality: 'video',
+      status: 'coming_soon',
+      recommended: true,
+      is_ai_detector: true,
+      special_badge: 'Coming Soon',
+      category_name: 'Huginn V1',
+      label: 'AI video',
+      default_threshold: 0.75,
+      default_color: '#FF4D1C',
+      size_mb: 520.0,
+      architecture: 'Temporal Flow & Frame Inter-Consistency Network',
+      tagline: 'Coming Soon • Local AI Video & Deepfake Detector',
+      description: 'Analyzes video streams for temporal flicker, optical flow morphing discontinuities, and frame-to-frame diffusion latent shifts.'
+    },
+    {
+      id: 'fvf_bragi_01',
+      name: 'Bragi V1',
+      version: '1.0.0-preview',
+      modality: 'audio',
+      status: 'coming_soon',
+      recommended: true,
+      is_ai_detector: true,
+      special_badge: 'Coming Soon',
+      category_name: 'Bragi V1',
+      label: 'AI audio',
+      default_threshold: 0.75,
+      default_color: '#FF4D1C',
+      size_mb: 210.0,
+      architecture: 'Phase Vocoder & Spectral Inharmonicity Discriminator',
+      tagline: 'Coming Soon • Voice Clone & Synthetic Audio Detector',
+      description: 'Detects synthetic speech, voice cloning, and AI audio by scanning for phase incoherence and spectral repetition in HTML5 web audio.'
+    }
+  ]
+};
 
 // ============================================================================
 // STATE
@@ -16,7 +116,7 @@ let currentScreen = 1;
 let currentTutorialStep = 1;
 let extensionConnected = false;
 let nativeHostConnected = false;
-let officialCatalog = null;
+let officialCatalog = FALLBACK_CATALOG;
 let installedModels = new Set();
 let selectedModels = new Set(['fvf_heimdall02']); // Recommended default selected
 
@@ -36,34 +136,6 @@ let sandboxCategories = [
   }
 ];
 let activeSandboxCatIndex = 0;
-
-// Forensic X-Ray captions
-const FORENSIC_CHANNEL_INFO = {
-  original: {
-    real: 'Natural optical depth-of-field and organic sensor grain across both the out-of-focus sky corners and the sharp ice foreground.',
-    ai: 'Visually convincing lighting on the puffer coat, but subtle synthetic smoothness hides in the fabric and background bokeh.'
-  },
-  prnu_noise_residual: {
-    real: 'Consistent physical camera sensor Photo-Response Non-Uniformity (PRNU) noise across all 5 spatial crops.',
-    ai: 'Notice how the diffusion generator leaves unnatural structural outlines inside the noise residual instead of uniform sensor grain!'
-  },
-  res_native_srm_kv: {
-    real: 'Rich, isotropic high-frequency micro-edges across the polar bear fur and crystalline ice surface.',
-    ai: 'The coat interior is abnormally devoid of micro-residuals while high-contrast coat seams ring with synthetic oversharpening.'
-  },
-  dct8_diag_checker_energy: {
-    real: 'Smooth, organic 8×8 frequency distribution reflecting natural scene luminance transitions.',
-    ai: 'Strong diagonal upscaling & decoder grid energy concentrations typical of latent diffusion decoding.'
-  },
-  lbp_microtexture: {
-    real: 'Continuous Local Binary Pattern (LBP) entropy across natural water ripples, ice fractures, and fur.',
-    ai: 'Patchy micro-texture dropouts across the synthetic puffer jacket panels and blurred background figures.'
-  },
-  wavelet_db4_HH: {
-    real: 'Balanced Daubechies-4 diagonal wavelet coefficients matching physical lens focus falloff.',
-    ai: 'Abrupt wavelet silence in smooth regions paired with synthetic high-frequency spikes along edges.'
-  }
-};
 
 // ============================================================================
 // EXTENSION BRIDGE (Supports Direct Extension Context + GitHub Pages postMessage)
@@ -149,58 +221,36 @@ function sendBridgeMessage(action, payload = {}, timeoutMs = 10000) {
 // ============================================================================
 
 async function checkBridgeAndNativeStatus() {
-  const extBadge = document.getElementById('ext-bridge-status');
-  const extText = document.getElementById('ext-bridge-text');
-  const natBadge = document.getElementById('native-bridge-status');
-  const natText = document.getElementById('native-bridge-text');
-  const diagramPill = document.getElementById('diagram-host-pill');
-
-  const pingRes = await sendBridgeMessage('PING', {}, 2500);
+  const pingRes = await sendBridgeMessage('PING', {}, 2000).catch(() => ({ ok: false }));
   extensionConnected = Boolean(pingRes && pingRes.ok);
 
   if (extensionConnected) {
-    extBadge?.classList.add('online');
-    if (extText) extText.textContent = 'Extension: Active';
-
-    const hostRes = await sendBridgeMessage('CHECK_NATIVE_HOST', {}, 4500);
+    const hostRes = await sendBridgeMessage('CHECK_NATIVE_HOST', {}, 3000).catch(() => ({ connected: false }));
     nativeHostConnected = Boolean(hostRes && hostRes.connected);
-    if (nativeHostConnected) {
-      natBadge?.classList.add('online');
-      if (natText) natText.textContent = 'Native Host: Connected';
-      if (diagramPill) {
-        diagramPill.textContent = 'Connected ✓';
-        diagramPill.style.background = 'rgba(24, 163, 74, 0.25)';
-        diagramPill.style.color = '#a7f3d0';
-      }
-    } else {
-      natBadge?.classList.remove('online');
-      if (natText) natText.textContent = 'Native Host: Awaiting Install';
-    }
   } else {
-    extBadge?.classList.remove('online');
-    if (extText) extText.textContent = 'Web Preview Mode';
-    natBadge?.classList.remove('online');
-    if (natText) natText.textContent = 'Native Host: Offline';
+    nativeHostConnected = false;
   }
 }
 
 async function loadOfficialModelsCatalog() {
   // 1. Try via Extension -> Native Host first (gives live local installed status)
   if (extensionConnected) {
-    const res = await sendBridgeMessage('GET_OFFICIAL_CATALOG', {}, 8000);
-    if (res && res.ok && res.catalog && Array.isArray(res.catalog.models)) {
-      officialCatalog = res.catalog;
-      nativeHostConnected = Boolean(res.nativeConnected);
-      (res.installedModels || []).forEach((id) => {
-        installedModels.add(id);
-        selectedModels.add(id);
-      });
-      renderModalityQuadrants();
-      return;
-    }
+    try {
+      const res = await sendBridgeMessage('GET_OFFICIAL_CATALOG', {}, 4000);
+      if (res && res.ok && res.catalog && Array.isArray(res.catalog.models)) {
+        officialCatalog = res.catalog;
+        nativeHostConnected = Boolean(res.nativeConnected);
+        (res.installedModels || []).forEach((id) => {
+          installedModels.add(id);
+          selectedModels.add(id);
+        });
+        renderModalityQuadrants();
+        return;
+      }
+    } catch (_) {}
   }
 
-  // 2. Try fetching directly from GitHub Raw so the website always reflects live GitHub state
+  // 2. Try fetching directly from GitHub Raw
   try {
     const resp = await fetch(RAW_GITHUB_CATALOG_URL, { cache: 'no-store' });
     if (resp && resp.ok) {
@@ -266,10 +316,8 @@ function renderModalityQuadrants() {
     const allInModality = models.filter((m) => m.modality === quad.modality);
     const hasAvailableModel = allInModality.some((m) => m.status === 'available');
 
-    // Dynamic Catalog Rule (User Requirement A4):
-    // When at least one model is "available" for a modality in GitHub, automatically hide
-    // any "coming_soon" / "coming_next" placeholder tile for that modality, while keeping
-    // all "available" models (including older/legacy models) listed!
+    // Dynamic Catalog Rule:
+    // When at least one model is "available" for a modality, hide "coming_soon" / "coming_next"
     const visibleModels = hasAvailableModel
       ? allInModality.filter((m) => m.status === 'available')
       : allInModality;
@@ -306,7 +354,7 @@ function renderModalityQuadrants() {
       tile.className = `model-tile ${isAvailable ? 'selectable' : 'upcoming'} ${isSelected ? 'selected' : ''}`;
       tile.dataset.modelId = model.id;
 
-      // Build Stickers: Automatic Recommended sticker on top AI model per modality + Spider non-AI note
+      // Stickers
       let stickersHtml = '';
       if (model.recommended && model.is_ai_detector !== false) {
         stickersHtml += `<span class="sticker-recommended">★ Recommended AI Classifier</span>`;
@@ -325,7 +373,7 @@ function renderModalityQuadrants() {
                ${isInstalled ? '✓ Installed Locally' : (isSelected ? 'Selected for Setup' : 'Click to Select')}
              </span>
            </div>`
-        : `<span style="font-size: 0.78rem; color: var(--text-muted);">In active training by LuckyCowMoo</span>`;
+        : `<span style="font-size: 0.78rem; color: var(--text-muted);">In active development by LuckyCowMoo</span>`;
 
       tile.innerHTML = `
         <div class="model-top-row">
@@ -370,7 +418,6 @@ function renderModalityQuadrants() {
 
 function toggleModelSelection(modelId) {
   if (selectedModels.has(modelId)) {
-    // Keep at least one model selected if user unchecks everything
     if (selectedModels.size > 1) {
       selectedModels.delete(modelId);
     }
@@ -424,7 +471,7 @@ async function downloadSelectedModelsAndAdvance() {
 
     if (extensionConnected) {
       if (statusEl) statusEl.textContent = `Requesting Native Host to install ${modelId} (.py + .pt)...`;
-      const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000);
+      const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000).catch(() => ({ ok: false }));
       if (res && res.ok) {
         installedModels.add(modelId);
         handleDownloadProgressEvent({
@@ -433,7 +480,6 @@ async function downloadSelectedModelsAndAdvance() {
           status: '✓ Installed & Registered in Native Host'
         });
       } else {
-        // Even if Native Host isn't running yet, allow smooth onboarding progression
         handleDownloadProgressEvent({
           modelId,
           percent: 100,
@@ -510,7 +556,7 @@ async function runAutoSetupForMe() {
   await sendBridgeMessage('AUTO_SETUP_CATEGORIES', {
     downloadedModels: downloadedIds,
     threshold: 0.75
-  });
+  }).catch(() => {});
 
   const summaryEl = document.getElementById('final-ready-summary');
   const hasSpider = selectedModels.has('res_net50_spider');
@@ -640,7 +686,7 @@ async function saveTutorialSettingsAndFinish() {
 
   await sendBridgeMessage('SAVE_ONBOARDING_ENSEMBLES', {
     ensembles: formattedEnsembles
-  });
+  }).catch(() => {});
 
   goToScreen(5);
 }
@@ -657,11 +703,13 @@ function goToScreen(stepNumber) {
     sec.classList.toggle('active', s === stepNumber);
   });
 
-  document.querySelectorAll('.step-pill').forEach((pill) => {
-    const s = Number(pill.dataset.step);
-    pill.classList.toggle('active', s === stepNumber);
-    pill.classList.toggle('completed', s < stepNumber);
-  });
+  if (stepNumber === 2) {
+    renderModalityQuadrants();
+  }
+
+  if (stepNumber === 3 || stepNumber === 4) {
+    renderSandboxUI();
+  }
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -756,7 +804,6 @@ function initVolumetric3DEffects() {
     { passive: true }
   );
 
-  // Subtle 3D tilt on cards with [data-tilt]
   document.querySelectorAll('[data-tilt]').forEach((card) => {
     card.addEventListener('pointermove', (e) => {
       const rect = card.getBoundingClientRect();
@@ -769,7 +816,6 @@ function initVolumetric3DEffects() {
     });
   });
 
-  // Floating Ember Canvas
   const canvas = document.getElementById('ember-webgl-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -817,56 +863,14 @@ function initVolumetric3DEffects() {
 }
 
 // ============================================================================
-// FORENSIC 20-CHANNEL SHOWCASE INTERACTIONS
-// ============================================================================
-
-function initForensicShowcase() {
-  const realImg = document.getElementById('xray-real-img');
-  const aiImg = document.getElementById('xray-ai-img');
-  const realCap = document.getElementById('xray-real-caption');
-  const aiCap = document.getElementById('xray-ai-caption');
-
-  document.querySelectorAll('#forensic-channel-selector .channel-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const ch = btn.dataset.channel;
-      document.querySelectorAll('#forensic-channel-selector .channel-btn').forEach((b) =>
-        b.classList.toggle('active', b === btn)
-      );
-      if (realImg) realImg.src = `./assets/real_${ch}.png`;
-      if (aiImg) aiImg.src = `./assets/ai_${ch}.png`;
-      if (FORENSIC_CHANNEL_INFO[ch]) {
-        if (realCap) realCap.textContent = FORENSIC_CHANNEL_INFO[ch].real;
-        if (aiCap) aiCap.textContent = FORENSIC_CHANNEL_INFO[ch].ai;
-      }
-    });
-  });
-
-  const cropToggle = document.getElementById('toggle-5crop-overlay');
-  if (cropToggle) {
-    cropToggle.addEventListener('change', () => {
-      document.querySelectorAll('.crop-overlays-group').forEach((el) => {
-        el.style.display = cropToggle.checked ? 'block' : 'none';
-      });
-    });
-  }
-}
-
-// ============================================================================
 // INITIALIZE APP & EVENT LISTENERS
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', async () => {
+function init() {
   initVolumetric3DEffects();
   initBrowserPinSimulator();
-  initForensicShowcase();
   renderSandboxUI();
-
-  // Top Stepper navigation
-  document.querySelectorAll('.step-pill').forEach((pill) => {
-    pill.addEventListener('click', () => {
-      goToScreen(Number(pill.dataset.step));
-    });
-  });
+  renderModalityQuadrants();
 
   // Screen 1 buttons
   const dlNativeBtn = document.getElementById('download-native-host-btn');
@@ -876,13 +880,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  document.getElementById('skip-to-models-btn')?.addEventListener('click', () => goToScreen(2));
-  document.getElementById('recheck-native-btn')?.addEventListener('click', async () => {
-    await checkBridgeAndNativeStatus();
-    if (nativeHostConnected) {
+  const skipBtn = document.getElementById('skip-to-models-btn');
+  if (skipBtn) {
+    skipBtn.addEventListener('click', (e) => {
+      e.preventDefault();
       goToScreen(2);
-    }
-  });
+    });
+  }
 
   // Screen 2 buttons
   document.getElementById('back-to-step1-btn')?.addEventListener('click', () => goToScreen(1));
@@ -985,14 +989,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     goToTutorialModule(1);
   });
 
-  // Initial bridge check & catalog fetch
-  await checkBridgeAndNativeStatus();
-  await loadOfficialModelsCatalog();
+  // Background status verification (non-blocking)
+  checkBridgeAndNativeStatus().catch(() => {});
+  loadOfficialModelsCatalog().catch(() => {});
+}
 
-  // Poll gently for Native Host connection while on Screen 1
-  setInterval(async () => {
-    if (currentScreen === 1 && !nativeHostConnected) {
-      await checkBridgeAndNativeStatus();
-    }
-  }, 5000);
-});
+// Immediate execution if DOM is ready, or on DOMContentLoaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}

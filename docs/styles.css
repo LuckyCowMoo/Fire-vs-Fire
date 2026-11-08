@@ -578,21 +578,11 @@ body {
 }
 
 .modality-quadrant {
-  padding: 24px 26px;
+  padding: 22px 24px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   gap: 16px;
-  aspect-ratio: 1 / 1;
-  min-height: 380px;
   box-sizing: border-box;
-}
-
-@media (max-width: 960px) {
-  .modality-quadrant {
-    aspect-ratio: auto;
-    min-height: auto;
-  }
 }
 
 .quadrant-header {
@@ -640,14 +630,20 @@ body {
 
 .quadrant-models-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 14px;
 }
 
-/* Classifier Model Tile inside a Quadrant — Compact & Square */
+@media (max-width: 640px) {
+  .quadrant-models-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Classifier Model Tile inside a Quadrant — Compact Square Tile */
 .model-tile {
   position: relative;
-  padding: 16px 18px;
+  padding: 15px 16px;
   border-radius: var(--radius-lg);
   background: rgba(12, 5, 3, 0.68);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -655,8 +651,16 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 185px;
+  aspect-ratio: 1 / 1;
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .model-tile {
+    aspect-ratio: auto;
+    min-height: 180px;
+  }
 }
 
 .model-tile.selectable {
@@ -683,23 +687,24 @@ body {
 .model-top-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .model-name {
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 800;
   color: #fff;
+  line-height: 1.25;
 }
 
 .model-stickers-wrap {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .model-selection-row {
-  margin: 8px 0 10px;
+  margin: 6px 0;
   width: 100%;
   display: block;
 }
@@ -707,20 +712,20 @@ body {
 .model-checkbox-label {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
 }
 
 .model-select-checkbox {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   accent-color: #ff6218;
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .model-checkbox-text {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 

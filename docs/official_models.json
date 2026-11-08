@@ -19,7 +19,7 @@
       "default_color": "#FF4D1C",
       "size_mb": 463.4,
       "architecture": "5-Crop 20-Channel SRNet + ConvNeXt-Small Fusion",
-      "tagline": "Flagship AI Image Detector",
+      "tagline": "local AI Image classifier",
       "description": "Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels (FFT spectra, DCT residuals, SRM filters, chromatic aberration, and noise variance) across 5 spatial crops (center, corners, and edges) fused with a ConvNeXt-Small semantic backbone.",
       "files": [
         {

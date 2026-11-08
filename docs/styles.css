@@ -720,10 +720,21 @@ body {
 }
 
 .modality-quadrant {
-  padding: 28px;
+  padding: 24px 26px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  justify-content: space-between;
+  gap: 16px;
+  aspect-ratio: 1 / 1;
+  min-height: 380px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 960px) {
+  .modality-quadrant {
+    aspect-ratio: auto;
+    min-height: auto;
+  }
 }
 
 .quadrant-header {

@@ -14,7 +14,7 @@ const FALLBACK_CATALOG = {
   repository: 'LuckyCowMoo/Fire-vs-Fire',
   branch: 'main',
   author: 'LuckyCowMoo',
-  updated_at: '2026-11-08T21:00:00Z',
+  updated_at: '2026-11-08T21:30:00Z',
   models: [
     {
       id: 'fvf_heimdall02',
@@ -30,7 +30,7 @@ const FALLBACK_CATALOG = {
       default_color: '#FF4D1C',
       download_size: '463 MB',
       ram_size: '1.2 GB VRAM / RAM',
-      tagline: 'Flagship AI Image Detector',
+      tagline: 'local AI Image classifier',
       description: 'Our flagship first-party AI image classifier.'
     },
     {
@@ -299,6 +299,7 @@ function renderModalityQuadrants() {
 
     const quadrantEl = document.createElement('div');
     quadrantEl.className = 'glass-card-3d modality-quadrant';
+    quadrantEl.setAttribute('data-tilt', '');
 
     quadrantEl.innerHTML = `
       <div class="quadrant-header">
@@ -325,6 +326,7 @@ function renderModalityQuadrants() {
       const tile = document.createElement('div');
       tile.className = `model-tile ${isAvailable ? 'selectable' : 'upcoming'} ${isSelected ? 'selected' : ''}`;
       tile.dataset.modelId = model.id;
+      tile.setAttribute('data-tilt', '');
 
       // Stickers
       let stickersHtml = '';
@@ -390,13 +392,12 @@ function renderModalityQuadrants() {
   });
 
   updateSelectedModelsSummary();
+  refreshAllTilts();
 }
 
 function toggleModelSelection(modelId) {
   if (selectedModels.has(modelId)) {
-    if (selectedModels.size > 1) {
-      selectedModels.delete(modelId);
-    }
+    selectedModels.delete(modelId);
   } else {
     selectedModels.add(modelId);
   }
@@ -405,6 +406,7 @@ function toggleModelSelection(modelId) {
 
 function updateSelectedModelsSummary() {
   const summaryEl = document.getElementById('selected-models-summary');
+  const btn = document.getElementById('download-and-continue-btn');
   if (!summaryEl) return;
 
   const models = (officialCatalog && Array.isArray(officialCatalog.models)) ? officialCatalog.models : [];
@@ -412,9 +414,13 @@ function updateSelectedModelsSummary() {
     .filter((m) => selectedModels.has(m.id))
     .map((m) => m.name);
 
-  summaryEl.textContent = chosenNames.length
-    ? `Selected (${chosenNames.length}): ${chosenNames.join(' + ')}`
-    : 'Select at least one classifier model above';
+  if (chosenNames.length > 0) {
+    summaryEl.textContent = `Selected (${chosenNames.length}): ${chosenNames.join(' + ')}`;
+    if (btn) btn.innerHTML = '<span>⬇ Download Selected &amp; Continue →</span>';
+  } else {
+    summaryEl.textContent = 'No models selected (you can proceed without downloading)';
+    if (btn) btn.innerHTML = '<span>Continue Without Models →</span>';
+  }
 }
 
 function handleDownloadProgressEvent(progress) {
@@ -434,6 +440,12 @@ async function downloadSelectedModelsAndAdvance() {
   const btn = document.getElementById('download-and-continue-btn');
   const statusEl = document.getElementById('download-overall-status');
   const ids = Array.from(selectedModels);
+
+  // If user chose 0 models, proceed immediately without blocking
+  if (ids.length === 0) {
+    goToScreen(3);
+    return;
+  }
 
   if (btn) {
     btn.disabled = true;
@@ -526,6 +538,24 @@ function goToScreen(stepNumber) {
 // VOLUMETRIC 3D TILT, PORTAL PARALLAX & EMBER PARTICLE ENGINE
 // ============================================================================
 
+function applyTiltToElement(el) {
+  if (el.dataset.tiltBound) return;
+  el.dataset.tiltBound = 'true';
+  el.addEventListener('pointermove', (e) => {
+    const rect = el.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    el.style.transform = `perspective(1100px) rotateX(${(-py * 5.5).toFixed(2)}deg) rotateY(${(px * 5.5).toFixed(2)}deg)`;
+  });
+  el.addEventListener('pointerleave', () => {
+    el.style.transform = 'perspective(1100px) rotateX(0deg) rotateY(0deg)';
+  });
+}
+
+function refreshAllTilts() {
+  document.querySelectorAll('[data-tilt]').forEach(applyTiltToElement);
+}
+
 function initVolumetric3DEffects() {
   const portal = document.getElementById('portal-assembly');
   const orbRig = document.getElementById('orb-3d-rig');
@@ -554,17 +584,7 @@ function initVolumetric3DEffects() {
     { passive: true }
   );
 
-  document.querySelectorAll('[data-tilt]').forEach((card) => {
-    card.addEventListener('pointermove', (e) => {
-      const rect = card.getBoundingClientRect();
-      const px = (e.clientX - rect.left) / rect.width - 0.5;
-      const py = (e.clientY - rect.top) / rect.height - 0.5;
-      card.style.transform = `perspective(1100px) rotateX(${(-py * 4.5).toFixed(2)}deg) rotateY(${(px * 4.5).toFixed(2)}deg)`;
-    });
-    card.addEventListener('pointerleave', () => {
-      card.style.transform = 'perspective(1100px) rotateX(0deg) rotateY(0deg)';
-    });
-  });
+  refreshAllTilts();
 
   const canvas = document.getElementById('ember-webgl-canvas');
   if (!canvas) return;
@@ -649,9 +669,6 @@ function init() {
   });
 
   // Screen 4 buttons (Final Ready Page)
-  document.getElementById('btn-close-tab')?.addEventListener('click', () => {
-    window.close();
-  });
   document.getElementById('btn-review-models')?.addEventListener('click', () => goToScreen(2));
 
   // Background status verification (non-blocking)

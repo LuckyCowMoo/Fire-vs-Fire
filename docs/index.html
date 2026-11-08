@@ -230,10 +230,10 @@ class BaseClassifier(ABC):
 
           <ul class="setup-steps-list">
             <li>
-              <strong>Pin Fire vs Fire to your browser bar:</strong> Click your browser's puzzle piece icon (🧩) and pin the flame icon so it is always visible.
+              <strong>Pin Fire vs Fire to your browser bar:</strong> Click your browser's extensions icon and pin the flame icon so it is always visible.
             </li>
             <li>
-              <strong>Open the Options menu:</strong> Click the flame icon in your toolbar, then click the gear icon (⚙️) to open your Settings dashboard.
+              <strong>Open the Options menu:</strong> Click the flame icon in your toolbar, then click Options to open your Settings dashboard.
             </li>
             <li>
               <strong>Create or edit a Category:</strong> Categories group your classifiers by rules (e.g. AI Images, Spiders, or custom concepts).
@@ -268,7 +268,9 @@ class BaseClassifier(ABC):
            ================================================================== -->
       <section class="wizard-screen" id="screen-4" data-screen="4">
         <div class="glass-card-3d ready-hero-card" data-tilt>
-          <div class="ready-check-orb">🔥</div>
+          <div class="ready-check-orb" style="background: transparent; border: none; box-shadow: none;">
+            <img src="./assets/icon.svg" alt="Fire vs Fire Logo" style="width: 76px; height: 76px; object-fit: contain;" />
+          </div>
           <h1 class="display-title" style="margin-bottom: 14px;">
             Fire vs Fire is now ready to go, you can close this page
           </h1>
@@ -277,9 +279,6 @@ class BaseClassifier(ABC):
           </p>
 
           <div style="display: flex; justify-content: center; gap: 14px; flex-wrap: wrap;">
-            <button type="button" class="btn-fire" id="btn-close-tab">
-              <span>✓ Close This Page</span>
-            </button>
             <button type="button" class="btn-ember-outline" id="btn-review-models">
               <span>Review Models</span>
             </button>
@@ -289,32 +288,25 @@ class BaseClassifier(ABC):
         <!-- Optional Ko-fi Support Card with Explicit Non-Paywall Guarantee -->
         <div class="glass-card-3d kofi-support-card" data-tilt>
           <div>
-            <div class="eyebrow-pill" style="background: rgba(255, 212, 56, 0.18); border-color: rgba(255, 212, 56, 0.45); color: #ffe58f;">
-              ☕ Optional Creator Support • Ko-fi
-            </div>
-            <h2 style="font-size: 1.65rem; font-weight: 800; margin-bottom: 10px;">
-              Support Me &amp; Future Open-Source Classifiers
+            <h2 style="font-size: 1.65rem; font-weight: 800; margin-bottom: 14px;">
+              Help support Me &amp; my projects
             </h2>
-            <p style="color: var(--text-secondary); font-size: 0.96rem;">
-              Fire vs Fire and all first-party models (<strong>Heimdall V2</strong>, <strong>Spider</strong>, and the
-              upcoming <strong>Mímir V2</strong>, <strong>Huginn V1</strong>, and <strong>Bragi V1</strong>) are built
-              independently and given to the community for free.
+            <p style="color: var(--text-secondary); font-size: 0.98rem; line-height: 1.6; margin-bottom: 16px;">
+              Fire vs Fire and all first-party models (Heimdall V2, Spider, and the upcoming Mímir , Huginn , and Bragi) are built independently and given to the community for free.
             </p>
 
-            <div class="ethical-pledge-box">
+            <div class="ethical-pledge-box" style="margin-bottom: 16px;">
               <strong>💚 100% Free Forever — Zero Paywalls:</strong><br />
-              Making a donation on Ko-fi is purely optional to support me and my future projects.
-              <strong>Making a payment will NOT unlock any additional features, models, or higher speeds</strong>—every
-              single feature in Fire vs Fire is already unlocked for everyone.
+              Making a donation on Ko-fi is purely optional to support me and my future projects. Making a payment will not unlock any additional features, models, or higher speeds.
             </div>
+
+            <p style="font-size: 0.94rem; color: #ffcaa6; margin-bottom: 24px;">
+              check out my other projects here <a href="https://luckycowmoo.github.io/simple-page/" target="_blank" rel="noopener noreferrer" style="color: #ff9d66; text-decoration: underline;">https://luckycowmoo.github.io/simple-page/</a>
+            </p>
           </div>
 
-          <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 24px; border-radius: var(--radius-lg); background: rgba(0, 0, 0, 0.42); border: 1px solid rgba(255, 212, 56, 0.25);">
-            <div style="font-size: 2.2rem;">☕</div>
-            <strong style="font-size: 1.05rem;">Support LuckyCowMoo on Ko-fi</strong>
-            <p style="font-size: 0.82rem; color: var(--text-secondary);">
-              Helps fund GPU compute for training upcoming Video, Audio, and Text forensic models!
-            </p>
+          <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 24px; border-radius: var(--radius-lg); background: rgba(0, 0, 0, 0.42); border: 1px solid rgba(255, 212, 56, 0.25);">
+            <strong style="font-size: 1.1rem;">Support on Ko-fi</strong>
             <a
               href="https://ko-fi.com/"
               target="_blank"
@@ -323,11 +315,8 @@ class BaseClassifier(ABC):
               id="kofi-donate-link"
               style="width: 100%;"
             >
-              <span>☕ Support on Ko-fi (Coming Soon)</span>
+              <span>Support on Ko-fi</span>
             </a>
-            <span style="font-size: 0.74rem; color: var(--text-muted);">
-              No account or payment is ever required to use Fire vs Fire.
-            </span>
           </div>
         </div>
       </section>

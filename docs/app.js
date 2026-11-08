@@ -655,9 +655,6 @@ function init() {
     runFinishSetup();
   });
 
-  // Screen 4 buttons (Final Ready Page)
-  document.getElementById('btn-review-models')?.addEventListener('click', () => goToScreen(2));
-
   // Background status verification (non-blocking)
   checkBridgeAndNativeStatus().catch(() => {});
   loadOfficialModelsCatalog().catch(() => {});

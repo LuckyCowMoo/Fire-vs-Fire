@@ -36,9 +36,6 @@
     <div class="progressive-vignette" aria-hidden="true"></div>
 
     <div class="site-shell">
-      <!-- Top Glassmorphic Navigation & Live Wizard Stepper -->
-      
-
       <!-- ==================================================================
            SCREEN 1: INSTALL NATIVE HOST (HARDWARE-ACCELERATED AI ENVIRONMENT)
            ================================================================== -->
@@ -95,44 +92,7 @@
            ================================================================== -->
       <section class="wizard-screen" id="screen-2" data-screen="2">
         <div class="screen-header">
-          <div class="eyebrow-pill">Step 2 of 4 • Live GitHub Classifier Catalog</div>
           <h1 class="display-title">Choose Your First-Party Classifiers</h1>
-          <p class="lead-subtitle">
-            Fire vs Fire organizes detection into <strong>4 Modality Quadrants</strong>. Download a classifier for each
-            modality you want to scan—they can be downloaded or updated at any time.
-          </p>
-        </div>
-
-        <!-- Key Principles Banner requested by User -->
-        <div class="catalog-info-banner">
-          <div class="info-pill-card">
-            <span style="font-size: 1.4rem;">🎁</span>
-            <div>
-              <strong>100% Free &amp; First-Party</strong>
-              <span>All models below are made by me (LuckyCowMoo) and hosted openly on GitHub at zero cost.</span>
-            </div>
-          </div>
-          <div class="info-pill-card">
-            <span style="font-size: 1.4rem;">💻</span>
-            <div>
-              <strong>Runs Completely on Your PC</strong>
-              <span>Every classifier downloads `.py` + `.pt` weights locally and runs offline on your hardware.</span>
-            </div>
-          </div>
-          <div class="info-pill-card">
-            <span style="font-size: 1.4rem;">🔄</span>
-            <div>
-              <strong>Download Anytime</strong>
-              <span>Start with what you need today and come back anytime as new modalities go live.</span>
-            </div>
-          </div>
-          <div class="info-pill-card">
-            <span style="font-size: 1.4rem;">🛠️</span>
-            <div>
-              <strong>Make Your Own Classifiers!</strong>
-              <span>Know Python/PyTorch? I strongly encourage you to build your own custom classifiers!</span>
-            </div>
-          </div>
         </div>
 
         <!-- 4 Modality Quadrants Grid (Populated dynamically from official_models.json) -->
@@ -140,49 +100,107 @@
           <!-- Quadrants rendered dynamically by app.js -->
         </div>
 
-        <!-- Expandable Developer Guide: Build Your Own Classifier -->
+        <!-- Expandable Developer Guide: Build Your Own Classifier with Full BaseClassifier API -->
         <details class="glass-card-3d byo-classifier-card">
           <summary>
-            <span>🧪 Want to build your own classifier? Click to see how easy the plugin architecture is</span>
+            <span>Want to build your own classifier? Click to see the BaseClassifier API</span>
             <span style="font-size: 0.82rem; color: #ffb38a;">BaseClassifier API ▾</span>
           </summary>
-          <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 12px;">
+          <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 14px; margin-bottom: 16px; line-height: 1.6;">
             Fire vs Fire isn’t limited to AI detection—that’s why <strong>ResNet 50 - Spider</strong> exists! Any Python
-            class inheriting from <code>BaseClassifier</code> dropped into <code>native/classifiers/</code> is
-            automatically discovered and appears in your browser extension popup.
+            class inheriting from <code>BaseClassifier</code> placed in <code>native/classifiers/</code> is
+            automatically discovered and loaded by the Native Host. Here is the complete interface:
           </p>
-          <pre class="code-block-ember"><code>from classifiers.base_classifier import BaseClassifier
+          <pre class="code-block-ember"><code>from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional, Set
+from pathlib import Path
+import sys
 
-class MyCustomClassifier(BaseClassifier):
-    def get_supported_modalities(self):
-        return {"image"}  # or {"text"}, {"video"}, {"audio"}
+class BaseClassifier(ABC):
+    """Abstract base class for AI detection classifiers (multi-modal)."""
 
-    def get_model_name(self) -&gt; str:
-        return "My Custom Detector"
+    def __init__(self, model_path: Optional[Path] = None):
+        self.model_path = model_path
+        self.model = None
+        self.device = None
+        self._is_loaded = False
 
-    def get_label(self) -&gt; str:
-        return "Custom Tag"
+    @abstractmethod
+    def get_supported_modalities(self) -> Set[str]:
+        """Return supported modalities: {'image'}, {'text'}, {'audio'}, or {'video'}."""
+        pass
 
-    def load_model(self):
-        # Load your PyTorch (.pt) or ONNX weights onto GPU/CPU
-        self._is_loaded = True
-        return True, None
+    @abstractmethod
+    def load_model(self) -> tuple[bool, Optional[str]]:
+        """Load weights onto device. Return (success: bool, error_reason: Optional[str])."""
+        pass
 
-    def classify_batch(self, batch_tensor) -&gt; list[float]:
-        # Return confidence scores between 0.0 and 1.0 for each item
-        return [0.95 for _ in range(len(batch_tensor))]</code></pre>
+    @abstractmethod
+    def preprocess_batch(self, inputs: List[Any], modality: str) -> tuple[Any, List[int]]:
+        """Preprocess inputs for inference. Return (batch_tensor, valid_indices)."""
+        pass
+
+    @abstractmethod
+    def classify_batch(self, batch_tensor: Any) -> List[float]:
+        """Run model inference. Return List of scores in [0.0, 1.0], or -1.0 for error."""
+        pass
+
+    @abstractmethod
+    def get_device_info(self) -> Dict[str, Any]:
+        """Return dict with keys: 'device', 'name', 'backend' (e.g. CUDA, DirectML, CPU)."""
+        pass
+
+    @abstractmethod
+    def get_model_name(self) -> str:
+        """Return human-readable model name."""
+        pass
+
+    def get_label(self) -> str:
+        """Human-readable badge label (e.g. 'AI generated', 'Spider')."""
+        return "AI generated"
+
+    def is_loaded(self) -> bool:
+        """Check if model is currently loaded in memory."""
+        return self._is_loaded
+
+    def unload_model(self):
+        """Unload model from memory for resource efficiency."""
+        self.model = None
+        self._is_loaded = False
+
+    def process_batch(self, inputs: List[Any], modality: str) -> List[float]:
+        """Convenience method combining load_model, preprocess_batch, and classify_batch."""
+        if not self.is_loaded():
+            success, _ = self.load_model()
+            if not success:
+                return [-1.0] * len(inputs)
+        batch_tensor, valid_indices = self.preprocess_batch(inputs, modality)
+        if not valid_indices:
+            return [-1.0] * len(inputs)
+        scores = self.classify_batch(batch_tensor)
+        results = [-1.0] * len(inputs)
+        for idx, score in zip(valid_indices, scores):
+            results[idx] = score
+        return results
+
+    def _log_to_stderr(self, message: str) -> None:
+        """Safe stderr logging to avoid corrupting native messaging JSON on stdout."""
+        try:
+            print(message, file=sys.stderr, flush=True)
+        except Exception:
+            pass</code></pre>
         </details>
 
         <div
           class="glass-card-3d"
-          style="padding: 24px 30px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;"
+          style="padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;"
         >
           <div>
             <div style="font-weight: 800; font-size: 1.05rem;" id="selected-models-summary">
-              Selected: FvF Heimdall V2 (Recommended)
+              Selected: FvF Heimdall V2
             </div>
             <div style="font-size: 0.84rem; color: var(--text-secondary);" id="download-overall-status">
-              Ready to verify or download selected models via the Native Host into <code>native/classifiers/</code>.
+              download selected models via the Native Host into <code>native/classifiers/</code>.
             </div>
           </div>
 
@@ -198,502 +216,72 @@ class MyCustomClassifier(BaseClassifier):
       </section>
 
       <!-- ==================================================================
-           SCREEN 3: SETUP CHOICE ("SET UP FOR ME" VS "TAKE A QUICK TUTORIAL")
+           SCREEN 3: SETTING UP YOUR FIRST CLASSIFIER (BULLET POINTS)
            ================================================================== -->
       <section class="wizard-screen" id="screen-3" data-screen="3">
         <div class="screen-header">
-          <div class="eyebrow-pill">Step 3 of 4 • Extension Configuration</div>
-          <h1 class="display-title">How Would You Like to Configure Fire vs Fire?</h1>
-          <p class="lead-subtitle">
-            Let Fire vs Fire automatically configure your Categories and sensitivity thresholds right now, or take a
-            guided 5-minute interactive tour to master every control.
-          </p>
+          <h1 class="display-title">Setting Up Your First Classifier</h1>
         </div>
 
-        <div class="choice-cards-grid">
-          <!-- Option A: Set up for me -->
-          <div class="glass-card-3d choice-card" data-tilt>
-            <div>
-              <span class="choice-card-badge">⚡ Instant Automatic Setup</span>
-              <h3>Set up for me</h3>
-              <p style="color: var(--text-secondary); margin-bottom: 22px;">
-                Automatically configures your extension with balanced, ready-to-browse defaults based on the models you
-                just selected:
-              </p>
-              <ul class="choice-feature-list" id="auto-setup-preview-list">
-                <li>
-                  <span>🔥</span>
-                  <span>
-                    Creates <strong>one Category per top modality model</strong> you downloaded (e.g.,
-                    <strong>FvF Heimdall V2</strong> for Image detection).
-                  </span>
-                </li>
-                <li>
-                  <span>🎯</span>
-                  <span>
-                    Sets the <strong>Detection Sensitivity / Threshold to 75%</strong> with Hover-to-Reveal Blur,
-                    Glowing Border, and Badge enabled.
-                  </span>
-                </li>
-                <li>
-                  <span>🕷️</span>
-                  <span>
-                    If you downloaded <strong>ResNet 50 - Spider</strong>, automatically creates a dedicated
-                    <strong>Spider</strong> category at <strong>75% sensitivity</strong> as well!
-                  </span>
-                </li>
-              </ul>
-            </div>
+        <div class="glass-card-3d setup-guide-card" data-tilt style="max-width: 820px; padding: 32px 36px;">
+          <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 22px;">
+            How to set up your first classifier:
+          </h2>
 
-            <button type="button" class="btn-fire" id="btn-setup-for-me" style="width: 100%;">
-              <span>⚡ Set up for me &amp; Finish</span>
+          <ul class="setup-steps-list">
+            <li>
+              <strong>Pin Fire vs Fire to your browser bar:</strong> Click your browser's puzzle piece icon (🧩) and pin the flame icon so it is always visible.
+            </li>
+            <li>
+              <strong>Open the Options menu:</strong> Click the flame icon in your toolbar, then click the gear icon (⚙️) to open your Settings dashboard.
+            </li>
+            <li>
+              <strong>Create or edit a Category:</strong> Categories group your classifiers by rules (e.g. AI Images, Spiders, or custom concepts).
+            </li>
+            <li>
+              <strong>Assign your downloaded classifiers:</strong> Check the box next to your downloaded classifiers (e.g., FvF Heimdall V2) to enable them inside that category.
+            </li>
+            <li>
+              <strong>Set your sensitivity threshold:</strong> Adjust the threshold slider (recommended: 75%). Any image or text scoring above this threshold will trigger your chosen alert style.
+            </li>
+            <li>
+              <strong>Choose your display style:</strong> Select between Hover-to-Reveal Blur, an outline Border, and an Info Badge.
+            </li>
+            <li>
+              <strong>Toolbar flame indicators:</strong> A green flame logo with a counter means active scanning is underway; a red flame means the GPU/CPU is idle standing by.
+            </li>
+          </ul>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 32px; gap: 16px; flex-wrap: wrap;">
+            <button type="button" class="btn-ember-outline" id="back-to-step2-btn">
+              ← Back
             </button>
-          </div>
-
-          <!-- Option B: Take a quick tutorial - 5 min -->
-          <div class="glass-card-3d choice-card" data-tilt>
-            <div>
-              <span class="choice-card-badge">🎓 Interactive Guided Walkthrough</span>
-              <h3>Take a quick tutorial — 5 min</h3>
-              <p style="color: var(--text-secondary); margin-bottom: 22px;">
-                Learn how Fire vs Fire works under the hood and customize your Categories hands-on before finishing:
-              </p>
-              <ul class="choice-feature-list">
-                <li>
-                  <span>📌</span>
-                  <span>
-                    <strong>Pin to Browser Bar:</strong> See how to open the Options popup in your specific browser and
-                    pin the flame icon.
-                  </span>
-                </li>
-                <li>
-                  <span>🧠</span>
-                  <span>
-                    <strong>Categories vs. Classifiers:</strong> Understand how multiple classifiers combine and weight
-                    together inside a Category.
-                  </span>
-                </li>
-                <li>
-                  <span>🎛️</span>
-                  <span>
-                    <strong>Live Interactive Sandbox:</strong> Tweak sensitivity sliders, blur modes, and border colors
-                    live on test images.
-                  </span>
-                </li>
-                <li>
-                  <span>🟢</span>
-                  <span>
-                    <strong>Red vs. Green Flame Logos:</strong> Learn what the different coloured toolbar logos and
-                    badge counters mean.
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-            <button type="button" class="btn-ember-outline" id="btn-start-tutorial" style="width: 100%;">
-              <span>🎓 Take a quick tutorial — 5 min →</span>
+            <button type="button" class="btn-fire" id="finish-setup-btn">
+              <span>Finish Setup →</span>
             </button>
           </div>
         </div>
       </section>
 
       <!-- ==================================================================
-           SCREEN 4: INTERACTIVE 5-MINUTE TUTORIAL
+           SCREEN 4: FINAL READY PAGE + OPTIONAL KO-FI SUPPORT
            ================================================================== -->
       <section class="wizard-screen" id="screen-4" data-screen="4">
-        <div class="screen-header">
-          <div class="eyebrow-pill">Interactive Tutorial • 4 Quick Modules</div>
-          <h1 class="display-title">Master Fire vs Fire in 5 Minutes</h1>
-          <p class="lead-subtitle">
-            Click through each interactive module below. When you finish Module 4, you’ll land right on the Ready
-            screen with your settings saved!
-          </p>
-        </div>
-
-        <!-- 4 Module Tabs -->
-        <div class="tutorial-progress-tabs">
-          <button type="button" class="tut-tab-btn active" data-tut-step="1">
-            <small>Module 1 / 4</small>
-            <span>📌 Pin to Browser Bar</span>
-          </button>
-          <button type="button" class="tut-tab-btn" data-tut-step="2">
-            <small>Module 2 / 4</small>
-            <span>🧩 Categories vs. Classifiers</span>
-          </button>
-          <button type="button" class="tut-tab-btn" data-tut-step="3">
-            <small>Module 3 / 4</small>
-            <span>🎛️ Live Settings Sandbox</span>
-          </button>
-          <button type="button" class="tut-tab-btn" data-tut-step="4">
-            <small>Module 4 / 4</small>
-            <span>🔥 Logo Colours Explained</span>
-          </button>
-        </div>
-
-        <!-- MODULE 1: PIN TO BROWSER BAR -->
-        <div class="glass-card-3d tutorial-module active" id="tut-module-1">
-          <h2 style="font-size: 1.6rem; font-weight: 800; margin-bottom: 10px;">
-            1. Access the Popup &amp; Pin Fire vs Fire to Your Toolbar
-          </h2>
-          <p style="color: var(--text-secondary); margin-bottom: 20px;">
-            Browsers hide newly installed extensions inside an Extensions menu by default. Pinning
-            <strong>Fire vs Fire</strong> keeps the flame icon visible so you can see live classification activity and
-            adjust sensitivity with one click.
-          </p>
-
-          <div class="browser-selector-strip" id="browser-selector-strip">
-            <button type="button" class="browser-chip active" data-browser="firefox">🦊 Firefox</button>
-            <button type="button" class="browser-chip" data-browser="chrome">🌐 Chrome / Brave</button>
-            <button type="button" class="browser-chip" data-browser="edge">🌊 Microsoft Edge</button>
-            <button type="button" class="browser-chip" data-browser="opera">🔴 Opera</button>
-          </div>
-
-          <div class="browser-mockup-window">
-            <div class="browser-toolbar-bar">
-              <div style="display: flex; gap: 7px;">
-                <span style="width: 11px; height: 11px; border-radius: 50%; background: #ef4444;"></span>
-                <span style="width: 11px; height: 11px; border-radius: 50%; background: #f59e0b;"></span>
-                <span style="width: 11px; height: 11px; border-radius: 50%; background: #10b981;"></span>
-              </div>
-              <div class="browser-url-omnibox">https://example.com/feed</div>
-              <div class="browser-actions-cluster">
-                <div
-                  class="toolbar-icon-btn"
-                  id="sim-pinned-fvf-icon"
-                  style="display: none; border-color: var(--flame-core); background: rgba(255, 98, 24, 0.2);"
-                  title="Fire vs Fire Pinned!"
-                >
-                  <img src="./assets/icon-red.svg" alt="Pinned FvF" style="width: 22px; height: 22px;" />
-                </div>
-                <button
-                  type="button"
-                  class="toolbar-icon-btn pulse-attention"
-                  id="sim-puzzle-btn"
-                  title="Click the Extensions Puzzle Icon"
-                >
-                  🧩
-                </button>
-              </div>
-            </div>
-
-            <div class="extensions-dropdown-sim">
-              <div style="display: flex; align-items: center; gap: 14px;">
-                <img src="./assets/icon-red.svg" alt="FvF" style="width: 34px; height: 34px;" />
-                <div>
-                  <strong style="font-size: 0.96rem; display: block;">Fire Vs Fire</strong>
-                  <span style="font-size: 0.82rem; color: var(--text-secondary);" id="browser-pin-instruction">
-                    In <strong>Firefox</strong>: Click the Puzzle Piece icon in the top-right toolbar, click the Gear
-                    (⚙️) next to Fire Vs Fire, and check <strong>"Pin to Toolbar"</strong>.
-                  </span>
-                </div>
-              </div>
-              <button type="button" class="btn-fire" id="sim-pin-action-btn" style="padding: 10px 20px; font-size: 0.86rem;">
-                📌 Try Pinning It Here
-              </button>
-            </div>
-          </div>
-
-          <div style="display: flex; justify-content: flex-end; margin-top: 24px;">
-            <button type="button" class="btn-fire" data-next-tut="2">
-              Next: Categories vs. Classifiers →
-            </button>
-          </div>
-        </div>
-
-        <!-- MODULE 2: CATEGORIES VS CLASSIFIERS -->
-        <div class="glass-card-3d tutorial-module" id="tut-module-2">
-          <h2 style="font-size: 1.6rem; font-weight: 800; margin-bottom: 10px;">
-            2. What is a Classifier vs. a Category?
-          </h2>
-          <p style="color: var(--text-secondary); margin-bottom: 24px;">
-            Fire vs Fire separates the <strong>AI brain (Classifier)</strong> from your
-            <strong>visual rules (Category)</strong> so you have total creative control over what gets filtered and how
-            it looks.
-          </p>
-
-          <div class="native-grid" style="margin-bottom: 24px;">
-            <div class="why-box" style="padding: 24px;">
-              <div class="eyebrow-pill" style="margin-bottom: 10px;">🧠 The Classifier (The Brain)</div>
-              <h3 style="font-size: 1.25rem; margin-bottom: 8px;">Outputs a 0% – 100% Score</h3>
-              <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 14px;">
-                A <strong>Classifier</strong> is a neural network file in your Native Host—such as
-                <strong>FvF Heimdall V2</strong> (which detects AI images) or <strong>ResNet 50 - Spider</strong>
-                (which detects spiders). It inspects each item on the page and returns a raw probability score.
-              </p>
-              <div style="padding: 12px; border-radius: 10px; background: rgba(0,0,0,0.45); font-size: 0.82rem; color: #ffc59e;">
-                Example: <code>FvF Heimdall V2</code> scans an image → returns <code>0.998 (99.8% AI)</code>
-              </div>
-            </div>
-
-            <div class="why-box" style="padding: 24px;">
-              <div class="eyebrow-pill" style="margin-bottom: 10px;">🎨 The Category (Your Rule &amp; Style)</div>
-              <h3 style="font-size: 1.25rem; margin-bottom: 8px;">Decides When &amp; How to React</h3>
-              <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 14px;">
-                A <strong>Category</strong> groups one or more Classifiers together under a single sensitivity threshold
-                (e.g. <strong>75%</strong>) and applies your chosen visual effect: <strong>Blur</strong>,
-                <strong>Colored Border</strong>, and <strong>Corner Badge</strong> (on Hover, Always, or Off).
-              </p>
-              <div style="padding: 12px; border-radius: 10px; background: rgba(0,0,0,0.45); font-size: 0.82rem; color: #ffc59e;">
-                Pro Tip: Enable <strong>2+ Classifiers</strong> in one Category to unlock linked
-                <strong>Ensemble Weight Sliders</strong>!
-              </div>
-            </div>
-          </div>
-
-          <div style="display: flex; justify-content: space-between; margin-top: 24px;">
-            <button type="button" class="btn-ember-outline" data-prev-tut="1">← Previous</button>
-            <button type="button" class="btn-fire" data-next-tut="3">
-              Next: Try the Live Settings Sandbox →
-            </button>
-          </div>
-        </div>
-
-        <!-- MODULE 3: LIVE INTERACTIVE CATEGORY SANDBOX -->
-        <div class="glass-card-3d tutorial-module" id="tut-module-3">
-          <h2 style="font-size: 1.6rem; font-weight: 800; margin-bottom: 8px;">
-            3. Hands-On Sandbox: Customize Categories &amp; Hover Over Results
-          </h2>
-          <p style="color: var(--text-secondary); margin-bottom: 22px;">
-            Try adjusting the <strong>Detection Threshold</strong> (default <strong>75%</strong>), changing the
-            <strong>Blur Mode</strong>, or adding a new Category—then <strong>hover your mouse over the images on the
-            right</strong> to see how Fire vs Fire reveals blurred content on hover!
-          </p>
-
-          <div class="sandbox-split">
-            <!-- Left: Mini Options Popup Replica -->
-            <div class="sandbox-controls-panel">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <strong style="font-size: 0.92rem; text-transform: uppercase; letter-spacing: 0.06em; color: #ffb38a;">
-                  Categories Strip
-                </strong>
-                <button
-                  type="button"
-                  class="btn-ember-outline"
-                  id="sandbox-add-cat-btn"
-                  style="padding: 5px 12px; font-size: 0.76rem;"
-                >
-                  + New Category
-                </button>
-              </div>
-
-              <div class="sandbox-cat-strip" id="sandbox-cat-strip">
-                <!-- Populated by app.js -->
-              </div>
-
-              <div>
-                <div style="display: flex; justify-content: space-between; font-size: 0.86rem; margin-bottom: 6px;">
-                  <span>Detection Threshold (Sensitivity)</span>
-                  <strong id="sandbox-threshold-label" style="color: var(--flame-gold);">75%</strong>
-                </div>
-                <input
-                  type="range"
-                  class="ember-slider"
-                  id="sandbox-threshold-slider"
-                  min="0.05"
-                  max="0.99"
-                  step="0.01"
-                  value="0.75"
-                />
-                <div style="font-size: 0.74rem; color: var(--text-muted); margin-top: 4px;">
-                  Images scoring above this threshold are flagged by this Category.
-                </div>
-              </div>
-
-              <div>
-                <div style="display: flex; justify-content: space-between; font-size: 0.86rem; margin-bottom: 6px;">
-                  <span>Blur Mode</span>
-                  <strong id="sandbox-blurmode-label" style="color: #ffc59e;">Unblur on Hover</strong>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                  <button type="button" class="browser-chip active" data-blurmode="hover" style="flex: 1; padding: 6px;">
-                    🖱️ Hover
-                  </button>
-                  <button type="button" class="browser-chip" data-blurmode="always" style="flex: 1; padding: 6px;">
-                    📌 Always
-                  </button>
-                  <button type="button" class="browser-chip" data-blurmode="off" style="flex: 1; padding: 6px;">
-                    🚫 Off
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <div style="display: flex; justify-content: space-between; font-size: 0.86rem; margin-bottom: 6px;">
-                  <span>Blur Strength</span>
-                  <strong id="sandbox-blurpx-label">8 px</strong>
-                </div>
-                <input
-                  type="range"
-                  class="ember-slider"
-                  id="sandbox-blurpx-slider"
-                  min="0"
-                  max="20"
-                  step="1"
-                  value="8"
-                />
-              </div>
-
-              <div>
-                <div style="display: flex; justify-content: space-between; font-size: 0.86rem; margin-bottom: 6px;">
-                  <span>Border &amp; Badge Accent Color</span>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                  <button
-                    type="button"
-                    class="sandbox-color-swatch"
-                    data-color="#FF4D1C"
-                    style="width: 28px; height: 28px; border-radius: 50%; background: #FF4D1C; border: 2px solid #fff; cursor: pointer;"
-                  ></button>
-                  <button
-                    type="button"
-                    class="sandbox-color-swatch"
-                    data-color="#FF0064"
-                    style="width: 28px; height: 28px; border-radius: 50%; background: #FF0064; border: 2px solid transparent; cursor: pointer;"
-                  ></button>
-                  <button
-                    type="button"
-                    class="sandbox-color-swatch"
-                    data-color="#FFB020"
-                    style="width: 28px; height: 28px; border-radius: 50%; background: #FFB020; border: 2px solid transparent; cursor: pointer;"
-                  ></button>
-                  <button
-                    type="button"
-                    class="sandbox-color-swatch"
-                    data-color="#38BDF8"
-                    style="width: 28px; height: 28px; border-radius: 50%; background: #38BDF8; border: 2px solid transparent; cursor: pointer;"
-                  ></button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Right: Live Interactive Test Images -->
-            <div>
-              <div class="sandbox-preview-cards">
-                <!-- Test Card 1: AI Balenciaga Pope (99.8% AI) -->
-                <div class="sandbox-media-card" id="sandbox-card-ai" data-score="0.998" data-type="ai">
-                  <div class="sandbox-img-stage">
-                    <img src="./assets/ai-balenciaga-pope.jpg" alt="AI Balenciaga Pope Test Image" />
-                    <span class="sandbox-badge-pill" id="sandbox-badge-ai">AI generated • 100%</span>
-                  </div>
-                  <div style="padding: 12px 14px;">
-                    <strong style="font-size: 0.9rem; display: block;">AI Image (Balenciaga Pope)</strong>
-                    <span style="font-size: 0.78rem; color: var(--text-secondary);">
-                      Heimdall V2 Score: <strong>99.8% AI</strong> — Hover image to test!
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Test Card 2: Real Polar Bear (0.6% AI) -->
-                <div class="sandbox-media-card" id="sandbox-card-real" data-score="0.006" data-type="ai">
-                  <div class="sandbox-img-stage">
-                    <img src="./assets/real-polar-bear.jpg" alt="Real Polar Bear Photograph" />
-                    <span class="sandbox-badge-pill" id="sandbox-badge-real" style="display: none;">Real • 0.6%</span>
-                  </div>
-                  <div style="padding: 12px 14px;">
-                    <strong style="font-size: 0.9rem; display: block;">Real Photo (Polar Bear)</strong>
-                    <span style="font-size: 0.78rem; color: var(--text-secondary);">
-                      Heimdall V2 Score: <strong>0.6% AI (99.4% Real)</strong> — Untouched!
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div style="display: flex; justify-content: space-between; margin-top: 26px;">
-            <button type="button" class="btn-ember-outline" data-prev-tut="2">← Previous</button>
-            <button type="button" class="btn-fire" data-next-tut="4">
-              Next: What the Coloured Logos Mean →
-            </button>
-          </div>
-        </div>
-
-        <!-- MODULE 4: WHAT THE DIFFERENT COLOURED LOGOS MEAN -->
-        <div class="glass-card-3d tutorial-module" id="tut-module-4">
-          <h2 style="font-size: 1.6rem; font-weight: 800; margin-bottom: 10px;">
-            4. What the Different Coloured Logos Mean
-          </h2>
-          <p style="color: var(--text-secondary); margin-bottom: 24px;">
-            The Fire vs Fire icon in your browser toolbar changes colour in real time so you always know when your GPU
-            is actively classifying content vs. standing by.
-          </p>
-
-          <div class="logo-states-grid">
-            <!-- Red Flame Logo State -->
-            <div class="logo-state-card">
-              <div class="logo-state-orb idle-red">
-                <img src="./assets/icon-red.svg" alt="Red Fire vs Fire Logo (Idle)" />
-              </div>
-              <div>
-                <div class="eyebrow-pill" style="margin-bottom: 6px;">🔴 Red Flame Logo</div>
-                <h3 style="font-size: 1.22rem; font-weight: 800; margin-bottom: 6px;">
-                  Idle / Standing By
-                </h3>
-                <p style="font-size: 0.88rem; color: var(--text-secondary);">
-                  All visible images and text on the current page have been classified (or returned instantly from
-                  cache). Your GPU/CPU is completely idle and using zero compute.
-                </p>
-              </div>
-            </div>
-
-            <!-- Green Flame Logo State -->
-            <div class="logo-state-card">
-              <div class="logo-state-orb active-green">
-                <img src="./assets/icon-green.svg" alt="Green Fire vs Fire Logo (Active)" />
-                <span class="badge-counter-demo" id="demo-green-badge-count">3</span>
-              </div>
-              <div>
-                <div
-                  class="eyebrow-pill"
-                  style="margin-bottom: 6px; background: rgba(24, 163, 74, 0.2); border-color: rgba(52, 211, 153, 0.5); color: #a7f3d0;"
-                >
-                  🟢 Green Flame Logo + Counter
-                </div>
-                <h3 style="font-size: 1.22rem; font-weight: 800; margin-bottom: 6px;">
-                  Actively Classifying Content
-                </h3>
-                <p style="font-size: 0.88rem; color: var(--text-secondary);">
-                  The Native Host is actively processing new batches of images or text as you scroll. The green badge
-                  number shows how many classification jobs are currently running, and results stream onto the page
-                  progressively!
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 28px; flex-wrap: wrap; gap: 12px;">
-            <button type="button" class="btn-ember-outline" data-prev-tut="3">← Previous</button>
-            <button type="button" class="btn-fire" id="btn-finish-tutorial">
-              <span>✅ Save My Settings &amp; Finish Tutorial →</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ==================================================================
-           SCREEN 5: CONVERGED FINAL READY PAGE + OPTIONAL KO-FI SUPPORT
-           ================================================================== -->
-      <section class="wizard-screen" id="screen-5" data-screen="5">
         <div class="glass-card-3d ready-hero-card" data-tilt>
           <div class="ready-check-orb">🔥</div>
-          <div class="eyebrow-pill">Setup Complete • All Systems Active</div>
           <h1 class="display-title" style="margin-bottom: 14px;">
             Fire vs Fire is now ready to go, you can close this page
           </h1>
           <p class="lead-subtitle" style="max-width: 700px; margin: 0 auto 28px;" id="final-ready-summary">
-            Your categories have been configured at <strong>75% sensitivity</strong> and synced to your browser
-            extension. Open any website to see Fire vs Fire classify content automatically on your hardware!
+            Your extension is ready to scan. Open any website to see Fire vs Fire classify content locally on your hardware.
           </p>
 
           <div style="display: flex; justify-content: center; gap: 14px; flex-wrap: wrap;">
             <button type="button" class="btn-fire" id="btn-close-tab">
-              <span>✓ Close This Page &amp; Start Browsing</span>
+              <span>✓ Close This Page</span>
             </button>
             <button type="button" class="btn-ember-outline" id="btn-review-models">
-              <span>🧩 Review 4 Modality Quadrants</span>
-            </button>
-            <button type="button" class="btn-ember-outline" id="btn-replay-tutorial">
-              <span>🎓 Replay 5-Min Tutorial</span>
+              <span>Review Models</span>
             </button>
           </div>
         </div>
@@ -743,8 +331,6 @@ class MyCustomClassifier(BaseClassifier):
           </div>
         </div>
       </section>
-
-      
     </div>
 
     <script src="./app.js"></script>

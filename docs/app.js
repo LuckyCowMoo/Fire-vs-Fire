@@ -14,7 +14,7 @@ const FALLBACK_CATALOG = {
   repository: 'LuckyCowMoo/Fire-vs-Fire',
   branch: 'main',
   author: 'LuckyCowMoo',
-  updated_at: '2026-11-08T18:00:00Z',
+  updated_at: '2026-11-08T21:00:00Z',
   models: [
     {
       id: 'fvf_heimdall02',
@@ -28,10 +28,10 @@ const FALLBACK_CATALOG = {
       label: 'AI generated',
       default_threshold: 0.75,
       default_color: '#FF4D1C',
-      size_mb: 463.4,
-      architecture: '5-Crop 20-Channel SRNet + ConvNeXt-Small Fusion',
-      tagline: 'Flagship AI Image Detector • 20 Forensic Channels × 5 Spatial Crops',
-      description: 'Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels (FFT spectra, DCT residuals, SRM filters, chromatic aberration, and noise variance) across 5 spatial crops (center, corners, and edges) fused with a ConvNeXt-Small semantic backbone.'
+      download_size: '463 MB',
+      ram_size: '1.2 GB VRAM / RAM',
+      tagline: 'Flagship AI Image Detector',
+      description: 'Our flagship first-party AI image classifier.'
     },
     {
       id: 'res_net50_spider',
@@ -41,15 +41,15 @@ const FALLBACK_CATALOG = {
       status: 'available',
       recommended: false,
       is_ai_detector: false,
-      special_badge: 'Detects Spiders • NOT AI',
+      special_badge: 'Object classifier',
       category_name: 'ResNet50 Spider',
       label: 'Spider',
       default_threshold: 0.75,
       default_color: '#FFB020',
-      size_mb: 90.0,
-      architecture: 'ResNet-50 Binary Vision Classifier',
-      tagline: 'Arachnophobia Shield • Detects Spiders, NOT AI Images',
-      description: 'Demonstrates that Fire vs Fire can classify any visual concept—not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.'
+      download_size: '90 MB',
+      ram_size: '450 MB VRAM / RAM',
+      tagline: 'Detects spiders',
+      description: 'Detects real and illustrated spiders on web pages.'
     },
     {
       id: 'fvf_mimir_02',
@@ -64,10 +64,10 @@ const FALLBACK_CATALOG = {
       label: 'AI text',
       default_threshold: 0.75,
       default_color: '#FF6218',
-      size_mb: 280.0,
-      architecture: 'Bi-Directional Token Burstiness & Syntactic Transformer',
-      tagline: 'Next in Queue • Local AI Text & Article Classifier',
-      description: 'Local neural language model trained to flag LLM-generated prose, essays, fake reviews, and synthetic comments using token burstiness variance and perplexity signatures.'
+      download_size: '280 MB',
+      ram_size: '800 MB RAM',
+      tagline: 'Local AI Text Classifier',
+      description: 'Local neural language model trained to flag LLM-generated prose.'
     },
     {
       id: 'fvf_huginn_01',
@@ -82,10 +82,10 @@ const FALLBACK_CATALOG = {
       label: 'AI video',
       default_threshold: 0.75,
       default_color: '#FF4D1C',
-      size_mb: 520.0,
-      architecture: 'Temporal Flow & Frame Inter-Consistency Network',
-      tagline: 'Coming Soon • Local AI Video & Deepfake Detector',
-      description: 'Analyzes video streams for temporal flicker, optical flow morphing discontinuities, and frame-to-frame diffusion latent shifts.'
+      download_size: '520 MB',
+      ram_size: '1.5 GB VRAM / RAM',
+      tagline: 'Local AI Video Classifier',
+      description: 'Analyzes video streams for temporal flicker and deepfakes.'
     },
     {
       id: 'fvf_bragi_01',
@@ -100,10 +100,10 @@ const FALLBACK_CATALOG = {
       label: 'AI audio',
       default_threshold: 0.75,
       default_color: '#FF4D1C',
-      size_mb: 210.0,
-      architecture: 'Phase Vocoder & Spectral Inharmonicity Discriminator',
-      tagline: 'Coming Soon • Voice Clone & Synthetic Audio Detector',
-      description: 'Detects synthetic speech, voice cloning, and AI audio by scanning for phase incoherence and spectral repetition in HTML5 web audio.'
+      download_size: '210 MB',
+      ram_size: '600 MB RAM',
+      tagline: 'Voice Clone & Synthetic Audio Detector',
+      description: 'Detects synthetic speech, voice cloning, and AI audio.'
     }
   ]
 };
@@ -113,29 +113,11 @@ const FALLBACK_CATALOG = {
 // ============================================================================
 
 let currentScreen = 1;
-let currentTutorialStep = 1;
 let extensionConnected = false;
 let nativeHostConnected = false;
 let officialCatalog = FALLBACK_CATALOG;
 let installedModels = new Set();
 let selectedModels = new Set(['fvf_heimdall02']); // Recommended default selected
-
-// Sandbox state for Module 3 of the Tutorial
-let sandboxCategories = [
-  {
-    id: 'auto_image_fvf_heimdall02',
-    name: 'FvF Heimdall V2',
-    modality: 'image',
-    enabled: true,
-    threshold: 0.75,
-    classifiers: ['fvf_heimdall02'],
-    weights: [1],
-    blurMode: 'hover',
-    blurAmount: 8,
-    borderColor: '#FF4D1C'
-  }
-];
-let activeSandboxCatIndex = 0;
 
 // ============================================================================
 // EXTENSION BRIDGE (Supports Direct Extension Context + GitHub Pages postMessage)
@@ -172,7 +154,6 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 }
 
 function sendBridgeMessage(action, payload = {}, timeoutMs = 10000) {
-  // 1. Direct extension page context (moz-extension:// or chrome-extension://)
   if (ext && ext.runtime && typeof ext.runtime.sendMessage === 'function') {
     return new Promise((resolve) => {
       try {
@@ -193,7 +174,6 @@ function sendBridgeMessage(action, payload = {}, timeoutMs = 10000) {
     });
   }
 
-  // 2. GitHub Pages / Web context via content.js window.postMessage bridge
   return new Promise((resolve) => {
     const requestId = 'bridge-' + Math.random().toString(36).slice(2) + '-' + Date.now();
     const timer = setTimeout(() => {
@@ -233,7 +213,6 @@ async function checkBridgeAndNativeStatus() {
 }
 
 async function loadOfficialModelsCatalog() {
-  // 1. Try via Extension -> Native Host first (gives live local installed status)
   if (extensionConnected) {
     try {
       const res = await sendBridgeMessage('GET_OFFICIAL_CATALOG', {}, 4000);
@@ -250,7 +229,6 @@ async function loadOfficialModelsCatalog() {
     } catch (_) {}
   }
 
-  // 2. Try fetching directly from GitHub Raw
   try {
     const resp = await fetch(RAW_GITHUB_CATALOG_URL, { cache: 'no-store' });
     if (resp && resp.ok) {
@@ -263,7 +241,6 @@ async function loadOfficialModelsCatalog() {
     }
   } catch (_) {}
 
-  // 3. Fallback to local ./official_models.json
   try {
     const resp = await fetch('./official_models.json');
     if (resp && resp.ok) {
@@ -275,33 +252,33 @@ async function loadOfficialModelsCatalog() {
 }
 
 // ============================================================================
-// SCREEN 2: RENDER 4 MODALITY QUADRANTS WITH DYNAMIC PLACEHOLDER LOGIC
+// SCREEN 2: RENDER 4 MODALITY QUADRANTS WITH ATTACHED ICONS & SQUARE CARDS
 // ============================================================================
 
 const QUADRANT_META = [
   {
     modality: 'image',
     title: 'Image Modality',
-    subtitle: 'Photographs, Art, Thumbnails & Social Media Feeds',
-    icon: '🖼️'
+    subtitle: 'Photographs, Art, Thumbnails & Feeds',
+    iconSrc: './assets/modality-image.png'
   },
   {
     modality: 'text',
     title: 'Text Modality',
     subtitle: 'Articles, Essays, Comments & Web Copy',
-    icon: '📝'
+    iconSrc: './assets/modality-text.png'
   },
   {
     modality: 'video',
     title: 'Video Modality',
-    subtitle: 'Short-Form Clips, Streams & Temporal Frames',
-    icon: '🎬'
+    subtitle: 'Clips, Streams & Temporal Frames',
+    iconSrc: './assets/modality-video.png'
   },
   {
     modality: 'audio',
     title: 'Audio Modality',
-    subtitle: 'Voice Clones, Podcasts & Synthetic Speech',
-    icon: '🎙️'
+    subtitle: 'Voice Clones, Podcasts & Speech',
+    iconSrc: './assets/modality-audio.png'
   }
 ];
 
@@ -316,8 +293,6 @@ function renderModalityQuadrants() {
     const allInModality = models.filter((m) => m.modality === quad.modality);
     const hasAvailableModel = allInModality.some((m) => m.status === 'available');
 
-    // Dynamic Catalog Rule:
-    // When at least one model is "available" for a modality, hide "coming_soon" / "coming_next"
     const visibleModels = hasAvailableModel
       ? allInModality.filter((m) => m.status === 'available')
       : allInModality;
@@ -325,20 +300,17 @@ function renderModalityQuadrants() {
     const quadrantEl = document.createElement('div');
     quadrantEl.className = 'glass-card-3d modality-quadrant';
 
-    const statusLabel = hasAvailableModel
-      ? `${visibleModels.length} Active Model${visibleModels.length > 1 ? 's' : ''}`
-      : 'Upcoming Release';
-
     quadrantEl.innerHTML = `
       <div class="quadrant-header">
         <div class="quadrant-title-group">
-          <div class="quadrant-icon">${quad.icon}</div>
+          <div class="quadrant-icon">
+            <img src="${quad.iconSrc}" alt="${quad.title}" class="quadrant-icon-img" />
+          </div>
           <div>
             <div class="quadrant-title">${quad.title}</div>
             <div class="quadrant-subtitle">${quad.subtitle}</div>
           </div>
         </div>
-        <span class="brand-tag">${statusLabel}</span>
       </div>
       <div class="quadrant-models-list"></div>
     `;
@@ -360,34 +332,38 @@ function renderModalityQuadrants() {
         stickersHtml += `<span class="sticker-recommended">★ Recommended AI Classifier</span>`;
       }
       if (model.is_ai_detector === false) {
-        stickersHtml += `<span class="sticker-spider-warning">🕷️ ${model.special_badge || 'Detects Spiders • NOT AI'}</span>`;
+        stickersHtml += `<span class="sticker-spider-warning">Object classifier</span>`;
       } else if (!isAvailable) {
         const badgeText = model.status === 'coming_next' ? 'Coming Next' : 'Coming Soon';
         stickersHtml += `<span class="sticker-upcoming">⏳ ${badgeText}</span>`;
       }
 
-      const checkboxStateHtml = isAvailable
-        ? `<div style="display: flex; align-items: center; gap: 8px;">
-             <input type="checkbox" class="model-select-checkbox" data-model-id="${model.id}" ${isSelected ? 'checked' : ''} style="width: 18px; height: 18px; accent-color: #ff6218; cursor: pointer;" />
-             <span style="font-size: 0.8rem; font-weight: 700; color: ${isInstalled ? '#34d399' : '#ffcaa6'};" id="tile-status-${model.id}">
-               ${isInstalled ? '✓ Installed Locally' : (isSelected ? 'Selected for Setup' : 'Click to Select')}
-             </span>
+      // Dedicated Selection / Status Line (ALWAYS on its own line)
+      const statusLineHtml = isAvailable
+        ? `<div class="model-selection-row">
+             <label class="model-checkbox-label">
+               <input type="checkbox" class="model-select-checkbox" data-model-id="${model.id}" ${isSelected ? 'checked' : ''} />
+               <span class="model-checkbox-text ${isInstalled ? 'status-installed' : (isSelected ? 'status-selected' : 'status-unselected')}">
+                 ${isInstalled ? '✓ Installed Locally' : (isSelected ? 'Selected for install' : 'Click to select')}
+               </span>
+             </label>
            </div>`
-        : `<span style="font-size: 0.78rem; color: var(--text-muted);">In active development by LuckyCowMoo</span>`;
+        : `<div class="model-selection-row">
+             <span class="model-checkbox-text status-upcoming">In active development</span>
+           </div>`;
 
       tile.innerHTML = `
-        <div class="model-top-row">
-          <div class="model-name-cluster">
+        <div>
+          <div class="model-top-row">
             <span class="model-name">${model.name}</span>
-            ${stickersHtml}
+            ${stickersHtml ? `<div class="model-stickers-wrap">${stickersHtml}</div>` : ''}
           </div>
-          ${checkboxStateHtml}
+          ${statusLineHtml}
+          <div class="model-tagline">${model.tagline || ''}</div>
         </div>
-        <div class="model-tagline">${model.tagline || ''}</div>
-        <p class="model-desc">${model.description || ''}</p>
         <div class="model-meta-footer">
-          <span class="model-arch-chip">${model.architecture || ''}</span>
-          <span class="model-arch-chip">${model.size_mb ? `~${model.size_mb} MB (.py + .pt)` : ''}</span>
+          <span class="model-arch-chip">Download: ${model.download_size || (model.size_mb ? model.size_mb + ' MB' : 'N/A')}</span>
+          <span class="model-arch-chip">RAM: ${model.ram_size || 'N/A'}</span>
         </div>
         <div class="model-progress-wrap" id="progress-wrap-${model.id}" hidden>
           <div class="model-progress-bar">
@@ -425,7 +401,6 @@ function toggleModelSelection(modelId) {
     selectedModels.add(modelId);
   }
   renderModalityQuadrants();
-  syncSandboxWithSelection();
 }
 
 function updateSelectedModelsSummary() {
@@ -435,7 +410,7 @@ function updateSelectedModelsSummary() {
   const models = (officialCatalog && Array.isArray(officialCatalog.models)) ? officialCatalog.models : [];
   const chosenNames = models
     .filter((m) => selectedModels.has(m.id))
-    .map((m) => (m.id === 'res_net50_spider' ? `${m.name} (Spider Filter)` : m.name));
+    .map((m) => m.name);
 
   summaryEl.textContent = chosenNames.length
     ? `Selected (${chosenNames.length}): ${chosenNames.join(' + ')}`
@@ -462,7 +437,7 @@ async function downloadSelectedModelsAndAdvance() {
 
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<span>⏳ Verifying &amp; Downloading Models…</span>';
+    btn.innerHTML = '<span>⏳ Downloading Models…</span>';
   }
 
   for (const modelId of ids) {
@@ -470,7 +445,7 @@ async function downloadSelectedModelsAndAdvance() {
     if (wrap) wrap.hidden = false;
 
     if (extensionConnected) {
-      if (statusEl) statusEl.textContent = `Requesting Native Host to install ${modelId} (.py + .pt)...`;
+      if (statusEl) statusEl.textContent = `Requesting Native Host to install ${modelId}...`;
       const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000).catch(() => ({ ok: false }));
       if (res && res.ok) {
         installedModels.add(modelId);
@@ -483,14 +458,14 @@ async function downloadSelectedModelsAndAdvance() {
         handleDownloadProgressEvent({
           modelId,
           percent: 100,
-          status: 'Queued for Category Setup'
+          status: 'Queued for install'
         });
       }
     } else {
       handleDownloadProgressEvent({
         modelId,
         percent: 100,
-        status: 'Selected for Category Setup'
+        status: 'Selected for install'
       });
     }
   }
@@ -500,56 +475,18 @@ async function downloadSelectedModelsAndAdvance() {
     btn.innerHTML = '<span>⬇ Download Selected &amp; Continue →</span>';
   }
 
-  syncSandboxWithSelection();
   goToScreen(3);
 }
 
 // ============================================================================
-// SCREEN 3 & 4: AUTO-SETUP ("SET UP FOR ME") & INTERACTIVE TUTORIAL SANDBOX
+// SCREEN 3: FINISH SETUP ACTION
 // ============================================================================
 
-function syncSandboxWithSelection() {
-  const newCats = [];
-  if (selectedModels.has('fvf_heimdall02') || selectedModels.size === 0) {
-    newCats.push({
-      id: 'auto_image_fvf_heimdall02',
-      name: 'FvF Heimdall V2',
-      modality: 'image',
-      enabled: true,
-      threshold: 0.75,
-      classifiers: ['fvf_heimdall02'],
-      weights: [1],
-      blurMode: 'hover',
-      blurAmount: 8,
-      borderColor: '#FF4D1C'
-    });
-  }
-  if (selectedModels.has('res_net50_spider')) {
-    newCats.push({
-      id: 'auto_image_res_net50_spider',
-      name: 'ResNet50 Spider',
-      modality: 'image',
-      enabled: true,
-      threshold: 0.75,
-      classifiers: ['res_net50_spider'],
-      weights: [1],
-      blurMode: 'hover',
-      blurAmount: 8,
-      borderColor: '#FFB020'
-    });
-  }
-  if (newCats.length) {
-    sandboxCategories = newCats;
-    activeSandboxCatIndex = 0;
-    renderSandboxUI();
-  }
-}
-
-async function runAutoSetupForMe() {
-  const btn = document.getElementById('btn-setup-for-me');
+async function runFinishSetup() {
+  const btn = document.getElementById('finish-setup-btn');
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<span>⚡ Configuring Categories at 75% Sensitivity…</span>';
+    btn.innerHTML = '<span>Configuring Categories…</span>';
   }
 
   const downloadedIds = Array.from(selectedModels);
@@ -558,137 +495,12 @@ async function runAutoSetupForMe() {
     threshold: 0.75
   }).catch(() => {});
 
-  const summaryEl = document.getElementById('final-ready-summary');
-  const hasSpider = selectedModels.has('res_net50_spider');
-  if (summaryEl) {
-    summaryEl.innerHTML = hasSpider
-      ? `We automatically created your <strong>FvF Heimdall V2 (AI Images)</strong> category and your <strong>ResNet50 Spider</strong> category, both set to <strong>75% sensitivity</strong> with Hover-to-Reveal Blur enabled!`
-      : `We automatically created your <strong>FvF Heimdall V2 (AI Images)</strong> category set to <strong>75% sensitivity</strong> with Hover-to-Reveal Blur, Border, and Badge enabled!`;
-  }
-
   if (btn) {
     btn.disabled = false;
-    btn.innerHTML = '<span>⚡ Set up for me &amp; Finish</span>';
+    btn.innerHTML = '<span>Finish Setup →</span>';
   }
 
-  goToScreen(5);
-}
-
-function renderSandboxUI() {
-  const strip = document.getElementById('sandbox-cat-strip');
-  if (!strip) return;
-  strip.innerHTML = '';
-
-  sandboxCategories.forEach((cat, idx) => {
-    const tab = document.createElement('button');
-    tab.type = 'button';
-    tab.className = `sandbox-cat-tab ${idx === activeSandboxCatIndex ? 'active' : ''}`;
-    tab.style.borderLeft = `4px solid ${cat.borderColor}`;
-    tab.textContent = cat.name;
-    tab.addEventListener('click', () => {
-      activeSandboxCatIndex = idx;
-      renderSandboxUI();
-    });
-    strip.appendChild(tab);
-  });
-
-  const current = sandboxCategories[activeSandboxCatIndex];
-  if (!current) return;
-
-  const threshSlider = document.getElementById('sandbox-threshold-slider');
-  const threshLabel = document.getElementById('sandbox-threshold-label');
-  if (threshSlider) threshSlider.value = String(current.threshold);
-  if (threshLabel) threshLabel.textContent = `${Math.round(current.threshold * 100)}%`;
-
-  const blurPxSlider = document.getElementById('sandbox-blurpx-slider');
-  const blurPxLabel = document.getElementById('sandbox-blurpx-label');
-  if (blurPxSlider) blurPxSlider.value = String(current.blurAmount);
-  if (blurPxLabel) blurPxLabel.textContent = `${current.blurAmount} px`;
-
-  document.querySelectorAll('[data-blurmode]').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.blurmode === current.blurMode);
-  });
-
-  applySandboxVisualsToTestCards();
-}
-
-function applySandboxVisualsToTestCards(hoveredCardId = null) {
-  const current = sandboxCategories[activeSandboxCatIndex];
-  if (!current) return;
-
-  const cards = [
-    { id: 'sandbox-card-ai', badgeId: 'sandbox-badge-ai', score: 0.998 },
-    { id: 'sandbox-card-real', badgeId: 'sandbox-badge-real', score: 0.006 }
-  ];
-
-  cards.forEach(({ id, badgeId, score }) => {
-    const cardEl = document.getElementById(id);
-    const badgeEl = document.getElementById(badgeId);
-    if (!cardEl) return;
-    const imgEl = cardEl.querySelector('img');
-    const stageEl = cardEl.querySelector('.sandbox-img-stage');
-    if (!imgEl || !stageEl) return;
-
-    const isFlagged = score >= current.threshold;
-    const isHovered = hoveredCardId === id;
-
-    if (!isFlagged) {
-      imgEl.style.filter = 'none';
-      stageEl.style.outline = 'none';
-      if (badgeEl) badgeEl.style.display = 'none';
-      return;
-    }
-
-    // Apply border & badge
-    stageEl.style.outline = `3px solid ${current.borderColor}`;
-    stageEl.style.outlineOffset = '-3px';
-    if (badgeEl) {
-      badgeEl.style.display = 'inline-block';
-      badgeEl.style.borderColor = current.borderColor;
-      badgeEl.textContent = `${current.name} • ${Math.round(score * 100)}%`;
-    }
-
-    // Apply Blur Mode (hover / always / off)
-    if (current.blurMode === 'off') {
-      imgEl.style.filter = 'none';
-    } else if (current.blurMode === 'always') {
-      imgEl.style.filter = `blur(${current.blurAmount}px)`;
-    } else {
-      // 'hover' mode: blurred at rest, unblurred when hovered!
-      imgEl.style.filter = isHovered ? 'none' : `blur(${current.blurAmount}px)`;
-    }
-  });
-}
-
-async function saveTutorialSettingsAndFinish() {
-  const formattedEnsembles = sandboxCategories.map((cat) => ({
-    id: cat.id,
-    name: cat.name,
-    modality: cat.modality || 'image',
-    enabled: true,
-    threshold: cat.threshold,
-    classifiers: cat.classifiers,
-    weights: cat.weights || [1],
-    styles: {
-      image: {
-        applyBlur: cat.blurMode !== 'off',
-        blurAmount: cat.blurAmount,
-        applyBorder: true,
-        borderMultiplier: 1.2,
-        borderColor: cat.borderColor,
-        applyBadge: true,
-        blurMode: cat.blurMode,
-        borderMode: 'hover',
-        badgeMode: 'hover'
-      }
-    }
-  }));
-
-  await sendBridgeMessage('SAVE_ONBOARDING_ENSEMBLES', {
-    ensembles: formattedEnsembles
-  }).catch(() => {});
-
-  goToScreen(5);
+  goToScreen(4);
 }
 
 // ============================================================================
@@ -707,69 +519,7 @@ function goToScreen(stepNumber) {
     renderModalityQuadrants();
   }
 
-  if (stepNumber === 3 || stepNumber === 4) {
-    renderSandboxUI();
-  }
-
   window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function goToTutorialModule(tutStep) {
-  currentTutorialStep = tutStep;
-  document.querySelectorAll('.tut-tab-btn').forEach((btn) => {
-    btn.classList.toggle('active', Number(btn.dataset.tutStep) === tutStep);
-  });
-  document.querySelectorAll('.tutorial-module').forEach((mod, idx) => {
-    mod.classList.toggle('active', idx + 1 === tutStep);
-  });
-}
-
-// ============================================================================
-// BROWSER AUTO-DETECTION FOR TUTORIAL MODULE 1
-// ============================================================================
-
-const BROWSER_PIN_GUIDES = {
-  firefox:
-    'In <strong>Firefox</strong>: Click the Puzzle Piece (🧩) icon in the top-right toolbar, click the Gear (⚙️) next to <strong>Fire Vs Fire</strong>, and select <strong>"Pin to Toolbar"</strong>.',
-  chrome:
-    'In <strong>Chrome / Brave</strong>: Click the Puzzle Piece (🧩) icon to the right of your address bar, then click the <strong>Pin (📌)</strong> icon next to <strong>Fire Vs Fire</strong>.',
-  edge:
-    'In <strong>Microsoft Edge</strong>: Click the Puzzle Piece (🧩) icon near the top-right corner, then click the <strong>Eye / Pin icon</strong> next to <strong>Fire Vs Fire</strong> to keep it visible.',
-  opera:
-    'In <strong>Opera</strong>: Click the Cube (Extensions) icon in the top-right bar, then click the <strong>Pin (📌)</strong> icon beside <strong>Fire Vs Fire</strong>.'
-};
-
-function initBrowserPinSimulator() {
-  const ua = navigator.userAgent.toLowerCase();
-  let detected = 'firefox';
-  if (ua.includes('edg/')) detected = 'edge';
-  else if (ua.includes('opr/') || ua.includes('opera')) detected = 'opera';
-  else if (ua.includes('chrome') && !ua.includes('firefox')) detected = 'chrome';
-
-  const setBrowserGuide = (browserKey) => {
-    document.querySelectorAll('[data-browser]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.browser === browserKey);
-    });
-    const instr = document.getElementById('browser-pin-instruction');
-    if (instr && BROWSER_PIN_GUIDES[browserKey]) {
-      instr.innerHTML = BROWSER_PIN_GUIDES[browserKey];
-    }
-  };
-
-  setBrowserGuide(detected);
-
-  document.querySelectorAll('[data-browser]').forEach((btn) => {
-    btn.addEventListener('click', () => setBrowserGuide(btn.dataset.browser));
-  });
-
-  const pinBtn = document.getElementById('sim-pin-action-btn');
-  const pinnedIcon = document.getElementById('sim-pinned-fvf-icon');
-  if (pinBtn && pinnedIcon) {
-    pinBtn.addEventListener('click', () => {
-      pinnedIcon.style.display = 'grid';
-      pinBtn.innerHTML = '✓ Pinned to Browser Bar!';
-    });
-  }
 }
 
 // ============================================================================
@@ -868,8 +618,6 @@ function initVolumetric3DEffects() {
 
 function init() {
   initVolumetric3DEffects();
-  initBrowserPinSimulator();
-  renderSandboxUI();
   renderModalityQuadrants();
 
   // Screen 1 buttons
@@ -894,100 +642,17 @@ function init() {
     downloadSelectedModelsAndAdvance();
   });
 
-  // Screen 3 buttons ("Set up for me" vs "Take a quick tutorial - 5 min")
-  document.getElementById('btn-setup-for-me')?.addEventListener('click', () => {
-    runAutoSetupForMe();
-  });
-  document.getElementById('btn-start-tutorial')?.addEventListener('click', () => {
-    goToScreen(4);
-    goToTutorialModule(1);
+  // Screen 3 buttons (Setting Up Your First Classifier)
+  document.getElementById('back-to-step2-btn')?.addEventListener('click', () => goToScreen(2));
+  document.getElementById('finish-setup-btn')?.addEventListener('click', () => {
+    runFinishSetup();
   });
 
-  // Screen 4 Tutorial navigation
-  document.querySelectorAll('.tut-tab-btn').forEach((btn) => {
-    btn.addEventListener('click', () => goToTutorialModule(Number(btn.dataset.tutStep)));
-  });
-  document.querySelectorAll('[data-next-tut]').forEach((btn) => {
-    btn.addEventListener('click', () => goToTutorialModule(Number(btn.dataset.nextTut)));
-  });
-  document.querySelectorAll('[data-prev-tut]').forEach((btn) => {
-    btn.addEventListener('click', () => goToTutorialModule(Number(btn.dataset.prevTut)));
-  });
-
-  // Sandbox controls in Module 3
-  document.getElementById('sandbox-threshold-slider')?.addEventListener('input', (e) => {
-    const val = parseFloat(e.target.value) || 0.75;
-    if (sandboxCategories[activeSandboxCatIndex]) {
-      sandboxCategories[activeSandboxCatIndex].threshold = val;
-      renderSandboxUI();
-    }
-  });
-
-  document.getElementById('sandbox-blurpx-slider')?.addEventListener('input', (e) => {
-    const val = parseInt(e.target.value, 10) || 0;
-    if (sandboxCategories[activeSandboxCatIndex]) {
-      sandboxCategories[activeSandboxCatIndex].blurAmount = val;
-      renderSandboxUI();
-    }
-  });
-
-  document.querySelectorAll('[data-blurmode]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (sandboxCategories[activeSandboxCatIndex]) {
-        sandboxCategories[activeSandboxCatIndex].blurMode = btn.dataset.blurmode;
-        renderSandboxUI();
-      }
-    });
-  });
-
-  document.querySelectorAll('.sandbox-color-swatch').forEach((swatch) => {
-    swatch.addEventListener('click', () => {
-      if (sandboxCategories[activeSandboxCatIndex]) {
-        sandboxCategories[activeSandboxCatIndex].borderColor = swatch.dataset.color;
-        renderSandboxUI();
-      }
-    });
-  });
-
-  document.getElementById('sandbox-add-cat-btn')?.addEventListener('click', () => {
-    const idx = sandboxCategories.length + 1;
-    sandboxCategories.push({
-      id: `custom_cat_${Date.now()}`,
-      name: `Custom Category ${idx}`,
-      modality: 'image',
-      enabled: true,
-      threshold: 0.75,
-      classifiers: ['fvf_heimdall02'],
-      weights: [1],
-      blurMode: 'hover',
-      blurAmount: 8,
-      borderColor: '#38BDF8'
-    });
-    activeSandboxCatIndex = sandboxCategories.length - 1;
-    renderSandboxUI();
-  });
-
-  // Hover interactions on Sandbox Test Cards
-  ['sandbox-card-ai', 'sandbox-card-real'].forEach((cardId) => {
-    const el = document.getElementById(cardId);
-    if (!el) return;
-    el.addEventListener('pointerenter', () => applySandboxVisualsToTestCards(cardId));
-    el.addEventListener('pointerleave', () => applySandboxVisualsToTestCards(null));
-  });
-
-  document.getElementById('btn-finish-tutorial')?.addEventListener('click', () => {
-    saveTutorialSettingsAndFinish();
-  });
-
-  // Screen 5 buttons
+  // Screen 4 buttons (Final Ready Page)
   document.getElementById('btn-close-tab')?.addEventListener('click', () => {
     window.close();
   });
   document.getElementById('btn-review-models')?.addEventListener('click', () => goToScreen(2));
-  document.getElementById('btn-replay-tutorial')?.addEventListener('click', () => {
-    goToScreen(4);
-    goToTutorialModule(1);
-  });
 
   // Background status verification (non-blocking)
   checkBridgeAndNativeStatus().catch(() => {});

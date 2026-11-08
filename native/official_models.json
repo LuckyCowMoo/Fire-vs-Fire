@@ -19,7 +19,7 @@
       "default_color": "#FF4D1C",
       "size_mb": 463.4,
       "architecture": "5-Crop 20-Channel SRNet + ConvNeXt-Small Fusion",
-      "tagline": "Flagship AI Image Detector • 20 Forensic Channels × 5 Spatial Crops",
+      "tagline": "Flagship AI Image Detector",
       "description": "Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels (FFT spectra, DCT residuals, SRM filters, chromatic aberration, and noise variance) across 5 spatial crops (center, corners, and edges) fused with a ConvNeXt-Small semantic backbone.",
       "files": [
         {
@@ -47,7 +47,9 @@
           "fallback_url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/classifiers/fvf_heimdall_02_best.pt",
           "required": true
         }
-      ]
+      ],
+      "download_size": "463 MB",
+      "ram_size": "1.2 GB VRAM / RAM"
     },
     {
       "id": "res_net50_spider",
@@ -57,15 +59,15 @@
       "status": "available",
       "recommended": false,
       "is_ai_detector": false,
-      "special_badge": "Detects Spiders • NOT AI",
+      "special_badge": "Object classifier",
       "category_name": "ResNet50 Spider",
       "label": "Spider",
       "default_threshold": 0.75,
       "default_color": "#FFB020",
       "size_mb": 90.0,
       "architecture": "ResNet-50 Binary Vision Classifier",
-      "tagline": "Arachnophobia Shield • Detects Spiders, NOT AI Images",
-      "description": "Demonstrates that Fire vs Fire can classify any visual concept—not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
+      "tagline": "Detects spiders",
+      "description": "Demonstrates that Fire vs Fire can classify any visual concept\u2014not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
       "files": [
         {
           "type": "classifier_py",
@@ -80,26 +82,30 @@
           "fallback_url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/classifiers/spider_detector_resnet50.pt",
           "required": true
         }
-      ]
+      ],
+      "download_size": "90 MB",
+      "ram_size": "450 MB VRAM / RAM"
     },
     {
       "id": "fvf_mimir_02",
-      "name": "Mímir V2",
+      "name": "M\u00edmir V2",
       "version": "2.0.0-preview",
       "modality": "text",
       "status": "coming_next",
       "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Next",
-      "category_name": "Mímir V2",
+      "category_name": "M\u00edmir V2",
       "label": "AI text",
       "default_threshold": 0.75,
       "default_color": "#FF6218",
       "size_mb": 280.0,
       "architecture": "Bi-Directional Token Burstiness & Syntactic Transformer",
-      "tagline": "Next in Queue • Local AI Text & Article Classifier",
+      "tagline": "Local AI Text Classifier",
       "description": "Evaluates token entropy, perplexity curvature, and structural repetition to flag synthetic articles, comments, and LLM-generated essays completely offline.",
-      "files": []
+      "files": [],
+      "download_size": "280 MB",
+      "ram_size": "800 MB RAM"
     },
     {
       "id": "fvf_huginn_01",
@@ -116,9 +122,11 @@
       "default_color": "#F34142",
       "size_mb": 520.0,
       "architecture": "3D Spatio-Temporal Optical Flow & Keyframe Forensic Net",
-      "tagline": "In Development • Real-Time Stream & Short-Form Video Scanner",
+      "tagline": "Local AI Video Classifier",
       "description": "Inspects inter-frame optical flow, temporal flickering, and keyframe diffusion residuals to detect AI-generated video clips and deepfakes.",
-      "files": []
+      "files": [],
+      "download_size": "520 MB",
+      "ram_size": "1.5 GB VRAM / RAM"
     },
     {
       "id": "fvf_bragi_01",
@@ -135,9 +143,11 @@
       "default_color": "#FFD438",
       "size_mb": 195.0,
       "architecture": "Mel-Spectrogram Phase & Neural Vocoder Residual Net",
-      "tagline": "In Development • Synthetic Voice & Audio Clone Detector",
+      "tagline": "Voice Clone & Synthetic Audio Detector",
       "description": "Detects phase discontinuities, high-frequency vocoder aliasing, and unnatural breath cadence in synthetic speech and AI music.",
-      "files": []
+      "files": [],
+      "download_size": "210 MB",
+      "ram_size": "600 MB RAM"
     }
   ]
 }

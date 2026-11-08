@@ -1,0 +1,2 @@
+native/classifiers/fvf_heimdall_02_best.pt filter=lfs diff=lfs merge=lfs -text
+native/classifiers/spider_detector_resnet50.pt filter=lfs diff=lfs merge=lfs -text

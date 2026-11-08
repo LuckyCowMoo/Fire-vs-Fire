@@ -15,6 +15,10 @@ ENV/
 *.safetensors
 *.tar.gz
 
+# Track official models via Git LFS
+!native/classifiers/fvf_heimdall_02_best.pt
+!native/classifiers/spider_detector_resnet50.pt
+
 # Python cache
 __pycache__/
 *.py[cod]

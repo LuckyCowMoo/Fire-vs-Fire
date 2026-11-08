@@ -208,12 +208,17 @@ class FvfHeimdall02Classifier(BaseClassifier):
         self._setup_device()
 
         try:
-            repo_root = Path(__file__).resolve().parents[2]
-            training_dir = str(repo_root / "training")
-            if training_dir not in sys.path:
-                sys.path.insert(0, training_dir)
-
-            from model_fvf_ares import FvfAresModel
+            try:
+                from ._heimdall_arch import FvfAresModel
+            except Exception:
+                try:
+                    from _heimdall_arch import FvfAresModel
+                except Exception:
+                    repo_root = Path(__file__).resolve().parents[2]
+                    training_dir = str(repo_root / "training")
+                    if training_dir not in sys.path:
+                        sys.path.insert(0, training_dir)
+                    from model_fvf_ares import FvfAresModel
 
             ckpt = self.torch.load(ckpt_path, map_location="cpu", weights_only=False)
             backbone_name = ckpt.get("backbone_name", "convnextv2_tiny") if isinstance(ckpt, dict) else "convnextv2_tiny"

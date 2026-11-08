@@ -1,7 +1,7 @@
 {
   "catalog_version": 2,
   "repository": "LuckyCowMoo/Fire-vs-Fire",
-  "branch": "main",
+  "branch": "FVF-clean",
   "author": "LuckyCowMoo",
   "updated_at": "2026-11-08T18:00:00Z",
   "models": [
@@ -17,38 +17,32 @@
       "label": "AI generated",
       "default_threshold": 0.75,
       "default_color": "#FF4D1C",
-      "size_mb": 463.4,
-      "architecture": "5-Crop 20-Channel SRNet + ConvNeXt-Small Fusion",
+      "size_mb": 192.3,
+      "architecture": "5-Crop 20-Channel SRNet + ConvNeXt-Base Fusion",
       "tagline": "local AI Image classifier",
-      "description": "Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels (FFT spectra, DCT residuals, SRM filters, chromatic aberration, and noise variance) across 5 spatial crops (center, corners, and edges) fused with a ConvNeXt-Small semantic backbone.",
+      "description": "Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels across 5 spatial crops fused with a ConvNeXt-Base semantic backbone.",
       "files": [
         {
           "type": "classifier_py",
           "relative_path": "native/classifiers/fvf_heimdall_02_classifier.py",
-          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/classifiers/fvf_heimdall_02_classifier.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_02_classifier.py",
           "required": true
         },
         {
           "type": "support_py",
-          "relative_path": "training/model_fvf_ares.py",
-          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/training/model_fvf_ares.py",
-          "required": true
-        },
-        {
-          "type": "support_py",
-          "relative_path": "training/forensic_channels.py",
-          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/training/forensic_channels.py",
+          "relative_path": "native/classifiers/_heimdall_arch.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/_heimdall_arch.py",
           "required": true
         },
         {
           "type": "weights_pt",
           "relative_path": "native/classifiers/fvf_heimdall_02_best.pt",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.pt",
-          "fallback_url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/classifiers/fvf_heimdall_02_best.pt",
+          "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_02_best.pt",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.pt",
           "required": true
         }
       ],
-      "download_size": "463 MB",
+      "download_size": "192 MB",
       "ram_size": "1.2 GB VRAM / RAM"
     },
     {
@@ -67,19 +61,19 @@
       "size_mb": 90.0,
       "architecture": "ResNet-50 Binary Vision Classifier",
       "tagline": "Detects spiders",
-      "description": "Demonstrates that Fire vs Fire can classify any visual concept\u2014not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
+      "description": "Demonstrates that Fire vs Fire can classify any visual concept—not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
       "files": [
         {
           "type": "classifier_py",
           "relative_path": "native/classifiers/Resnet50_spider.py",
-          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/classifiers/Resnet50_spider.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/Resnet50_spider.py",
           "required": true
         },
         {
           "type": "weights_pt",
           "relative_path": "native/classifiers/spider_detector_resnet50.pt",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.pt",
-          "fallback_url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/classifiers/spider_detector_resnet50.pt",
+          "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/spider_detector_resnet50.pt",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.pt",
           "required": true
         }
       ],
@@ -88,14 +82,14 @@
     },
     {
       "id": "fvf_mimir_02",
-      "name": "M\u00edmir V2",
+      "name": "Mímir V2",
       "version": "2.0.0-preview",
       "modality": "text",
       "status": "coming_next",
       "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Next",
-      "category_name": "M\u00edmir V2",
+      "category_name": "Mímir V2",
       "label": "AI text",
       "default_threshold": 0.75,
       "default_color": "#FF6218",

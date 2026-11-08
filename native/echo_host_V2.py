@@ -909,9 +909,10 @@ def list_models(request_id: Optional[str] = None):
 # Main Loop
 # ----------------------------------------------------------------------------
 
-OFFICIAL_CATALOG_URL = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json"
+OFFICIAL_CATALOG_URL = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json"
 ALLOWED_GITHUB_PREFIXES = (
     "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/",
+    "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/",
     "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/",
 )
 

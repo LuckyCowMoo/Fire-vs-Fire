@@ -3,33 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SocialFeed — Generic Social Media Test Environment</title>
-    <meta name="description" content="Generic social media feed for testing the Fire vs Fire browser extension and capturing extension store screenshots with all 3 images visible at once." />
+    <title>SocialFeed — Community Feed</title>
+    <meta name="description" content="SocialFeed community feed." />
     <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
     <link rel="stylesheet" href="./feed.css" />
   </head>
   <body>
-    <!-- Top Notice Banner for Extension Testing (Auto-hidden with ?clean=1 or by clicking Hide) -->
-    <header class="test-notice-bar" id="test-banner">
-      <div class="test-notice-content">
-        <span class="test-pill">🧪 Test Environment</span>
-        <span>
-          <strong>Fire vs Fire Detection Test:</strong> Top Row — Balenciaga Pope (AI), Polar Bear (Real), Turtle (Real). Bottom Row — Football Champions (Real), Sagrada Família (Real), Théâtre D’opéra (AI).
-        </span>
-      </div>
-      <div class="test-notice-actions">
-        <button type="button" class="btn-banner" id="theme-toggle-btn" title="Toggle Light / Dark mode">
-          <span id="theme-icon">☀️</span> <span id="theme-label">Light</span>
-        </button>
-        <button type="button" class="btn-banner btn-banner-primary" id="clean-mode-btn" title="Hide this banner to capture clean screenshots for browser store listings">
-          📷 Hide for Screenshots
-        </button>
-        <a href="./index.html" class="btn-banner" title="Return to Setup Wizard">
-          ← Setup Wizard
-        </a>
-      </div>
-    </header>
-
     <div class="app-container">
       <!-- ================================================================
            SLIM NAVIGATION RAIL (Allocates minimal space, max space to feed)
@@ -90,6 +69,9 @@
           </div>
 
           <div class="feed-controls-group">
+            <button type="button" class="btn-theme-toggle" id="theme-toggle-btn" title="Toggle Light / Dark mode" aria-label="Toggle Light / Dark mode">
+              <span id="theme-icon">☀️</span>
+            </button>
             <!-- View Mode Switcher -->
             <div class="view-switch" role="group" aria-label="Feed layout">
               <button type="button" class="btn-view-mode active" id="btn-grid-view" title="3-column grid layout (3x2): see all posts organized cleanly">
@@ -482,39 +464,17 @@
       </main>
     </div>
 
-    <!-- Interactive script: Clean screenshot toggle, view switch, theme toggle, likes -->
+    <!-- Interactive script: View switch, theme toggle, likes -->
     <script>
       (function() {
         'use strict';
 
         const params = new URLSearchParams(window.location.search);
-        const testBanner = document.getElementById('test-banner');
-        const cleanBtn = document.getElementById('clean-mode-btn');
         const themeBtn = document.getElementById('theme-toggle-btn');
         const themeIcon = document.getElementById('theme-icon');
-        const themeLabel = document.getElementById('theme-label');
         const postsContainer = document.getElementById('posts-container');
         const btnGridView = document.getElementById('btn-grid-view');
         const btnSingleView = document.getElementById('btn-single-view');
-
-        function setCleanMode(active) {
-          if (active) {
-            testBanner.classList.add('hidden');
-          } else {
-            testBanner.classList.remove('hidden');
-          }
-        }
-
-        // Automatically activate clean screenshot mode if ?clean=1 or ?clean=true
-        if (params.get('clean') === '1' || params.get('clean') === 'true') {
-          setCleanMode(true);
-        }
-
-        if (cleanBtn) {
-          cleanBtn.addEventListener('click', function() {
-            setCleanMode(true);
-          });
-        }
 
         // View Mode Switcher: 3 Cards Grid vs Single Column Timeline
         if (btnGridView && btnSingleView && postsContainer) {
@@ -547,10 +507,8 @@
             html.setAttribute('data-theme', next);
             if (next === 'light') {
               themeIcon.textContent = '🌙';
-              themeLabel.textContent = 'Dark';
             } else {
               themeIcon.textContent = '☀️';
-              themeLabel.textContent = 'Light';
             }
           });
         }

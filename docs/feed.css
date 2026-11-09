@@ -565,6 +565,18 @@ body {
   object-position: center 35%;
 }
 
+.img-football {
+  object-position: center 25%;
+}
+
+.img-sagrada {
+  object-position: center 38%;
+}
+
+.img-theatre {
+  object-position: center center;
+}
+
 /* Post Actions Footer */
 .post-actions {
   display: flex;

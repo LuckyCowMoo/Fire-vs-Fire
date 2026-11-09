@@ -14,7 +14,7 @@
       <div class="test-notice-content">
         <span class="test-pill">🧪 Test Environment</span>
         <span>
-          <strong>Fire vs Fire Detection Test:</strong> Post 1 (Balenciaga Pope) is synthetic AI; Posts 2 &amp; 3 (Polar Bear, Turtle) are authentic award-winning photographs. All 3 are displayed side-by-side on screen.
+          <strong>Fire vs Fire Detection Test:</strong> Top Row — Balenciaga Pope (AI), Polar Bear (Real), Turtle (Real). Bottom Row — Football Champions (Real), Sagrada Família (Real), Théâtre D’opéra (AI).
         </span>
       </div>
       <div class="test-notice-actions">
@@ -92,9 +92,9 @@
           <div class="feed-controls-group">
             <!-- View Mode Switcher -->
             <div class="view-switch" role="group" aria-label="Feed layout">
-              <button type="button" class="btn-view-mode active" id="btn-grid-view" title="3-column layout: see all 3 images simultaneously on screen">
+              <button type="button" class="btn-view-mode active" id="btn-grid-view" title="3-column grid layout (3x2): see all posts organized cleanly">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
-                <span>3 Cards</span>
+                <span>Grid (3×2)</span>
               </button>
               <button type="button" class="btn-view-mode" id="btn-single-view" title="Single column timeline layout">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -289,6 +289,192 @@
               <span class="action-btn views" title="Total Views">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
                 <span>510K</span>
+              </span>
+            </footer>
+          </article>
+
+          <!-- ==============================================================
+               POST 4: Famous Football Team Celebrating Their Win (Real Image)
+               Championship victory trophy celebration
+               ============================================================== -->
+          <article class="post-card" id="post-football">
+            <header class="post-header">
+              <div class="author-meta-wrapper">
+                <img src="./assets/avatar-sports.svg" alt="Pitchside Sports Avatar" class="post-avatar" />
+                <div class="author-details">
+                  <div class="author-name-row">
+                    <a href="#sports" class="author-name">Pitchside Football</a>
+                    <svg class="verified-icon" viewBox="0 0 24 24" fill="currentColor" aria-label="Verified creator">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path>
+                    </svg>
+                  </div>
+                  <div class="author-handle-row">
+                    <span>@pitchside_hq</span>
+                    <span class="dot-sep">·</span>
+                    <span>14h ago</span>
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="post-more-btn" aria-label="Post options">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
+              </button>
+            </header>
+
+            <p class="post-text">
+              Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline, and relentless determination boiling down to this iconic moment of glory. Absolute football history! ⚽🔥 <a href="#football" class="hashtag">#Football</a> <a href="#champions" class="hashtag">#Champions</a> <a href="#worldcup" class="hashtag">#Victory</a> <a href="#glory" class="hashtag">#Trophy</a>
+            </p>
+
+            <div class="post-media-container">
+              <img
+                src="./assets/football-team-celebration.jpg"
+                alt="Championship football team celebrating victory on the podium holding the golden trophy surrounded by golden confetti"
+                class="post-image img-football"
+                loading="eager"
+                width="1280"
+                height="823"
+              />
+            </div>
+
+            <footer class="post-actions">
+              <button type="button" class="action-btn reply" aria-label="Reply">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <span>3.4K</span>
+              </button>
+              <button type="button" class="action-btn share" aria-label="Share">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                <span>19.7K</span>
+              </button>
+              <button type="button" class="action-btn like" aria-label="Like" data-count="118400">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <span class="like-counter">118.4K</span>
+              </button>
+              <span class="action-btn views" title="Total Views">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                <span>1.4M</span>
+              </span>
+            </footer>
+          </article>
+
+          <!-- ==============================================================
+               POST 5: Basilica of the Sagrada Familia Being Finished (Real Image)
+               Antoni Gaudi's masterwork nearing completion in Barcelona
+               ============================================================== -->
+          <article class="post-card" id="post-sagrada">
+            <header class="post-header">
+              <div class="author-meta-wrapper">
+                <img src="./assets/avatar-architecture.svg" alt="Architecture Digest Avatar" class="post-avatar" />
+                <div class="author-details">
+                  <div class="author-name-row">
+                    <a href="#architecture" class="author-name">Architectural Heritage</a>
+                    <svg class="verified-icon" viewBox="0 0 24 24" fill="currentColor" aria-label="Verified creator">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path>
+                    </svg>
+                  </div>
+                  <div class="author-handle-row">
+                    <span>@arch_wonders</span>
+                    <span class="dot-sep">·</span>
+                    <span>18h ago</span>
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="post-more-btn" aria-label="Post options">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
+              </button>
+            </header>
+
+            <p class="post-text">
+              Over 140 years in the making! 🏗️✨ Breathtaking golden hour view of Antoni Gaudí’s masterwork, the Basílica de la Sagrada Família, with the central spires and the Tower of Jesus Christ nearing final completion across Barcelona's skyline. An extraordinary triumph of generational craftsmanship and architecture. 🏛️🇪🇸 <a href="#sagradafamilia" class="hashtag">#SagradaFamilia</a> <a href="#gaudi" class="hashtag">#Barcelona</a> <a href="#architecture" class="hashtag">#Masterpiece</a>
+            </p>
+
+            <div class="post-media-container">
+              <img
+                src="./assets/sagrada-familia-finished.jpg"
+                alt="Antoni Gaudi's Basilica of the Sagrada Familia standing tall over Barcelona bathed in golden hour sunlight with completed spires"
+                class="post-image img-sagrada"
+                loading="eager"
+                width="1024"
+                height="1024"
+              />
+            </div>
+
+            <footer class="post-actions">
+              <button type="button" class="action-btn reply" aria-label="Reply">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <span>2.1K</span>
+              </button>
+              <button type="button" class="action-btn share" aria-label="Share">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                <span>16.3K</span>
+              </button>
+              <button type="button" class="action-btn like" aria-label="Like" data-count="94200">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <span class="like-counter">94.2K</span>
+              </button>
+              <span class="action-btn views" title="Total Views">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                <span>980K</span>
+              </span>
+            </footer>
+          </article>
+
+          <!-- ==============================================================
+               POST 6: Théâtre D’opéra Spatial (AI Generated Image)
+               Commenter explicitly knows and discusses that this is AI
+               ============================================================== -->
+          <article class="post-card" id="post-theatre">
+            <header class="post-header">
+              <div class="author-meta-wrapper">
+                <img src="./assets/avatar-ai-art.svg" alt="Digital Curator Avatar" class="post-avatar" />
+                <div class="author-details">
+                  <div class="author-name-row">
+                    <a href="#digitalart" class="author-name">Digital Art &amp; Synth</a>
+                    <svg class="verified-icon" viewBox="0 0 24 24" fill="currentColor" aria-label="Verified creator">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path>
+                    </svg>
+                  </div>
+                  <div class="author-handle-row">
+                    <span>@digital_curator</span>
+                    <span class="dot-sep">·</span>
+                    <span>1d ago</span>
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="post-more-btn" aria-label="Post options">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
+              </button>
+            </header>
+
+            <p class="post-text">
+              Revisiting the watershed moment for generative AI: Jason M. Allen's 'Théâtre D’opéra Spatial'. Generated using Midjourney v3 and upscaled with Gigapixel AI, this piece shocked the art world when it took 1st place in the digital arts category at the 2022 Colorado State Fair. The baroque lighting and cosmic portal composition ignited the entire global debate over machine synthesis and prompt authorship. 🎨🤖✨ <a href="#midjourney" class="hashtag">#Midjourney</a> <a href="#generativeai" class="hashtag">#TheatreDopera</a> <a href="#aiart" class="hashtag">#DigitalSynthesis</a>
+            </p>
+
+            <div class="post-media-container">
+              <img
+                src="./assets/theatre-dopera-spatial.jpg"
+                alt="Jason M. Allen's Midjourney AI generated artwork Theatre D'opera Spatial showing figures in baroque robes gazing into a glowing circular cosmic portal"
+                class="post-image img-theatre"
+                loading="eager"
+                width="1024"
+                height="682"
+              />
+            </div>
+
+            <footer class="post-actions">
+              <button type="button" class="action-btn reply" aria-label="Reply">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <span>5.8K</span>
+              </button>
+              <button type="button" class="action-btn share" aria-label="Share">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                <span>31.2K</span>
+              </button>
+              <button type="button" class="action-btn like" aria-label="Like" data-count="168500">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <span class="like-counter">168.5K</span>
+              </button>
+              <span class="action-btn views" title="Total Views">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                <span>2.3M</span>
               </span>
             </footer>
           </article>

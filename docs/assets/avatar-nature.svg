@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="natGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#11998e" />
+      <stop offset="100%" stop-color="#38ef7d" />
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="50" fill="url(#natGrad)" />
+  <!-- Turtle shell / Leaf motif -->
+  <circle cx="50" cy="50" r="22" fill="#ffffff" opacity="0.9" />
+  <circle cx="50" cy="50" r="14" fill="#11998e" />
+  <path d="M50 28 L50 72 M28 50 L72 50" stroke="#ffffff" stroke-width="3" stroke-linecap="round" />
+</svg>

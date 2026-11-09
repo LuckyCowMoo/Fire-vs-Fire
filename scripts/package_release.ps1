@@ -60,6 +60,7 @@ New-Item -ItemType Directory -Force -Path $serverTemp | Out-Null
 
 Copy-Item -Path (Join-Path $repoRoot "Install-FireVsFire-NativeHost.bat") -Destination $serverTemp
 Copy-Item -Path (Join-Path $repoRoot "Uninstall-FireVsFire-NativeHost.bat") -Destination $serverTemp
+Copy-Item -Path (Join-Path $repoRoot "manifest.json") -Destination $serverTemp
 Copy-Item -Path (Join-Path $repoRoot "requirements.txt") -Destination $serverTemp
 Copy-Item -Path (Join-Path $repoRoot "LICENSE") -Destination $serverTemp
 

@@ -33,16 +33,26 @@ function Resolve-PythonPath {
 }
 
 function Resolve-ExtensionId {
-  param([string]$ManifestPath, [string]$ExplicitId)
+  param([string]$ManifestPath, [string]$ExplicitId, [string]$NativeManifestPath)
   if ($ExplicitId) { return $ExplicitId }
-  if (!(Test-Path $ManifestPath)) { return $null }
-  try {
-    $extManifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
-    $id = $extManifest.browser_specific_settings.gecko.id
-    if ($id) { return $id }
+  if (Test-Path $ManifestPath) {
+    try {
+      $extManifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
+      $id = $extManifest.browser_specific_settings.gecko.id
+      if ($id) { return $id }
+    }
+    catch {}
   }
-  catch {}
-  return $null
+  if ($NativeManifestPath -and (Test-Path $NativeManifestPath)) {
+    try {
+      $nativeManifest = Get-Content -Raw -Path $NativeManifestPath | ConvertFrom-Json
+      if ($nativeManifest.allowed_extensions -and $nativeManifest.allowed_extensions.Count -gt 0) {
+        return $nativeManifest.allowed_extensions[0]
+      }
+    }
+    catch {}
+  }
+  return 'template@example.com'
 }
 
 function Ensure-Venv {
@@ -77,9 +87,9 @@ if (!(Test-Path $requirementsPath)) { throw "Requirements file not found: $requi
 
 $pythonExe = Resolve-PythonPath -ExplicitPath $PythonPath
 $venvPython = Ensure-Venv -BasePython $pythonExe -VenvPath $venvRoot
-$resolvedExtensionId = Resolve-ExtensionId -ManifestPath $extensionManifestPath -ExplicitId $ExtensionId
+$resolvedExtensionId = Resolve-ExtensionId -ManifestPath $extensionManifestPath -ExplicitId $ExtensionId -NativeManifestPath $manifestPath
 if (-not $resolvedExtensionId) {
-  throw "Extension ID not found. Pass -ExtensionId or set browser_specific_settings.gecko.id in $extensionManifestPath"
+  $resolvedExtensionId = 'template@example.com'
 }
 Write-Host "Using Python: $pythonExe"
 Write-Host "Venv Python: $venvPython"

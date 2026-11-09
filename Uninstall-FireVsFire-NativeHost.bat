@@ -1,6 +1,6 @@
 @echo off
 title Fire vs Fire - Native Host Uninstaller
-color 0E
+color 0A
 echo ============================================================================
 echo   FIRE VS FIRE - NATIVE HOST UNINSTALLER
 echo ============================================================================

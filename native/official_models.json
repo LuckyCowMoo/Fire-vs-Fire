@@ -3,7 +3,7 @@
   "repository": "LuckyCowMoo/Fire-vs-Fire",
   "branch": "FVF-clean",
   "author": "LuckyCowMoo",
-  "updated_at": "2026-11-08T18:00:00Z",
+  "updated_at": "2026-11-09T11:45:00Z",
   "models": [
     {
       "id": "fvf_heimdall02",
@@ -46,6 +46,46 @@
       "ram_size": "1.2 GB VRAM / RAM"
     },
     {
+      "id": "fvf_heimdall03",
+      "name": "FvF Heimdall 03",
+      "version": "3.0.0-preview",
+      "modality": "image",
+      "status": "available",
+      "recommended": true,
+      "is_ai_detector": true,
+      "category_name": "FvF Heimdall 03",
+      "label": "AI generated",
+      "default_threshold": 0.75,
+      "default_color": "#FF2E00",
+      "size_mb": 207.5,
+      "architecture": "5-Crop 24-Channel FFT + ForensicNeXt + ConvNeXt-Base Fusion",
+      "tagline": "24-Ch FFT + ForensicNeXt AI Image Classifier",
+      "description": "Our next-generation AI image classifier. Extracts 24 forensic channels including 2D Fast Fourier Transform (FFT) spectral log-magnitude, high-pass residual, chrominance spectrum, and directional grid harmonics, fused with a 14.5M parameter ForensicNeXt backbone and ConvNeXt-V2 Base semantic stream.",
+      "files": [
+        {
+          "type": "classifier_py",
+          "relative_path": "native/classifiers/fvf_heimdall_03_classifier.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_03_classifier.py",
+          "required": true
+        },
+        {
+          "type": "support_py",
+          "relative_path": "native/classifiers/_heimdall_arch.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/_heimdall_arch.py",
+          "required": true
+        },
+        {
+          "type": "weights_pt",
+          "relative_path": "native/classifiers/fvf_heimdall_03_best.pt",
+          "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_03_best.pt",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.pt",
+          "required": true
+        }
+      ],
+      "download_size": "207 MB",
+      "ram_size": "1.5 GB VRAM / RAM"
+    },
+    {
       "id": "res_net50_spider",
       "name": "ResNet 50 - Spider",
       "version": "1.0.0",
@@ -61,7 +101,7 @@
       "size_mb": 90.0,
       "architecture": "ResNet-50 Binary Vision Classifier",
       "tagline": "Detects spiders",
-      "description": "Demonstrates that Fire vs Fire can classify any visual concept—not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
+      "description": "Demonstrates that Fire vs Fire can classify any visual concept\u2014not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
       "files": [
         {
           "type": "classifier_py",
@@ -82,14 +122,14 @@
     },
     {
       "id": "fvf_mimir_02",
-      "name": "Mímir V2",
+      "name": "M\u00edmir V2",
       "version": "2.0.0-preview",
       "modality": "text",
       "status": "coming_next",
       "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Next",
-      "category_name": "Mímir V2",
+      "category_name": "M\u00edmir V2",
       "label": "AI text",
       "default_threshold": 0.75,
       "default_color": "#FF6218",

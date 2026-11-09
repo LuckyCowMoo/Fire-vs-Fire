@@ -337,8 +337,9 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     } catch (_) {}
   }
 
-  // Always fallback to at least fvf_heimdall02 if nothing was reported
+  // Always fallback to at least fvf_heimdall03 (and fvf_heimdall02) if nothing was reported
   if (selectedSet.size === 0) {
+    selectedSet.add('fvf_heimdall03');
     selectedSet.add('fvf_heimdall02');
   }
 
@@ -347,26 +348,19 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     : 0.75;
 
   const newEnsembles = [];
-  const modalities = ['image', 'text', 'video', 'audio'];
 
-  // 1. One category per top recommended AI model downloaded for each modality
-  for (const mod of modalities) {
-    const topModel = models.find(
-      (m) => m.modality === mod && m.recommended === true && m.is_ai_detector !== false && selectedSet.has(m.id)
-    ) || models.find(
-      (m) => m.modality === mod && m.is_ai_detector !== false && selectedSet.has(m.id)
-    );
-
-    if (!topModel) continue;
-
-    const borderColor = topModel.default_color || '#FF4D1C';
+  // 1. Create a category for each selected/downloaded AI detector model
+  for (const m of models) {
+    if (!selectedSet.has(m.id) || m.is_ai_detector === false) continue;
+    const mod = m.modality || 'image';
+    const borderColor = m.default_color || '#FF4D1C';
     const ensemble = {
-      id: `auto_${mod}_${topModel.id}`,
-      name: topModel.category_name || topModel.name || `AI ${mod}`,
+      id: `auto_${mod}_${m.id}`,
+      name: m.category_name || m.name || `AI ${mod}`,
       modality: mod === 'text' ? 'text' : 'image',
       enabled: true,
       threshold,
-      classifiers: [topModel.id],
+      classifiers: [m.id],
       weights: [1],
       styles: mod === 'text'
         ? {
@@ -389,12 +383,12 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
             image: {
               applyBlur: true,
               blurAmount: 6,
+              blurMode: 'hover',
               applyBorder: true,
               borderMultiplier: 1.2,
               borderColor,
-              applyBadge: true,
-              blurMode: 'hover',
               borderMode: 'hover',
+              applyBadge: true,
               badgeMode: 'hover'
             }
           }
@@ -402,28 +396,28 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     newEnsembles.push(ensemble);
   }
 
-  // 2. Also create a dedicated Spider category at 75% sensitivity if ResNet 50 - Spider was downloaded
-  if (selectedSet.has('res_net50_spider')) {
-    const spiderModel = models.find((m) => m.id === 'res_net50_spider');
-    const spiderColor = (spiderModel && spiderModel.default_color) || '#FFB020';
+  // 2. Also create dedicated categories for object classifiers (e.g. ResNet 50 - Spider)
+  for (const m of models) {
+    if (!selectedSet.has(m.id) || m.is_ai_detector !== false) continue;
+    const borderColor = m.default_color || '#FFB020';
     newEnsembles.push({
-      id: 'auto_image_res_net50_spider',
-      name: (spiderModel && spiderModel.category_name) || 'ResNet50 Spider',
+      id: `auto_image_${m.id}`,
+      name: m.category_name || m.name || 'Object Detector',
       modality: 'image',
       enabled: true,
       threshold,
-      classifiers: ['res_net50_spider'],
+      classifiers: [m.id],
       weights: [1],
       styles: {
         image: {
           applyBlur: true,
           blurAmount: 8,
+          blurMode: 'hover',
           applyBorder: true,
           borderMultiplier: 1.2,
-          borderColor: spiderColor,
-          applyBadge: true,
-          blurMode: 'hover',
+          borderColor,
           borderMode: 'hover',
+          applyBadge: true,
           badgeMode: 'hover'
         }
       }

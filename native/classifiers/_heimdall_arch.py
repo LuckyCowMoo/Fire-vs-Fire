@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Self-contained architecture definition for FvF Heimdall 02.
 Bakes in the 20-channel forensic extractor and multi-crop fusion backbone
 so native/classifiers/ runs completely standalone without external training dependencies.
@@ -24,7 +26,6 @@ Channel Layout (20 Channels Total):
   [19]     Localized 8x8 DCT Diagonal/Nyquist Spectral Energy (checkerboard upsampling artifacts)
 """
 
-from __future__ import annotations
 
 import math
 from typing import List, Tuple
@@ -288,6 +289,66 @@ class ForensicChannelExtractor20(nn.Module):
         return out
 
 
+class ForensicChannelExtractor24(nn.Module):
+    """Extracts 24 forensic channels (20 spatial/wavelet + 4 2D FFT spectral channels) from RGB in [0, 1]."""
+
+    def __init__(self, standardize_forensic: bool = True) -> None:
+        super().__init__()
+        self.base_20 = ForensicChannelExtractor20(standardize_forensic=standardize_forensic)
+        self.num_channels = 24
+
+    def forward(self, rgb: torch.Tensor) -> torch.Tensor:
+        squeeze_batch = False
+        if rgb.dim() == 3:
+            rgb = rgb.unsqueeze(0)
+            squeeze_batch = True
+
+        h, w = int(rgb.shape[-2]), int(rgb.shape[-1])
+        base_20_feats = self.base_20(rgb)  # (B, 20, H, W)
+
+        r = rgb[:, 0:1, :, :]
+        g = rgb[:, 1:2, :, :]
+        b = rgb[:, 2:3, :, :]
+        y = 0.299 * r + 0.587 * g + 0.114 * b
+        cb = -0.168736 * r - 0.331264 * g + 0.500 * b
+        cr = 0.500 * r - 0.418688 * g - 0.081312 * b
+
+        # 8. 2D Fast Fourier Transform (FFT) Spectral Channels (4 channels: 20..23)
+        # cuFFT requires float32; compute in float and cast back to rgb.dtype
+        in_dtype = rgb.dtype
+        y_f32 = y.float()
+        fft_y = torch.fft.fftshift(torch.fft.fft2(y_f32, dim=(-2, -1)), dim=(-2, -1))
+        mag_y = torch.abs(fft_y).to(dtype=in_dtype)
+        log_mag_y = torch.log1p(mag_y)
+        ch_fft0 = (log_mag_y - log_mag_y.mean(dim=(-2, -1), keepdim=True)) / (log_mag_y.std(dim=(-2, -1), keepdim=True) + 1e-6)
+
+        # 8b. High-Pass Spectral Residual (masking central DC frequencies)
+        cy, cx = h // 2, w // 2
+        y_grid, x_grid = torch.meshgrid(torch.arange(h, device=rgb.device), torch.arange(w, device=rgb.device), indexing="ij")
+        dist = torch.sqrt((y_grid - cy).float()**2 + (x_grid - cx).float()**2)
+        hp_mask = (dist > (min(h, w) // 16)).to(dtype=in_dtype).unsqueeze(0).unsqueeze(0)
+        hp_mag = log_mag_y * hp_mask
+        ch_fft1 = (hp_mag - hp_mag.mean(dim=(-2, -1), keepdim=True)) / (hp_mag.std(dim=(-2, -1), keepdim=True) + 1e-6)
+
+        # 8c. Chrominance Color-Difference Spectrum (Cb - Cr)
+        chroma_diff_f32 = (cb - cr).float()
+        fft_c = torch.fft.fftshift(torch.fft.fft2(chroma_diff_f32, dim=(-2, -1)), dim=(-2, -1))
+        log_mag_c = torch.log1p(torch.abs(fft_c)).to(dtype=in_dtype)
+        ch_fft2 = (log_mag_c - log_mag_c.mean(dim=(-2, -1), keepdim=True)) / (log_mag_c.std(dim=(-2, -1), keepdim=True) + 1e-6)
+
+        # 8d. Directional Grid Artifacts (Difference from isotropic Gaussian/average blurred spectrum)
+        blurred_spec = F.avg_pool2d(log_mag_y, kernel_size=9, stride=1, padding=4)
+        spec_residual = log_mag_y - blurred_spec
+        ch_fft3 = (spec_residual - spec_residual.mean(dim=(-2, -1), keepdim=True)) / (spec_residual.std(dim=(-2, -1), keepdim=True) + 1e-6)
+
+        fft_4ch = torch.cat([ch_fft0, ch_fft1, ch_fft2, ch_fft3], dim=1)  # (B, 4, H, W)
+        out = torch.cat([base_20_feats, fft_4ch], dim=1)  # (B, 24, H, W)
+
+        if squeeze_batch:
+            return out.squeeze(0)
+        return out
+
+
 """FvF-Ares: Asymmetric Dual-Resolution 20-Channel Forensic Classifier.
 
 Architecture overview:
@@ -324,7 +385,6 @@ Architecture overview:
        calibration so the Fire vs Fire GUI threshold slider (0%-100%) behaves smoothly.
 """
 
-from __future__ import annotations
 
 from typing import Dict, Optional, Tuple
 
@@ -429,6 +489,100 @@ class SRNetForensicBranch20(nn.Module):
         return self.proj(moments)
 
 
+class GRN(nn.Module):
+    """Global Response Normalization (GRN) layer for modern ConvNeXt-V2 blocks."""
+
+    def __init__(self, dim: int) -> None:
+        super().__init__()
+        self.gamma = nn.Parameter(torch.zeros(1, 1, 1, dim))
+        self.beta = nn.Parameter(torch.zeros(1, 1, 1, dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        Gx = torch.norm(x, p=2, dim=(1, 2), keepdim=True)
+        Nx = Gx / (Gx.mean(dim=-1, keepdim=True) + 1e-6)
+        return self.gamma * (x * Nx) + self.beta + x
+
+
+class ForensicNeXtBlock(nn.Module):
+    """ConvNeXt-V2 Inverted Bottleneck Block with 7x7 Depthwise Conv & GRN."""
+
+    def __init__(self, dim: int) -> None:
+        super().__init__()
+        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)
+        self.norm = nn.LayerNorm(dim, eps=1e-6)
+        self.pwconv1 = nn.Linear(dim, 4 * dim)
+        self.act = nn.GELU()
+        self.grn = GRN(4 * dim)
+        self.pwconv2 = nn.Linear(4 * dim, dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        identity = x
+        x = self.dwconv(x)
+        x = x.permute(0, 2, 3, 1)  # (N, C, H, W) -> (N, H, W, C)
+        x = self.norm(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.grn(x)
+        x = self.pwconv2(x)
+        x = x.permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
+        return identity + x
+
+
+class ForensicNeXtBranch24(nn.Module):
+    """Modern 24-Channel (20 Spatial/Wavelet + 4 2D FFT) Forensic Backbone.
+
+    Features:
+      - Native Stride-1 Stem (preserves 1:1 camera sensor noise and pixel grid harmonics).
+      - 4 Hierarchical Stages of 7x7 Depthwise ConvNeXt-V2 Inverted Bottlenecks with GRN.
+      - 14.5M parameters (over 4x the capacity of classic 3.5M SRNet).
+      - Statistical Moment Pooling (Mean, Spatial Std / Noise Energy, Peak Max).
+    """
+
+    def __init__(self, in_channels: int = 24, out_dim: int = 768) -> None:
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+
+        dims = [96, 192, 384, 512]
+        depths = [2, 2, 3, 2]
+
+        self.downsamples = nn.ModuleList([
+            nn.Sequential(nn.Conv2d(64, 96, kernel_size=2, stride=2), nn.GroupNorm(1, 96)),
+            nn.Sequential(nn.Conv2d(96, 192, kernel_size=2, stride=2), nn.GroupNorm(1, 192)),
+            nn.Sequential(nn.Conv2d(192, 384, kernel_size=2, stride=2), nn.GroupNorm(1, 384)),
+            nn.Sequential(nn.Conv2d(384, 512, kernel_size=2, stride=2), nn.GroupNorm(1, 512)),
+        ])
+
+        self.stages = nn.ModuleList([
+            nn.Sequential(*[ForensicNeXtBlock(dims[i]) for _ in range(depths[i])])
+            for i in range(4)
+        ])
+
+        self.proj = nn.Sequential(
+            nn.Linear(dims[-1] * 3, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.GELU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.stem(x)
+        for i in range(4):
+            x = self.downsamples[i](x)
+            x = self.stages[i](x)
+
+        feat_mean = x.mean(dim=(-2, -1))
+        feat_std = x.var(dim=(-2, -1), unbiased=False).add(1e-5).sqrt()
+        feat_max = x.amax(dim=(-2, -1))
+        moments = torch.cat([feat_mean, feat_std, feat_max], dim=1)  # (B, 512 * 3 = 1536)
+        return self.proj(moments)  # (B, 768)
+
+
 BACKBONE_ALIASES: Dict[str, str] = {
     "convnextv2_base": "convnextv2_base.fcmae_ft_in22k_in1k",
     "convnextv2_tiny": "convnextv2_tiny.fcmae_ft_in22k_in1k",
@@ -523,6 +677,7 @@ class FvfAresModel(nn.Module):
         num_classes: int = 2,
         num_crops: int = 5,
         semantic_dropout_prob: float = 0.15,
+        use_forensicnext: bool = False,
     ) -> None:
         super().__init__()
         import timm
@@ -532,9 +687,14 @@ class FvfAresModel(nn.Module):
         self.resolved_backbone_name = resolved_name
         self.num_crops = int(num_crops)
         self.semantic_dropout_prob = float(semantic_dropout_prob)
+        self.use_forensicnext = bool(use_forensicnext)
 
-        # 20-channel pure-Conv2d feature extractor (baked into model for single-pass GPU/ONNX execution)
-        self.channel_extractor = ForensicChannelExtractor20(standardize_forensic=True)
+        if self.use_forensicnext:
+            self.channel_extractor = ForensicChannelExtractor24(standardize_forensic=True)
+            self.forensic_backbone = ForensicNeXtBranch24(in_channels=24, out_dim=forensic_dim)
+        else:
+            self.channel_extractor = ForensicChannelExtractor20(standardize_forensic=True)
+            self.forensic_backbone = SRNetForensicBranch20(in_channels=20, out_dim=forensic_dim)
 
         # ImageNet normalization buffers for Stream A (Global Semantic RGB)
         self.register_buffer(
@@ -557,10 +717,7 @@ class FvfAresModel(nn.Module):
         semantic_dim = int(self.semantic_backbone.num_features)
         self.semantic_norm = nn.LayerNorm(semantic_dim)
 
-        # Stream B: 20-Channel Native-Grid Forensic Backbone + Multi-Crop Aggregator
-        self.forensic_backbone = SRNetForensicBranch20(
-            in_channels=20, out_dim=forensic_dim
-        )
+        # Stream B: Multi-Crop Forensic Aggregator
         self.multi_crop_aggregator = MultiCropForensicAggregator(
             forensic_dim=forensic_dim, num_crops=self.num_crops
         )
@@ -693,3 +850,5 @@ class FvfAresModel(nn.Module):
 
 # Alias for naming consistency
 FvfHeimdall02Model = FvfAresModel
+
+FvfHeimdall03Model = FvfAresModel

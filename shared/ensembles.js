@@ -14,10 +14,32 @@
     const borderColor = settings.borderColor || '#FF0064';
     return [
       {
-        id: 'ai_images',
-        name: 'FvF Heimdall 02',
+        id: 'ai_images_03',
+        name: 'FvF Heimdall 03',
         modality: 'image',
         enabled: true,
+        threshold: settings.imageAiThreshold ?? 0.5,
+        classifiers: ['fvf_heimdall03'],
+        weights: null,
+        styles: {
+          image: {
+            applyBlur: true,
+            blurAmount: settings.blurAmount ?? 4,
+            applyBorder: true,
+            borderMultiplier: settings.borderMultiplier ?? 1,
+            borderColor,
+            applyBadge: true,
+            blurMode: 'hover',
+            borderMode: 'hover',
+            badgeMode: 'hover'
+          }
+        }
+      },
+      {
+        id: 'ai_images_02',
+        name: 'FvF Heimdall 02',
+        modality: 'image',
+        enabled: false,
         threshold: settings.imageAiThreshold ?? 0.5,
         classifiers: ['fvf_heimdall02'],
         weights: null,
@@ -27,7 +49,7 @@
             blurAmount: settings.blurAmount ?? 4,
             applyBorder: true,
             borderMultiplier: settings.borderMultiplier ?? 1,
-            borderColor,
+            borderColor: '#FF4D1C',
             applyBadge: true,
             blurMode: 'hover',
             borderMode: 'hover',

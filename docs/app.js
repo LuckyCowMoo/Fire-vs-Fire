@@ -28,10 +28,27 @@ const FALLBACK_CATALOG = {
       label: 'AI generated',
       default_threshold: 0.75,
       default_color: '#FF4D1C',
-      download_size: '463 MB',
+      download_size: '192 MB',
       ram_size: '1.2 GB VRAM / RAM',
       tagline: 'local AI Image classifier',
       description: 'Our flagship first-party AI image classifier.'
+    },
+    {
+      id: 'fvf_heimdall03',
+      name: 'FvF Heimdall 03',
+      version: '3.0.0-preview',
+      modality: 'image',
+      status: 'available',
+      recommended: true,
+      is_ai_detector: true,
+      category_name: 'FvF Heimdall 03',
+      label: 'AI generated',
+      default_threshold: 0.75,
+      default_color: '#FF2E00',
+      download_size: '207 MB',
+      ram_size: '1.5 GB VRAM / RAM',
+      tagline: '24-Ch FFT + ForensicNeXt Image Classifier',
+      description: 'Next-gen 24-channel FFT & ForensicNeXt AI image classifier with ConvNeXt-V2 Base.'
     },
     {
       id: 'res_net50_spider',
@@ -117,7 +134,7 @@ let extensionConnected = false;
 let nativeHostConnected = false;
 let officialCatalog = FALLBACK_CATALOG;
 let installedModels = new Set();
-let selectedModels = new Set(['fvf_heimdall02']); // Recommended default selected
+let selectedModels = new Set(['fvf_heimdall02', 'fvf_heimdall03']); // Recommended default selected
 
 // ============================================================================
 // EXTENSION BRIDGE (Supports Direct Extension Context + GitHub Pages postMessage)

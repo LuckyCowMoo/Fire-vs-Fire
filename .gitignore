@@ -17,6 +17,7 @@ ENV/
 
 # Track official models via Git LFS
 !native/classifiers/fvf_heimdall_02_best.pt
+!native/classifiers/fvf_heimdall_03_best.pt
 !native/classifiers/spider_detector_resnet50.pt
 
 # Python cache

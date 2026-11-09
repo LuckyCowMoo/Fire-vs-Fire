@@ -955,10 +955,18 @@ def _load_official_catalog() -> Dict[str, Any]:
     except Exception as exc:
         log(f"[Catalog] Remote GitHub fetch fell back to local catalog: {exc}")
 
-    if catalog is None and local_catalog_path.exists():
+    if local_catalog_path.exists():
         try:
             with open(local_catalog_path, "r", encoding="utf-8") as fh:
-                catalog = json.load(fh)
+                local_data = json.load(fh)
+                if isinstance(local_data, dict) and isinstance(local_data.get("models"), list):
+                    if catalog is None:
+                        catalog = local_data
+                    else:
+                        remote_ids = {m.get("id") for m in catalog.get("models", [])}
+                        for lm in local_data.get("models", []):
+                            if lm.get("id") not in remote_ids:
+                                catalog["models"].append(lm)
         except Exception as exc:
             log(f"[Catalog] Failed to load local official_models.json: {exc}")
 

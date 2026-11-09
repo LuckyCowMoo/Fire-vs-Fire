@@ -222,6 +222,26 @@ class BaseClassifier(ABC):
             pass</code></pre>
         </details>
 
+        <!-- Dedicated Live Model Download Progress Bar -->
+        <div id="models-download-progress-panel" class="glass-card-3d" style="display: none; padding: 22px 28px; margin-bottom: 16px; border: 1px solid rgba(255, 98, 24, 0.45); background: rgba(22, 8, 5, 0.9); box-shadow: 0 0 32px rgba(255, 98, 24, 0.25);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <strong id="download-progress-title" style="font-size: 1.1rem; color: #fff; font-weight: 800;">Downloading Classifiers…</strong>
+              <div id="download-progress-subtitle" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 3px;">
+                Downloading model weights directly into local native host…
+              </div>
+            </div>
+            <span id="download-progress-percent" style="font-size: 1.35rem; font-weight: 800; color: #ff8a3d;">0%</span>
+          </div>
+          <div style="height: 12px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.12);">
+            <div id="download-progress-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #ff4500, #ff8a3d, #ffb38a); border-radius: 999px; transition: width 0.3s ease; box-shadow: 0 0 16px rgba(255, 98, 24, 0.6);"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+            <span id="download-progress-status-text" style="font-size: 0.84rem; color: #ffb38a;">Initializing download stream…</span>
+            <span style="font-size: 0.82rem; color: var(--text-muted);">Please keep this tab open</span>
+          </div>
+        </div>
+
         <div
           class="glass-card-3d"
           style="padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;"

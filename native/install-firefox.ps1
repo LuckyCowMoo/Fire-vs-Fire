@@ -107,10 +107,16 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "Dependencies installed successfully." -ForegroundColor Green
 }
 
-# Hardware-aware accelerator detection (NVIDIA CUDA vs DirectML / NPU)
+# Hardware-aware accelerator detection (NVIDIA CUDA vs DirectML / Snapdragon NPU)
 try {
   $gpus = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+  $npus = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -match 'NPU|Hexagon|Neural|AI Boost' -or $_.PNPClass -eq 'ComputeAccelerator'
+  } | Select-Object -ExpandProperty Name -Unique
+
   $hasNvidia = ($gpus | Where-Object { $_ -match 'NVIDIA' }) -ne $null
+  $hasSnapdragon = ($npus | Where-Object { $_ -match 'Hexagon|Qualcomm' }) -ne $null -or ($gpus | Where-Object { $_ -match 'Qualcomm|Adreno' }) -ne $null
+
   if ($hasNvidia) {
     $cudaAvailable = & $venvPython -c "import torch; print(torch.cuda.is_available())" 2>$null
     if ($cudaAvailable -ne 'True') {
@@ -119,6 +125,16 @@ try {
     } else {
       Write-Host "NVIDIA CUDA PyTorch already active." -ForegroundColor Green
     }
+  } elseif ($hasSnapdragon) {
+    $npuTitle = if ($npus) { ($npus -join ', ') } else { "Qualcomm Hexagon NPU" }
+    Write-Host "`n=== Hardware Acceleration: Qualcomm Snapdragon X Elite ===" -ForegroundColor Green
+    Write-Host "  GPU: $($gpus -join ', ')" -ForegroundColor Cyan
+    Write-Host "  NPU: $npuTitle" -ForegroundColor Green
+    Write-Host "Configuring DirectML hardware acceleration for Snapdragon NPU/GPU..." -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null
+  } elseif ($npus) {
+    Write-Host "Detected NPU ($($npus -join ', ')) & GPU ($($gpus -join ', ')). Ensuring DirectML is available..." -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null
   } else {
     Write-Host "Non-NVIDIA GPU/NPU detected ($($gpus -join ', ')). Ensuring ONNX Runtime DirectML is available..." -ForegroundColor Cyan
     & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null

@@ -713,7 +713,7 @@ function imageToBase64(imgElement) {
 // Build classification batches - splits into multiple requests if needed to stay under message size limit
 function buildClassificationBatches(images = cachedImages, textSections = cachedTextSections) {
   const batches = [];
-  const MAX_MESSAGE_SIZE = 6000000;  // 6MB per chunk (prevents browser Native Messaging pipe disconnect on image-heavy pages)
+  const MAX_MESSAGE_SIZE = 750000;  // 750KB per chunk (strictly stays under Firefox 1MB limit to prevent disconnects)
   const MAX_ITEMS_PER_CHUNK = 16;    // Keep chunks compact so streaming starts immediately
   let currentBatch = [];
   let currentSize = 1000;  // Start with overhead estimate

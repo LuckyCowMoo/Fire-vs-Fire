@@ -44,21 +44,47 @@ from model_registry import get_registry
 # Native Messaging Protocol
 # ============================================================================
 
+# Preserve raw stdout binary buffer for Native Messaging protocol
+_raw_stdout = sys.stdout.buffer
+# Redirect text stdout to stderr so ANY accidental print() never corrupts native messaging!
+sys.stdout = sys.stderr
+
 def read_message():
-    # Read one message from browser via stdin
+    # Read 4-byte message length
     raw_length = sys.stdin.buffer.read(4)
-    if len(raw_length) == 0:
+    if not raw_length or len(raw_length) < 4:
         return None
     message_length = struct.unpack('<I', raw_length)[0]
-    message = sys.stdin.buffer.read(message_length).decode('utf-8')
-    return json.loads(message)
+
+    # Read message_length bytes in a loop (handles partial reads on Windows pipes)
+    chunks = []
+    bytes_read = 0
+    while bytes_read < message_length:
+        to_read = min(message_length - bytes_read, 65536)
+        chunk = sys.stdin.buffer.read(to_read)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        bytes_read += len(chunk)
+
+    if bytes_read < message_length:
+        log(f"[Native] Incomplete message read: expected {message_length}, got {bytes_read}")
+        return None
+
+    raw_message = b''.join(chunks).decode('utf-8')
+    return json.loads(raw_message)
 
 def send_message(message):
-    # Send one message to browser via stdout
     encoded = json.dumps(message, separators=(',', ':')).encode('utf-8')
-    sys.stdout.buffer.write(struct.pack('<I', len(encoded)))
-    sys.stdout.buffer.write(encoded)
-    sys.stdout.buffer.flush()
+    # Firefox strict 1MB message limit guard
+    if len(encoded) >= 1024 * 1024:
+        log(f"[Native] Warning: message size ({len(encoded)} bytes) exceeds 1MB limit; truncating results to prevent disconnect")
+        if isinstance(message, dict) and 'results' in message and isinstance(message['results'], list):
+            message['results'] = message['results'][:max(1, len(message['results']) // 2)]
+            encoded = json.dumps(message, separators=(',', ':')).encode('utf-8')
+    _raw_stdout.write(struct.pack('<I', len(encoded)))
+    _raw_stdout.write(encoded)
+    _raw_stdout.flush()
 
 
 # ============================================================================

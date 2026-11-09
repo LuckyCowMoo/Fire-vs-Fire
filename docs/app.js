@@ -528,18 +528,56 @@ async function downloadSelectedModelsAndAdvance() {
     return;
   }
 
+  const progressPanel = document.getElementById('models-download-progress-panel');
+  const progressTitle = document.getElementById('download-progress-title');
+  const progressFill = document.getElementById('download-progress-fill');
+  const progressPercent = document.getElementById('download-progress-percent');
+  const progressStatus = document.getElementById('download-progress-status-text');
+
+  if (progressPanel) {
+    progressPanel.style.display = 'block';
+    progressPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   if (btn) {
     btn.disabled = true;
     btn.innerHTML = '<span>⏳ Downloading Models…</span>';
   }
 
-  for (const modelId of ids) {
+  const total = ids.length;
+
+  for (let i = 0; i < total; i++) {
+    const modelId = ids[i];
+    const modelInfo = (officialCatalog?.models || []).find((m) => m.id === modelId);
+    const modelName = modelInfo?.name || modelId;
+
+    if (progressTitle) progressTitle.textContent = `Downloading ${modelName} (${i + 1}/${total})…`;
+    if (progressStatus) progressStatus.textContent = `Streaming model weights and classifier harness into native/classifiers/…`;
+
+    const basePct = Math.round((i / total) * 100);
+    const targetPct = Math.round(((i + 1) / total) * 100);
+
+    if (progressFill) progressFill.style.width = `${basePct}%`;
+    if (progressPercent) progressPercent.textContent = `${basePct}%`;
+
     const wrap = document.getElementById(`progress-wrap-${modelId}`);
     if (wrap) wrap.hidden = false;
 
+    // Simulate animated incremental progress while download is in-flight
+    let simPct = basePct;
+    const simInterval = setInterval(() => {
+      if (simPct < targetPct - 5) {
+        simPct += 2;
+        if (progressFill) progressFill.style.width = `${simPct}%`;
+        if (progressPercent) progressPercent.textContent = `${simPct}%`;
+      }
+    }, 400);
+
     if (extensionConnected) {
-      if (statusEl) statusEl.textContent = `Requesting Native Host to install ${modelId}...`;
+      if (statusEl) statusEl.textContent = `Installing ${modelName}...`;
       const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000).catch(() => ({ ok: false }));
+      clearInterval(simInterval);
+
       if (res && res.ok) {
         installedModels.add(modelId);
         handleDownloadProgressEvent({
@@ -555,13 +593,24 @@ async function downloadSelectedModelsAndAdvance() {
         });
       }
     } else {
+      clearInterval(simInterval);
       handleDownloadProgressEvent({
         modelId,
         percent: 100,
         status: 'Selected for install'
       });
     }
+
+    if (progressFill) progressFill.style.width = `${targetPct}%`;
+    if (progressPercent) progressPercent.textContent = `${targetPct}%`;
   }
+
+  if (progressTitle) progressTitle.textContent = '✅ All Classifiers Downloaded!';
+  if (progressStatus) progressStatus.textContent = 'Hardware-accelerated environment is primed and ready.';
+  if (progressFill) progressFill.style.width = '100%';
+  if (progressPercent) progressPercent.textContent = '100%';
+
+  await new Promise((r) => setTimeout(r, 1200));
 
   if (btn) {
     btn.disabled = false;

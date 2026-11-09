@@ -66,13 +66,61 @@ body {
   background: var(--bg);
 }
 
+/* Default Pop-up Mode (compact for extension popup window) */
 .popup-root {
   padding: 14px 14px 20px;
   width: 100%;
-  min-width: 100%;
-  max-width: 560px;
+  max-width: 450px;
   margin: 0 auto;
   overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* Full Page Mode (spacious centered dashboard when opened in a full tab) */
+@media (min-width: 680px) {
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 32px 16px 64px;
+    background: #090302;
+  }
+
+  .popup-root {
+    max-width: 820px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 28px 32px;
+    background: rgba(22, 9, 6, 0.82);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 98, 24, 0.22);
+    border-radius: 20px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 32px rgba(255, 77, 28, 0.12);
+  }
+
+  .app-header {
+    margin-bottom: 22px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .quick-nav-bar {
+    max-width: 480px;
+    margin: 0 auto 20px;
+  }
+
+  .nav-pill-btn {
+    padding: 9px 16px;
+    font-size: 13px;
+  }
+
+  .live-preview {
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 h1, h2, h3, strong {
@@ -608,13 +656,20 @@ h1, h2, h3, strong {
 .preview-image-wrap {
   position: relative;
   width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
 }
 
 .preview-image-wrap img {
   display: block;
-  width: 100%;
+  max-width: 100%;
+  max-height: 280px;
+  width: auto;
   height: auto;
   object-fit: contain;
+  margin: 0 auto;
 }
 
 .preview-text {

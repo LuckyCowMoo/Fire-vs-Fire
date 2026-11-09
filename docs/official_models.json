@@ -40,6 +40,13 @@
           "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_02_best.pt",
           "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.pt",
           "required": true
+        },
+        {
+          "type": "weights_onnx",
+          "relative_path": "native/classifiers/fvf_heimdall_02_best.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.onnx",
+          "required": false
         }
       ],
       "download_size": "192 MB",
@@ -115,6 +122,13 @@
           "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/spider_detector_resnet50.pt",
           "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.pt",
           "required": true
+        },
+        {
+          "type": "weights_onnx",
+          "relative_path": "native/classifiers/spider_detector_resnet50.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.onnx",
+          "required": false
         }
       ],
       "download_size": "90 MB",

@@ -30,7 +30,11 @@ if (-not $HostName) {
 
 $targets = @(
   @{ Path = "HKCU:\Software\Mozilla\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName" },
-  @{ Path = "HKLM:\Software\Mozilla\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Mozilla\NativeMessagingHosts\$HostName" }
+  @{ Path = "HKLM:\Software\Mozilla\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Mozilla\NativeMessagingHosts\$HostName" },
+  @{ Path = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName" },
+  @{ Path = "HKLM:\Software\Google\Chrome\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Google\Chrome\NativeMessagingHosts\$HostName" },
+  @{ Path = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$HostName" },
+  @{ Path = "HKLM:\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Microsoft\Edge\NativeMessagingHosts\$HostName" }
 )
 
 foreach ($target in $targets) {

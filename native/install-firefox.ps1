@@ -117,7 +117,7 @@ try {
   Write-Host "Hardware acceleration auto-detection skipped: $_" -ForegroundColor Yellow
 }
 
-# Update manifest JSON
+# Update Firefox manifest JSON
 $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
 if (-not $HostName) {
   $HostName = if ($manifest.name) { $manifest.name } else { 'com.aidetector.classifier' }
@@ -135,10 +135,32 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($manifestPath, $json, $utf8NoBom)
 
 # Register in HKCU for Firefox
-$regKey = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName"
-$escapedManifest = $manifestPath -replace '\\', '\\\\'
-Write-Host "Registering: $regKey -> $manifestPath"
-reg add $regKey /ve /d "$manifestPath" /f | Out-Null
+$regKeyFirefox = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName"
+Write-Host "Registering Firefox: $regKeyFirefox -> $manifestPath"
+reg add $regKeyFirefox /ve /d "$manifestPath" /f | Out-Null
 
-Write-Host "Done. Verify with: reg query $regKey"
-Write-Host "Restart Firefox, load the extension, and test native messaging."
+# Update Chrome/Chromium manifest JSON
+$chromeManifestPath = Join-Path $scriptRoot 'manifest.chrome.json'
+if (Test-Path $chromeManifestPath) {
+  $chromeManifest = Get-Content -Raw -Path $chromeManifestPath | ConvertFrom-Json
+  $chromeManifest.name = $HostName
+  $chromeManifest.path = $runHostPath
+  if ($chromeManifest.PSObject.Properties.Name -contains 'arguments') {
+    $chromeManifest.PSObject.Properties.Remove('arguments')
+  }
+  $chromeManifest.type = 'stdio'
+  $chromeManifest.description = 'Local AI classifier bridge (Chrome/Chromium)'
+  $chromeJson = $chromeManifest | ConvertTo-Json -Depth 5
+  [System.IO.File]::WriteAllText($chromeManifestPath, $chromeJson, $utf8NoBom)
+
+  # Register in HKCU for Chrome and Edge
+  $regKeyChrome = "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName"
+  $regKeyEdge = "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"
+  Write-Host "Registering Chrome: $regKeyChrome -> $chromeManifestPath"
+  reg add $regKeyChrome /ve /d "$chromeManifestPath" /f | Out-Null
+  Write-Host "Registering Edge: $regKeyEdge -> $chromeManifestPath"
+  reg add $regKeyEdge /ve /d "$chromeManifestPath" /f | Out-Null
+}
+
+Write-Host "Done. Registered native messaging bridge for Firefox, Chrome, and Edge."
+Write-Host "Restart your browser, load the extension, and return to the onboarding tab."

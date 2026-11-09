@@ -1780,6 +1780,20 @@ function initNavButtonsAndHostUpdater() {
     }
   }
 
+  const reconnectBtn = document.getElementById('reconnect-host-btn');
+  if (reconnectBtn) {
+    reconnectBtn.addEventListener('click', async () => {
+      reconnectBtn.disabled = true;
+      if (badgeEl) {
+        badgeEl.className = 'host-status-badge checking';
+        badgeEl.textContent = 'Connecting…';
+      }
+      if (detailEl) detailEl.textContent = 'Testing native messaging connection…';
+      await refreshHostStatus();
+      reconnectBtn.disabled = false;
+    });
+  }
+
   if (checkUpdateBtn && updateStatusEl) {
     checkUpdateBtn.addEventListener('click', async () => {
       checkUpdateBtn.disabled = true;

@@ -154,8 +154,15 @@ class FvfHeimdall02Classifier(BaseClassifier):
         # 3. CPU fallback
         self.device = torch.device("cpu")
         self._use_fp16 = False
-        self._device_info = {"device": "cpu", "name": "CPU", "backend": "CPU"}
-        self._log("Using CPU")
+        self._num_crops = 1
+        self._gpu_micro_batch_size = 2
+        try:
+            import os
+            self.torch.set_num_threads(min(8, os.cpu_count() or 4))
+        except Exception:
+            pass
+        self._device_info = {"device": "cpu", "name": "CPU (Multithreaded)", "backend": "CPU"}
+        self._log("Using CPU (Multithreaded, 1-crop mode)")
 
     def _try_load_onnx(self, onnx_path: Path) -> bool:
         try:
@@ -227,7 +234,8 @@ class FvfHeimdall02Classifier(BaseClassifier):
 
             state = ckpt.get("model_state_dict", ckpt) if isinstance(ckpt, dict) else ckpt
             has_multicrop = any("multi_crop_aggregator" in k for k in state.keys())
-            self._num_crops = int(ckpt.get("num_crops", 5 if has_multicrop else 1)) if isinstance(ckpt, dict) else (5 if has_multicrop else 1)
+            has_crops = int(ckpt.get("num_crops", 5 if has_multicrop else 1)) if isinstance(ckpt, dict) else (5 if has_multicrop else 1)
+            self._num_crops = 1 if self.device.type == "cpu" else has_crops
 
             model = FvfAresModel(backbone_name=backbone_name, pretrained=False, num_crops=max(1, self._num_crops))
             clean_state = {

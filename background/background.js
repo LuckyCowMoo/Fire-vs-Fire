@@ -147,23 +147,24 @@ function ensureNativePort() {
       return;
     }
 
-    if (!reqId || !pendingNativeRequests.has(reqId)) {
+    let matchedReqId = reqId;
+    if (!matchedReqId || !pendingNativeRequests.has(matchedReqId)) {
       if (response && (response.type === 'pong' || response.ok)) {
         for (const [id] of pendingNativeRequests.entries()) {
           if (id.startsWith('req-ping-') || pendingNativeRequests.size === 1) {
-            reqId = id;
+            matchedReqId = id;
             break;
           }
         }
       }
     }
-    if (!reqId || !pendingNativeRequests.has(reqId)) {
+    if (!matchedReqId || !pendingNativeRequests.has(matchedReqId)) {
       console.warn('[Native] Unmatched response:', response);
       return;
     }
-    const { resolve, timeoutId } = pendingNativeRequests.get(reqId);
+    const { resolve, timeoutId } = pendingNativeRequests.get(matchedReqId);
     if (timeoutId) clearTimeout(timeoutId);
-    pendingNativeRequests.delete(reqId);
+    pendingNativeRequests.delete(matchedReqId);
     resolve(response);
   });
 
@@ -238,8 +239,13 @@ function sendToNative(message, options = {}) {
 function sendToNativeFireAndForget(message) {
   const port = ensureNativePort();
   if (port) {
-    port.postMessage(message);
-    return true;
+    try {
+      port.postMessage(message);
+      return true;
+    } catch (err) {
+      console.warn('[Native] port.postMessage failed; resetting port:', err);
+      nativePort = null;
+    }
   }
 
   const canSend = ext && ext.runtime && typeof ext.runtime.sendNativeMessage === 'function';

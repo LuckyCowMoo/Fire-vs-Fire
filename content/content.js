@@ -677,70 +677,64 @@ function scanAllImages() {
   return newImages;
 }
 
-// Try to extract image as base64 from DOM to avoid re-downloading
+// Extract image as compact base64 from DOM (strictly budgeted to protect Firefox native messaging limit)
 function imageToBase64(imgElement) {
   try {
-    // Use natural dimensions so the classifier receives the full-resolution image.
-    // Pre-resizing on canvas before JPEG encoding introduces block artifacts that
-    // the artifact branch misidentifies as AI-generation artifacts.
-    const w = imgElement.naturalWidth || imgElement.width || 0;
-    const h = imgElement.naturalHeight || imgElement.height || 0;
-    if (!w || !h) return null;
+    let w = imgElement.naturalWidth || imgElement.width || 0;
+    let h = imgElement.naturalHeight || imgElement.height || 0;
+    if (w < 48 || h < 48) return null;
+
+    // Constrain dimensions to at most 768px (model analyzes 256x256 crops; 768 preserves full detail without blowing up memory)
+    const MAX_DIM = 768;
+    if (w > MAX_DIM || h > MAX_DIM) {
+      if (w >= h) {
+        h = Math.round((h * MAX_DIM) / w);
+        w = MAX_DIM;
+      } else {
+        w = Math.round((w * MAX_DIM) / h);
+        h = MAX_DIM;
+      }
+    }
+
     const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = Math.max(1, w);
+    canvas.height = Math.max(1, h);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(imgElement, 0, 0, w, h);
-    const base64 = canvas.toDataURL('image/png');  // Lossless: no JPEG block artifacts
-    
-    // Skip if base64 is suspiciously small (likely a low-quality thumbnail)
-    // Typical full images are 80KB+, thumbnails are 20-40KB
-    // Return null to skip this image for now - it will be re-processed when full version loads
-    if (base64 && base64.length < 60000) {  // ~45KB threshold
-      if (settings.verboseLogs) {
-        console.log(`[AI Detector] Image too small (${Math.round(base64.length/1024)}KB), waiting for full resolution:`, imgElement.src.substring(0, 80));
-      }
-      return 'TOO_SMALL';  // Special marker to indicate we should skip this image
-    }
-    
+
+    // High quality JPEG (0.90) keeps size ~60-120KB per image, perfectly safe for Native Messaging
+    const quality = typeof settings.imageCaptureQuality === 'number' ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality)) : 0.90;
+    const base64 = canvas.toDataURL('image/jpeg', quality);
     return base64;
   } catch (e) {
-    // CORS or other canvas errors - will fall back to URL fetch
+    // CORS or canvas error - falls back to direct URL fetch by native host
     return null;
   }
 }
 
-// Build classification batches - splits into multiple requests if needed to stay under message size limit
+// Build classification batches - strictly limits chunk sizes to stay well below Firefox 1MB native messaging limit
 function buildClassificationBatches(images = cachedImages, textSections = cachedTextSections) {
   const batches = [];
-  const MAX_MESSAGE_SIZE = 750000;  // 750KB per chunk (strictly stays under Firefox 1MB limit to prevent disconnects)
+  const MAX_MESSAGE_SIZE = 450000;   // 450KB target per chunk (Firefox hard crash limit is 1MB)
+  const MAX_ITEM_SIZE = 280000;      // 280KB max per single item base64
   const MAX_ITEMS_PER_CHUNK = 16;    // Keep chunks compact so streaming starts immediately
   let currentBatch = [];
-  let currentSize = 1000;  // Start with overhead estimate
-  
-  // DO NOT clear elementMap - preserve mappings from previous batches
-  // Only add new entries for images we haven't seen yet
+  let currentSize = 1000;
 
   images.forEach((img) => {
-    // Use URL as the ID (persistent across page reloads)
     const itemId = img.src || 'img-unknown-' + Math.random();
-    
-    // Update elementMap to track this element
     trackElement(itemId, img.element);
-    
-    // Try to get base64 from DOM first (avoids network fetch)
+
     let imageData = null;
-    let itemSize = 500;  // Rough estimate for JSON overhead per item
-    
+    let itemSize = 500;
+
     try {
       imageData = imageToBase64(img.element);
-      if (imageData === 'TOO_SMALL') {
-        processedImages.delete(img.element);
-        seenImageUrls.delete(itemId);
-        if (settings.verboseLogs) {
-          console.log(`[AI Detector] Skipping thumbnail ${itemId}, will retry when full image loads`);
+      // If base64 is too massive, discard base64 and let native host fetch HTTP directly
+      if (imageData && imageData.length > MAX_ITEM_SIZE) {
+        if (itemId.startsWith('http://') || itemId.startsWith('https://')) {
+          imageData = null; // Send lightweight URL
         }
-        return;  // Skip this image
       }
       if (imageData) {
         itemSize += imageData.length;
@@ -748,33 +742,38 @@ function buildClassificationBatches(images = cachedImages, textSections = cached
     } catch (e) {
       imageData = null;
     }
-    
-    // If adding this item would exceed limit, save current batch and start new one
+
+    // If adding item would exceed chunk limit, commit current batch
     if ((currentSize + itemSize > MAX_MESSAGE_SIZE || currentBatch.length >= MAX_ITEMS_PER_CHUNK) && currentBatch.length > 0) {
       batches.push(currentBatch);
       currentBatch = [];
       currentSize = 1000;
     }
-    
+
+    // Safety guard: if even by itself this single item exceeds MAX_MESSAGE_SIZE, fallback to URL
+    let safeUrl = imageData || img.src || null;
+    if (safeUrl && safeUrl.length > MAX_MESSAGE_SIZE) {
+      safeUrl = img.src || null;
+      itemSize = 500;
+    }
+
     const item = {
       id: itemId,
       modality: 'image',
       source: 'img',
-      url: imageData || img.src || null,  // Base64 if available, else URL
+      url: safeUrl,
       data: null,
-      mime: imageData ? 'image/png' : null,
+      mime: (safeUrl && safeUrl.startsWith('data:image/')) ? 'image/jpeg' : null,
       width: img.width || null,
       height: img.height || null
     };
-    
+
     if (settings.verboseLogs) {
-      const isBase64 = imageData != null;
-      const urlPreview = isBase64 ? 'base64' : (img.src || 'null').substring(0, 80);
-      console.log(`[AI Detector] Batching ${itemId}: ${img.width}x${img.height}, ${isBase64 ? 'base64 (' + Math.round(imageData.length/1024) + 'KB)' : 'URL: ' + urlPreview}`);
+      const isBase64 = Boolean(safeUrl && safeUrl.startsWith('data:'));
+      console.log([AI Detector] Batching : );
     }
-    
+
     currentBatch.push(item);
-    
     currentSize += itemSize;
   });
 

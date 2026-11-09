@@ -60,11 +60,14 @@
           <span class="host-status-badge checking" id="host-status-badge">Checking…</span>
         </div>
 
-        <div class="host-update-controls">
+        <div class="host-update-controls" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+          <button id="reconnect-host-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
+            <span>⚡ Test Connection</span>
+          </button>
           <button id="check-host-update-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
             <span>↻ Check for Updates</span>
           </button>
-          <div id="host-update-status" class="host-update-status" style="display: none;"></div>
+          <div id="host-update-status" class="host-update-status" style="display: none; width: 100%;"></div>
         </div>
       </section>
 

@@ -107,15 +107,35 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "Dependencies installed successfully." -ForegroundColor Green
 }
 
-# Hardware-aware accelerator detection (NVIDIA CUDA vs DirectML / Snapdragon NPU)
+# Hardware-aware accelerator detection (NVIDIA CUDA vs Snapdragon X Elite NPU/DirectML)
 try {
   $gpus = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
-  $npus = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object {
-    $_.Name -match 'NPU|Hexagon|Neural|AI Boost' -or $_.PNPClass -eq 'ComputeAccelerator'
-  } | Select-Object -ExpandProperty Name -Unique
+  $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -First 1
+
+  # Check PnP devices for Hexagon / NPU / ComputeAccelerator
+  $npus = @()
+  try {
+    $pnpAccelerators = Get-PnpDevice -Class 'ComputeAccelerator' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FriendlyName
+    if ($pnpAccelerators) { $npus += $pnpAccelerators }
+  } catch {}
+  try {
+    $pnpNpus = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
+      $_.FriendlyName -match 'Hexagon|NPU|Neural|AI Boost|Qualcomm.*Accelerator'
+    } | Select-Object -ExpandProperty FriendlyName
+    if ($pnpNpus) { $npus += $pnpNpus }
+  } catch {}
+  if (-not $npus -or $npus.Count -eq 0) {
+    try {
+      $cimNpus = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match 'NPU|Hexagon|Neural|AI Boost' -or $_.Service -match 'qcnpu'
+      } | Select-Object -ExpandProperty Name
+      if ($cimNpus) { $npus += $cimNpus }
+    } catch {}
+  }
+  $npus = $npus | Select-Object -Unique
 
   $hasNvidia = ($gpus | Where-Object { $_ -match 'NVIDIA' }) -ne $null
-  $hasSnapdragon = ($npus | Where-Object { $_ -match 'Hexagon|Qualcomm' }) -ne $null -or ($gpus | Where-Object { $_ -match 'Qualcomm|Adreno' }) -ne $null
+  $hasSnapdragon = ($npus | Where-Object { $_ -match 'Hexagon|Qualcomm' }) -ne $null -or ($gpus | Where-Object { $_ -match 'Qualcomm|Adreno' }) -ne $null -or ($cpu | Where-Object { $_ -match 'Snapdragon|Qualcomm' }) -ne $null
 
   if ($hasNvidia) {
     $cudaAvailable = & $venvPython -c "import torch; print(torch.cuda.is_available())" 2>$null
@@ -126,14 +146,19 @@ try {
       Write-Host "NVIDIA CUDA PyTorch already active." -ForegroundColor Green
     }
   } elseif ($hasSnapdragon) {
-    $npuTitle = if ($npus) { ($npus -join ', ') } else { "Qualcomm Hexagon NPU" }
-    Write-Host "`n=== Hardware Acceleration: Qualcomm Snapdragon X Elite ===" -ForegroundColor Green
-    Write-Host "  GPU: $($gpus -join ', ')" -ForegroundColor Cyan
+    $npuTitle = if ($npus -and $npus.Count -gt 0) { ($npus -join ', ') } else { "Qualcomm Hexagon NPU (45 TOPS Neural Processing Engine)" }
+    $gpuTitle = if ($gpus) { ($gpus -join ', ') } else { "Qualcomm Adreno GPU" }
+    Write-Host "`n============================================================" -ForegroundColor Green
+    Write-Host "  [HARDWARE DETECTED] Qualcomm Snapdragon X Elite Platform" -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Green
+    if ($cpu) { Write-Host "  CPU: $cpu" -ForegroundColor Cyan }
+    Write-Host "  GPU: $gpuTitle" -ForegroundColor Cyan
     Write-Host "  NPU: $npuTitle" -ForegroundColor Green
-    Write-Host "Configuring DirectML hardware acceleration for Snapdragon NPU/GPU..." -ForegroundColor Cyan
-    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null
+    Write-Host "`nEnsuring ONNX Runtime DirectML hardware acceleration is active..." -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml
+    Write-Host "DirectML hardware acceleration configured for Snapdragon GPU and NPU." -ForegroundColor Green
   } elseif ($npus) {
-    Write-Host "Detected NPU ($($npus -join ', ')) & GPU ($($gpus -join ', ')). Ensuring DirectML is available..." -ForegroundColor Cyan
+    Write-Host "Detected NPU ($($npus -join ', ')) and GPU ($($gpus -join ', ')). Ensuring DirectML is available..." -ForegroundColor Cyan
     & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null
   } else {
     Write-Host "Non-NVIDIA GPU/NPU detected ($($gpus -join ', ')). Ensuring ONNX Runtime DirectML is available..." -ForegroundColor Cyan

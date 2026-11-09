@@ -15,6 +15,7 @@ from urllib.error import URLError, HTTPError
 import base64
 import urllib.parse
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 import os
 
@@ -76,11 +77,12 @@ def read_message():
 
 def send_message(message):
     encoded = json.dumps(message, separators=(',', ':')).encode('utf-8')
-    # Firefox strict 1MB message limit guard
-    if len(encoded) >= 1024 * 1024:
-        log(f"[Native] Warning: message size ({len(encoded)} bytes) exceeds 1MB limit; truncating results to prevent disconnect")
-        if isinstance(message, dict) and 'results' in message and isinstance(message['results'], list):
-            message['results'] = message['results'][:max(1, len(message['results']) // 2)]
+    # Firefox strict 1MB native messaging limit: truncate gracefully so port NEVER disconnects
+    max_safe_bytes = 750 * 1024
+    if len(encoded) >= max_safe_bytes and isinstance(message, dict) and 'results' in message and isinstance(message['results'], list):
+        log(f"[Native] Warning: message size ({len(encoded)} bytes) exceeds safe limit; truncating results to protect connection")
+        while len(encoded) >= max_safe_bytes and len(message['results']) > 1:
+            message['results'] = message['results'][:len(message['results']) // 2]
             encoded = json.dumps(message, separators=(',', ':')).encode('utf-8')
     _raw_stdout.write(struct.pack('<I', len(encoded)))
     _raw_stdout.write(encoded)
@@ -192,80 +194,46 @@ def fetch_text_from_items(text_items: List[Dict[str, Any]]) -> List[tuple]:
     return results
 
 
-def fetch_images_from_urls(image_items: List[Dict[str, Any]]) -> List[tuple]:
-    
-    # Fetch images from URLs or decode base64 data URLs
-    
-    # Returns 4-tuples per image: (item_id, PIL.Image or None, error_reason or None, fetch_duration_ms)
-        
-    results = []
-    base64_count = 0
-    http_count = 0
-    
-    for item in image_items:
-        item_id = item.get('id')
-        url = item.get('url')
-        t0 = time.time()
-        
-        try:
-            # Handle data URLs (base64-encoded images from browser)
-            if url and url.startswith('data:'):
-                base64_count += 1
-                header, data_part = url.split(',', 1)
-                if ';base64' in header:
-                    raw = base64.b64decode(data_part)
-                else:
-                    raw = urllib.parse.unquote_to_bytes(data_part)
-                # Optionally dump incoming raw bytes for debugging transport/preproc
-                try:
-                    if os.environ.get('FIRE_SAVE_INCOMING_IMAGES') == '1':
-                        dbg_dir = Path(__file__).resolve().parent / 'incoming_debug'
-                        dbg_dir.mkdir(exist_ok=True)
-                        # Guess extension from header
-                        ext = 'jpg' if 'jpeg' in header or 'jpg' in header else 'png'
-                        out_path = dbg_dir / f"{item_id}_{int(time.time()*1000)}.{ext}"
-                        with open(out_path, 'wb') as fh:
-                            fh.write(raw)
-                        log(f"[fetch_images] Saved incoming image for {item_id} -> {out_path} ({len(raw)} bytes)")
-                except Exception:
-                    pass
-
-                img = Image.open(BytesIO(raw)).convert('RGB')
-                results.append((item_id, img, None, int((time.time() - t0) * 1000)))
-            
-            # Handle HTTP/HTTPS URLs (fetch from network)
-            elif url and url.startswith(('http://', 'https://')):
-                http_count += 1
-                req = Request(url, headers={
-                    'User-Agent': 'Mozilla/5.0 (native-host)',
-                    'Accept': 'image/*,*/*;q=0.8'
-                })
-                with urlopen(req, timeout=15) as resp:
-                    data = resp.read()
-                try:
-                    if os.environ.get('FIRE_SAVE_INCOMING_IMAGES') == '1':
-                        dbg_dir = Path(__file__).resolve().parent / 'incoming_debug'
-                        dbg_dir.mkdir(exist_ok=True)
-                        out_path = dbg_dir / f"{item_id}_{int(time.time()*1000)}.jpg"
-                        with open(out_path, 'wb') as fh:
-                            fh.write(data)
-                        log(f"[fetch_images] Saved fetched image for {item_id} -> {out_path} ({len(data)} bytes)")
-                except Exception:
-                    pass
-                img = Image.open(BytesIO(data)).convert('RGB')
-                results.append((item_id, img, None, int((time.time() - t0) * 1000)))
-            
+def _fetch_single_image(item: Dict[str, Any]) -> tuple:
+    item_id = item.get('id')
+    url = item.get('url')
+    t0 = time.time()
+    if not url:
+        return (item_id, None, 'errorus/no_url', 0)
+    try:
+        if url.startswith('data:'):
+            header, data_part = url.split(',', 1)
+            if ';base64' in header:
+                raw = base64.b64decode(data_part)
             else:
-                results.append((item_id, None, 'errorus/no_url', int((time.time() - t0) * 1000)))
-        
-        except (HTTPError, URLError) as e:
-            results.append((item_id, None, 'image_fetch_failed', int((time.time() - t0) * 1000)))
-        except Exception as e:
-            results.append((item_id, None, 'image_load_error', int((time.time() - t0) * 1000)))
+                raw = urllib.parse.unquote_to_bytes(data_part)
+            img = Image.open(BytesIO(raw)).convert('RGB')
+            return (item_id, img, None, int((time.time() - t0) * 1000))
+        elif url.startswith(('http://', 'https://')):
+            req = Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/*,*/*;q=0.8'
+            })
+            with urlopen(req, timeout=3.5) as resp:
+                data = resp.read()
+            img = Image.open(BytesIO(data)).convert('RGB')
+            return (item_id, img, None, int((time.time() - t0) * 1000))
+        else:
+            return (item_id, None, 'invalid_url_scheme', 0)
+    except Exception as e:
+        return (item_id, None, f'fetch_failed: {str(e)[:40]}', int((time.time() - t0) * 1000))
+
+def fetch_images_from_urls(image_items: List[Dict[str, Any]]) -> List[tuple]:
+    if not image_items:
+        return []
+    # If all items are base64, process in-thread directly for zero threading overhead
+    all_base64 = all(bool(it.get('url', '').startswith('data:')) for it in image_items)
+    if all_base64 or len(image_items) == 1:
+        return [_fetch_single_image(it) for it in image_items]
     
-    if base64_count > 0 or http_count > 0:
-        log(f"[fetch_images] Source breakdown: {base64_count} base64 (cached), {http_count} HTTP (network)")
-    
+    # Otherwise fetch concurrently with ThreadPoolExecutor so network delays never block host
+    with ThreadPoolExecutor(max_workers=min(6, len(image_items))) as executor:
+        results = list(executor.map(_fetch_single_image, image_items))
     return results
 
 

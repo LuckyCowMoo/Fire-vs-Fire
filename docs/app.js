@@ -217,6 +217,69 @@ function sendBridgeMessage(action, payload = {}, timeoutMs = 10000) {
 // STATUS CHECKS & CATALOG LOADING
 // ============================================================================
 
+let nativeCheckInterval = null;
+let waitingForNativeInstall = false;
+
+function updateNativeHostUI() {
+  const skipBtn = document.getElementById('skip-to-models-btn');
+  const liveBox = document.getElementById('native-live-status-box');
+  const heading = document.getElementById('native-status-heading');
+  const detail = document.getElementById('native-status-detail');
+  const icon = document.getElementById('native-pulse-icon');
+  const hint = document.getElementById('native-not-connected-hint');
+
+  if (nativeHostConnected) {
+    if (skipBtn) {
+      skipBtn.disabled = false;
+      skipBtn.style.opacity = '1';
+      skipBtn.style.cursor = 'pointer';
+    }
+    if (hint) hint.style.display = 'none';
+
+    if (liveBox) {
+      liveBox.style.background = 'rgba(76, 175, 80, 0.15)';
+      liveBox.style.borderColor = 'rgba(76, 175, 80, 0.45)';
+    }
+    if (icon) icon.textContent = '✅';
+    if (heading) {
+      heading.textContent = 'Native Host Connected & Ready!';
+      heading.style.color = '#7cfc00';
+    }
+    if (detail) {
+      detail.textContent = 'Local hardware-accelerated AI environment is online.';
+    }
+
+    if (waitingForNativeInstall && currentScreen === 1) {
+      waitingForNativeInstall = false;
+      if (nativeCheckInterval) {
+        clearInterval(nativeCheckInterval);
+        nativeCheckInterval = null;
+      }
+      setTimeout(() => {
+        goToScreen(2);
+      }, 1000);
+    }
+  } else {
+    if (skipBtn) {
+      skipBtn.disabled = true;
+      skipBtn.style.opacity = '0.45';
+      skipBtn.style.cursor = 'not-allowed';
+    }
+    if (liveBox) {
+      liveBox.style.background = 'rgba(255, 140, 0, 0.1)';
+      liveBox.style.borderColor = 'rgba(255, 140, 0, 0.35)';
+    }
+    if (icon) icon.textContent = '⏳';
+    if (heading) {
+      heading.textContent = 'Waiting for Native Host connection…';
+      heading.style.color = '#ffb020';
+    }
+    if (detail) {
+      detail.textContent = 'Keep this tab open while running the installer. Detection is automatic!';
+    }
+  }
+}
+
 async function checkBridgeAndNativeStatus() {
   const pingRes = await sendBridgeMessage('PING', {}, 2000).catch(() => ({ ok: false }));
   extensionConnected = Boolean(pingRes && pingRes.ok);
@@ -227,6 +290,7 @@ async function checkBridgeAndNativeStatus() {
   } else {
     nativeHostConnected = false;
   }
+  updateNativeHostUI();
 }
 
 async function loadOfficialModelsCatalog() {
@@ -537,6 +601,15 @@ async function runFinishSetup() {
 // ============================================================================
 
 function goToScreen(stepNumber) {
+  if (stepNumber === 2 && !nativeHostConnected) {
+    const hint = document.getElementById('native-not-connected-hint');
+    const instructions = document.getElementById('native-install-instructions');
+    if (hint) hint.style.display = 'block';
+    if (instructions) instructions.style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+
   currentScreen = stepNumber;
 
   document.querySelectorAll('.wizard-screen').forEach((sec) => {
@@ -648,7 +721,31 @@ function init() {
   const dlNativeBtn = document.getElementById('download-native-host-btn');
   if (dlNativeBtn) {
     dlNativeBtn.addEventListener('click', () => {
-      setTimeout(() => goToScreen(2), 900);
+      // Reveal the 2-step File Explorer instructions
+      const instructions = document.getElementById('native-install-instructions');
+      if (instructions) instructions.style.display = 'block';
+      waitingForNativeInstall = true;
+
+      // Start live connection heartbeat check every 1.5s
+      if (!nativeCheckInterval) {
+        nativeCheckInterval = setInterval(async () => {
+          await checkBridgeAndNativeStatus().catch(() => {});
+        }, 1500);
+      }
+    });
+  }
+
+  const checkConnBtn = document.getElementById('check-connection-btn');
+  if (checkConnBtn) {
+    checkConnBtn.addEventListener('click', async () => {
+      checkConnBtn.disabled = true;
+      checkConnBtn.textContent = 'Checking…';
+      await checkBridgeAndNativeStatus().catch(() => {});
+      checkConnBtn.disabled = false;
+      checkConnBtn.textContent = '↻ Check Now';
+      if (nativeHostConnected) {
+        goToScreen(2);
+      }
     });
   }
 
@@ -656,9 +753,23 @@ function init() {
   if (skipBtn) {
     skipBtn.addEventListener('click', (e) => {
       e.preventDefault();
+      if (!nativeHostConnected) {
+        const hint = document.getElementById('native-not-connected-hint');
+        const instructions = document.getElementById('native-install-instructions');
+        if (hint) hint.style.display = 'block';
+        if (instructions) instructions.style.display = 'block';
+        return;
+      }
       goToScreen(2);
     });
   }
+
+  // Periodic heartbeat on screen 1 to auto-detect connection
+  setInterval(() => {
+    if (currentScreen === 1) {
+      checkBridgeAndNativeStatus().catch(() => {});
+    }
+  }, 2500);
 
   // Screen 2 buttons
   document.getElementById('back-to-step1-btn')?.addEventListener('click', () => goToScreen(1));

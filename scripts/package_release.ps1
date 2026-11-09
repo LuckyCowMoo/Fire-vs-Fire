@@ -37,16 +37,19 @@ foreach ($f in $extFiles) {
     if (Test-Path $srcPath) { Copy-Item -Path $srcPath -Destination $extTemp }
 }
 
-$extDirs = @("background", "content", "options", "shared", "icons")
+$extDirs = @("background", "content", "options", "shared", "icons", "docs")
 foreach ($d in $extDirs) {
     $srcPath = Join-Path $repoRoot $d
     if (Test-Path $srcPath) { Copy-Item -Path $srcPath -Destination $extTemp -Recurse }
 }
 
-$extZip = Join-Path $distDir "FireVsFire-BrowserExtension-v$Version.zip"
+$extZip = Join-Path $distDir "FireVsFire-BrowserExtension.zip"
+$extZipVersioned = Join-Path $distDir "FireVsFire-BrowserExtension-v$Version.zip"
 Compress-Archive -Path "$extTemp\*" -DestinationPath $extZip -Force
+Copy-Item -Path $extZip -Destination $extZipVersioned -Force
 Remove-Item -Recurse -Force $extTemp
 Write-Host "  -> Created: $extZip" -ForegroundColor Green
+Write-Host "  -> Created: $extZipVersioned" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
 # 2. Package Backend Native Server
@@ -55,6 +58,7 @@ Write-Host "`n[2/2] Creating Backend Native Server Package..." -ForegroundColor 
 $serverTemp = Join-Path $distDir "temp_server"
 New-Item -ItemType Directory -Force -Path $serverTemp | Out-Null
 
+Copy-Item -Path (Join-Path $repoRoot "Install-FireVsFire-NativeHost.bat") -Destination $serverTemp
 Copy-Item -Path (Join-Path $repoRoot "requirements.txt") -Destination $serverTemp
 Copy-Item -Path (Join-Path $repoRoot "LICENSE") -Destination $serverTemp
 
@@ -76,10 +80,13 @@ Get-ChildItem -Path $nativeSrc -Recurse | Where-Object {
     }
 }
 
-$serverZip = Join-Path $distDir "FireVsFire-BackendServer-v$Version.zip"
+$serverZip = Join-Path $distDir "FireVsFire-NativeHost.zip"
+$serverZipVersioned = Join-Path $distDir "FireVsFire-NativeHost-v$Version.zip"
 Compress-Archive -Path "$serverTemp\*" -DestinationPath $serverZip -Force
+Copy-Item -Path $serverZip -Destination $serverZipVersioned -Force
 Remove-Item -Recurse -Force $serverTemp
 Write-Host "  -> Created: $serverZip" -ForegroundColor Green
+Write-Host "  -> Created: $serverZipVersioned" -ForegroundColor Green
 
 Write-Host "`n=============================================" -ForegroundColor Cyan
 Write-Host "  Packaging Complete! Output in ./dist/" -ForegroundColor Cyan

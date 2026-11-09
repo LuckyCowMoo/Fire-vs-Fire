@@ -109,8 +109,9 @@ class FvfHeimdall02Classifier(BaseClassifier):
         here = Path(__file__).resolve().parent
         repo_root = here.parents[1]
         candidates = [
-            here / "fvf_heimdall_02_best.pt",
+            here / "fvf_heimdall_02_int8.onnx",
             here / "fvf_heimdall_02_best.onnx",
+            here / "fvf_heimdall_02_best.pt",
             here / "fvf_ares_best.pt",
             repo_root / "checkpoints" / "fvf_heimdall_02_base" / "best_inference_fp16.pt",
             repo_root / "checkpoints" / "fvf_ares" / "best_inference_fp16.pt",
@@ -138,7 +139,19 @@ class FvfHeimdall02Classifier(BaseClassifier):
             self._log(f"Using GPU (CUDA): {name} (dtype={self._amp_dtype})")
             return
 
-        # 2. Try DirectML (AMD / Intel / Windows GPU & NPU)
+        # 2. Try Apple Silicon MPS (Metal Performance Shaders / Apple Neural Engine via MPSGraph)
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            try:
+                self.device = torch.device("mps")
+                self._use_fp16 = True
+                self._amp_dtype = torch.float16
+                self._device_info = {"device": "mps", "name": "Apple Silicon (Metal/ANE)", "backend": "MPS"}
+                self._log("Using Apple Silicon GPU/ANE (MPS)")
+                return
+            except Exception:
+                pass
+
+        # 3. Try DirectML (AMD / Intel / Windows GPU & NPU)
         try:
             import torch_directml
 
@@ -169,23 +182,22 @@ class FvfHeimdall02Classifier(BaseClassifier):
             import onnxruntime as ort
 
             avail = ort.get_available_providers()
-            preferred = [
-                "CUDAExecutionProvider",
-                "QNNExecutionProvider",       # Qualcomm Snapdragon X Elite NPU
-                "OpenVINOExecutionProvider",  # Intel Core Ultra NPU / Arc GPU
-                "DmlExecutionProvider",       # Windows DirectML GPU & NPU
-                "CPUExecutionProvider",
-            ]
+            preferred = BaseClassifier.get_preferred_onnx_providers()
             chosen = [p for p in preferred if p in avail] or avail
+            opts = BaseClassifier.get_onnx_provider_options(chosen)
             sess_opts = ort.SessionOptions()
             sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            self.ort_session = ort.InferenceSession(str(onnx_path), sess_options=sess_opts, providers=chosen)
+            try:
+                self.ort_session = ort.InferenceSession(str(onnx_path), sess_options=sess_opts, providers=chosen, provider_options=opts)
+            except Exception:
+                self.ort_session = ort.InferenceSession(str(onnx_path), sess_options=sess_opts, providers=chosen)
             active_ep = self.ort_session.get_providers()[0]
             self._device_info = {
                 "device": active_ep,
                 "name": f"ONNX Runtime ({active_ep})",
                 "backend": active_ep.replace("ExecutionProvider", ""),
             }
+            self.model_path = onnx_path
             self._is_loaded = True
             self._log(f"Loaded ONNX model {onnx_path.name} via {active_ep}")
             return True

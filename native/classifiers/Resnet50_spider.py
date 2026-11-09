@@ -38,6 +38,7 @@ class ResNet50SpiderClassifier(BaseClassifier):
         self._SpiderResNet50 = None
 
         self._preprocess = None
+        self.ort_session = None
         self._device_info: Dict[str, Any] = {
             "device": "unknown",
             "name": "Not loaded",
@@ -89,27 +90,50 @@ class ResNet50SpiderClassifier(BaseClassifier):
             self._log(f"[ResNet50Spider] Failed to import libraries: {exc}")
             return False
 
-    def _setup_device(self) -> None:
+    def _find_checkpoint(self) -> Optional[Path]:
+        if self.model_path and Path(self.model_path).exists():
+            return Path(self.model_path)
+        here = Path(__file__).resolve().parent
+        candidates = [
+            here / "spider_detector_resnet50_int8.onnx",
+            here / "spider_detector_resnet50.onnx",
+            here / "spider_detector_resnet50.pt",
+        ]
+        for p in candidates:
+            if p.is_file():
+                return p
+        return None
+
+    def _try_load_onnx(self, onnx_path: Path) -> bool:
         try:
-            import torch_directml
+            import onnxruntime as ort
 
-            self.device = torch_directml.device()
+            avail = ort.get_available_providers()
+            preferred = BaseClassifier.get_preferred_onnx_providers()
+            chosen = [p for p in preferred if p in avail] or avail
+            opts = BaseClassifier.get_onnx_provider_options(chosen)
+            sess_opts = ort.SessionOptions()
+            sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             try:
-                device_name = torch_directml.device_name(0)
+                self.ort_session = ort.InferenceSession(str(onnx_path), sess_options=sess_opts, providers=chosen, provider_options=opts)
             except Exception:
-                device_name = "DirectML GPU"
+                self.ort_session = ort.InferenceSession(str(onnx_path), sess_options=sess_opts, providers=chosen)
+            active_ep = self.ort_session.get_providers()[0]
             self._device_info = {
-                "device": "privateuseone:0",
-                "name": device_name,
-                "backend": "DirectML",
+                "device": active_ep,
+                "name": f"ONNX Runtime ({active_ep})",
+                "backend": active_ep.replace("ExecutionProvider", ""),
             }
-            self._log(f"[ResNet50Spider] Using GPU: {device_name} (DirectML)")
-            return
-        except ImportError:
-            self._log("[ResNet50Spider] DirectML not available")
+            self.model_path = onnx_path
+            self._is_loaded = True
+            self._log(f"Loaded ONNX model {onnx_path.name} via {active_ep}")
+            return True
         except Exception as exc:
-            self._log(f"[ResNet50Spider] DirectML failed: {exc}")
+            self._log(f"ONNX load skipped/failed ({exc}); falling back to PyTorch")
+            return False
 
+    def _setup_device(self) -> None:
+        # 1. NVIDIA CUDA first
         if self.torch.cuda.is_available():
             self.device = self.torch.device("cuda")
             try:
@@ -124,10 +148,48 @@ class ResNet50SpiderClassifier(BaseClassifier):
             self._log(f"[ResNet50Spider] Using GPU: {device_name} (CUDA)")
             return
 
+        # 2. Apple Silicon MPS
+        if hasattr(self.torch.backends, "mps") and self.torch.backends.mps.is_available():
+            try:
+                self.device = self.torch.device("mps")
+                self._device_info = {
+                    "device": "mps",
+                    "name": "Apple Silicon (Metal/ANE)",
+                    "backend": "MPS",
+                }
+                self._log("[ResNet50Spider] Using Apple Silicon GPU/ANE (MPS)")
+                return
+            except Exception:
+                pass
+
+        # 3. DirectML (AMD/Intel GPU & Windows NPU)
+        try:
+            import torch_directml
+            self.device = torch_directml.device()
+            try:
+                device_name = torch_directml.device_name(0)
+            except Exception:
+                device_name = "DirectML GPU"
+            self._device_info = {
+                "device": "privateuseone:0",
+                "name": device_name,
+                "backend": "DirectML",
+            }
+            self._log(f"[ResNet50Spider] Using GPU: {device_name} (DirectML)")
+            return
+        except Exception:
+            pass
+
+        # 4. Multithreaded CPU fallback
         self.device = self.torch.device("cpu")
+        try:
+            import os
+            self.torch.set_num_threads(min(8, os.cpu_count() or 4))
+        except Exception:
+            pass
         self._device_info = {
             "device": "cpu",
-            "name": "CPU",
+            "name": "CPU (Multithreaded)",
             "backend": "CPU",
         }
         self._log("[ResNet50Spider] Using CPU")
@@ -142,9 +204,17 @@ class ResNet50SpiderClassifier(BaseClassifier):
         if not self._ensure_imports():
             return False, "import_failed"
 
-        if self.model_path is None or not Path(self.model_path).exists():
-            return False, f"Model file not found: {self.model_path}"
+        ckpt_path = self._find_checkpoint()
+        if ckpt_path is None:
+            return False, f"Spider ResNet-50 checkpoint not found: {self.model_path}"
 
+        # If ONNX file exists and CUDA is not active, run hardware accelerated via ONNX Runtime
+        if ckpt_path.suffix.lower() == ".onnx" or (not self.torch.cuda.is_available() and ckpt_path.with_suffix(".onnx").is_file()):
+            onnx_file = ckpt_path if ckpt_path.suffix.lower() == ".onnx" else ckpt_path.with_suffix(".onnx")
+            if self._try_load_onnx(onnx_file):
+                return True, None
+
+        self.model_path = ckpt_path
         try:
             self._setup_device()
 
@@ -219,6 +289,14 @@ class ResNet50SpiderClassifier(BaseClassifier):
             return []
 
         try:
+            if self.ort_session is not None:
+                inp_name = self.ort_session.get_inputs()[0].name
+                inp_np = batch_tensor.cpu().numpy() if hasattr(batch_tensor, "cpu") else batch_tensor
+                logits_np = self.ort_session.run(None, {inp_name: inp_np})[0]
+                logits_t = self.torch.from_numpy(logits_np)
+                probs = self.torch.softmax(logits_t, dim=1)
+                return [float(s) for s in probs[:, 1].tolist()]
+
             with self.torch.no_grad():
                 logits = self.model(batch_tensor)
                 probs = self.torch.softmax(logits, dim=1)

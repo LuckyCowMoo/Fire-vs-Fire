@@ -251,6 +251,21 @@ class BaseClassifier(ABC):
             self._log_to_stderr(f"✓ Using GPU (CUDA): {device_name}")
             return device
 
+        # Try Apple Silicon MPS (Metal Performance Shaders / Apple Neural Engine via MPSGraph)
+        if hasattr(lib_torch.backends, 'mps') and lib_torch.backends.mps.is_available():
+            try:
+                device = lib_torch.device('mps')
+                if hasattr(self, '_device_info'):
+                    self._device_info = {
+                        'device': 'mps',
+                        'name': 'Apple Silicon (Metal/ANE)',
+                        'backend': 'MPS'
+                    }
+                self._log_to_stderr("✓ Using Apple Silicon GPU/ANE (MPS)")
+                return device
+            except Exception as e:
+                self._log_to_stderr(f"Apple Silicon MPS failed: {e}")
+
         # Try DirectML (AMD/Intel GPU & Windows NPU)
         try:
             import torch_directml
@@ -280,6 +295,40 @@ class BaseClassifier(ABC):
         self._log_to_stderr("⚠ Using CPU (GPU not available)")
         return device
     
+
+    @staticmethod
+    def get_preferred_onnx_providers() -> List[str]:
+        """Global hardware execution provider hierarchy for ONNX Runtime.
+        Ordered strictly by capability, performance, and efficiency:
+          1. CUDAExecutionProvider      - NVIDIA GPUs (RTX 5080, 4090, 3060, etc.)
+          2. CoreMLExecutionProvider    - Apple Silicon (Apple Neural Engine + Metal GPU on macOS)
+          3. QNNExecutionProvider       - Qualcomm Snapdragon X Elite Hexagon NPU (45 TOPS)
+          4. OpenVINOExecutionProvider  - Intel Core Ultra NPU & Arc GPUs
+          5. DmlExecutionProvider       - Windows DirectML (Qualcomm Adreno GPU, AMD Radeon, Intel)
+          6. CPUExecutionProvider       - Multithreaded CPU fallback
+        """
+        return [
+            "CUDAExecutionProvider",
+            "CoreMLExecutionProvider",
+            "QNNExecutionProvider",
+            "OpenVINOExecutionProvider",
+            "DmlExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+
+    @staticmethod
+    def get_onnx_provider_options(chosen_providers: List[str]) -> List[Dict[str, Any]]:
+        """Configure provider-specific accelerator options."""
+        options = []
+        for p in chosen_providers:
+            if p == "QNNExecutionProvider":
+                options.append({"backend_path": "QnnHtp.dll", "profiling_level": "off"})
+            elif p == "CoreMLExecutionProvider":
+                options.append({"coreml_flags": "0x001"})  # ANE + GPU + CPU
+            else:
+                options.append({})
+        return options
+
     def _ensure_imports_safely(self, import_dict: Dict[str, str]) -> bool:
         """
         Safely import multiple libraries with clear error reporting.

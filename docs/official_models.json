@@ -23,6 +23,13 @@
       "description": "Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels across 5 spatial crops fused with a ConvNeXt-Base semantic backbone.",
       "files": [
         {
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/fvf_heimdall_02_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_int8.onnx",
+          "required": false
+        },
+        {
           "type": "classifier_py",
           "relative_path": "native/classifiers/fvf_heimdall_02_classifier.py",
           "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_02_classifier.py",
@@ -110,6 +117,13 @@
       "tagline": "Detects spiders",
       "description": "Demonstrates that Fire vs Fire can classify any visual concept\u2014not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
       "files": [
+        {
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/spider_detector_resnet50_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50_int8.onnx",
+          "required": false
+        },
         {
           "type": "classifier_py",
           "relative_path": "native/classifiers/Resnet50_spider.py",

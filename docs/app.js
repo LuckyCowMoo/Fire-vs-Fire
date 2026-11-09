@@ -783,6 +783,30 @@ function init() {
     runFinishSetup();
   });
 
+  // Bypass link for users who already installed or are testing
+  const forceBtn = document.getElementById('force-proceed-models-btn');
+  if (forceBtn) {
+    forceBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      nativeHostConnected = true;
+      updateNativeHostUI();
+      goToScreen(2);
+    });
+  }
+
+  // Handle direct navigation to screen from URL (e.g. ?screen=2 or ?screen=3)
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetScreen = parseInt(urlParams.get('screen') || urlParams.get('step') || '0', 10);
+  if (targetScreen >= 2 && targetScreen <= 4) {
+    nativeHostConnected = true; // Bypass lock when navigating directly from extension options
+    goToScreen(targetScreen);
+  } else if (window.location.hash === '#models' || window.location.hash === '#screen-2') {
+    nativeHostConnected = true;
+    goToScreen(2);
+  } else if (window.location.hash === '#guide' || window.location.hash === '#screen-3') {
+    goToScreen(3);
+  }
+
   // Background status verification (non-blocking)
   checkBridgeAndNativeStatus().catch(() => {});
   loadOfficialModelsCatalog().catch(() => {});

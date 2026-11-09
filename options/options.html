@@ -14,6 +14,9 @@
     <link rel="stylesheet" href="../content/content.css" />
   </head>
   <body>
+    <!-- Floating Embers Background Engine -->
+    <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
+
     <main class="popup-root">
       <header class="app-header">
         <div class="logo-wrap">
@@ -30,6 +33,40 @@
           <span id="run-state-text">Idle</span>
         </p>
       </header>
+
+      <!-- Quick Navigation & App Hub -->
+      <div class="quick-nav-bar">
+        <button id="open-fullpage-btn" type="button" class="nav-pill-btn" title="Open Settings in a full browser tab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          <span>Full Page</span>
+        </button>
+        <button id="open-models-btn" type="button" class="nav-pill-btn" title="Open 4-Quadrant Model Downloads">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span>Model Hub</span>
+        </button>
+        <button id="open-guide-btn" type="button" class="nav-pill-btn" title="View Guide on How to Use Fire vs Fire">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <span>How to Use</span>
+        </button>
+      </div>
+
+      <!-- Native Host & Updates Panel -->
+      <section class="panel native-host-panel">
+        <div class="panel-header-row">
+          <div class="panel-header-title">
+            <strong style="font-size: 13px;">Native Inference Host</strong>
+            <span class="panel-header-sub" id="host-detail-text">Local GPU / CPU classifier bridge</span>
+          </div>
+          <span class="host-status-badge checking" id="host-status-badge">Checking…</span>
+        </div>
+
+        <div class="host-update-controls">
+          <button id="check-host-update-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
+            <span>↻ Check for Updates</span>
+          </button>
+          <div id="host-update-status" class="host-update-status" style="display: none;"></div>
+        </div>
+      </section>
 
       <section class="panel detection-panel">
         <label class="toggle-row master-toggle">

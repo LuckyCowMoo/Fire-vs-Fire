@@ -863,3 +863,132 @@ input[type='range']::-moz-range-thumb {
 .category-tile:active {
   transform: scale(0.98);
 }
+
+
+/* ============================================================================
+   FLOATING EMBERS CANVAS & QUICK NAV STYLES
+   ============================================================================ */
+
+#ember-webgl-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+}
+
+body {
+  position: relative;
+  background: #090302;
+}
+
+.popup-root {
+  position: relative;
+  z-index: 1;
+}
+
+.quick-nav-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  justify-content: space-between;
+}
+
+.nav-pill-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.nav-pill-btn:hover {
+  background: rgba(255, 98, 24, 0.14);
+  border-color: rgba(255, 98, 24, 0.45);
+  color: #ff9142;
+  transform: translateY(-1px);
+}
+
+.nav-pill-btn svg {
+  stroke: currentColor;
+  flex-shrink: 0;
+}
+
+/* Native Host Status & Updater Panel */
+.native-host-panel {
+  border-color: rgba(255, 98, 24, 0.22);
+  background: linear-gradient(145deg, rgba(22, 9, 6, 0.85), rgba(14, 5, 3, 0.9));
+}
+
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.panel-header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.panel-header-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.host-status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.host-status-badge.connected {
+  background: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.35);
+}
+
+.host-status-badge.disconnected {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.35);
+}
+
+.host-status-badge.checking {
+  background: rgba(241, 196, 15, 0.15);
+  color: #f1c40f;
+  border: 1px solid rgba(241, 196, 15, 0.35);
+}
+
+.host-update-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.host-update-status {
+  font-size: 11.5px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  line-height: 1.45;
+}

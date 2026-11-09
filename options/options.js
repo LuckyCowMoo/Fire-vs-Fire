@@ -1663,3 +1663,181 @@ if (refreshBtn) {
 [classificationDelayInput, imageCaptureQualityInput].forEach((el) => {
   if (el) updateSliderBackground(el);
 });
+
+
+// ============================================================================
+// FLOATING EMBERS ENGINE (BACKGROUND EFFECT)
+// ============================================================================
+
+function initFloatingEmbers() {
+  const canvas = document.getElementById('ember-webgl-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  let width = (canvas.width = window.innerWidth);
+  let height = (canvas.height = window.innerHeight);
+
+  window.addEventListener('resize', () => {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  });
+
+  const embers = Array.from({ length: 48 }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    vx: 0.2 + Math.random() * 0.6,
+    vy: -0.3 - Math.random() * 0.6,
+    r: 1.2 + Math.random() * 2.5,
+    alpha: 0.18 + Math.random() * 0.55,
+    hue: 14 + Math.random() * 32
+  }));
+
+  function renderEmbers() {
+    ctx.clearRect(0, 0, width, height);
+    for (const p of embers) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x > width + 20) p.x = -10;
+      if (p.y < -20) p.y = height + 10;
+
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 4.2);
+      grad.addColorStop(0, `hsla(${p.hue}, 100%, 72%, ${p.alpha})`);
+      grad.addColorStop(0.45, `hsla(${p.hue - 6}, 100%, 54%, ${p.alpha * 0.45})`);
+      grad.addColorStop(1, 'hsla(10, 100%, 40%, 0)');
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * 4.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    requestAnimationFrame(renderEmbers);
+  }
+  requestAnimationFrame(renderEmbers);
+}
+
+// ============================================================================
+// NAVIGATION BUTTONS & NATIVE HOST UPDATE SYSTEM
+// ============================================================================
+
+function initNavButtonsAndHostUpdater() {
+  // 1. Navigation Buttons
+  const fullPageBtn = document.getElementById('open-fullpage-btn');
+  if (fullPageBtn) {
+    fullPageBtn.addEventListener('click', () => {
+      ext.runtime.sendMessage({ type: 'OPEN_OPTIONS_FULLPAGE' }).catch(() => {
+        if (ext.tabs && ext.tabs.create) {
+          ext.tabs.create({ url: ext.runtime.getURL('options/options.html') });
+        }
+      });
+    });
+  }
+
+  const modelsBtn = document.getElementById('open-models-btn');
+  if (modelsBtn) {
+    modelsBtn.addEventListener('click', () => {
+      ext.runtime.sendMessage({ type: 'OPEN_MODELS_HUB' }).catch(() => {
+        if (ext.tabs && ext.tabs.create) {
+          ext.tabs.create({ url: ext.runtime.getURL('docs/index.html?screen=2') });
+        }
+      });
+    });
+  }
+
+  const guideBtn = document.getElementById('open-guide-btn');
+  if (guideBtn) {
+    guideBtn.addEventListener('click', () => {
+      ext.runtime.sendMessage({ type: 'OPEN_GUIDE_PAGE' }).catch(() => {
+        if (ext.tabs && ext.tabs.create) {
+          ext.tabs.create({ url: ext.runtime.getURL('docs/index.html?screen=3') });
+        }
+      });
+    });
+  }
+
+  // 2. Native Host Status & Updates
+  const badgeEl = document.getElementById('host-status-badge');
+  const detailEl = document.getElementById('host-detail-text');
+  const checkUpdateBtn = document.getElementById('check-host-update-btn');
+  const updateStatusEl = document.getElementById('host-update-status');
+
+  async function refreshHostStatus() {
+    if (!badgeEl) return;
+    try {
+      const resp = await ext.runtime.sendMessage({ type: 'CHECK_NATIVE_HOST' });
+      if (resp && resp.connected) {
+        badgeEl.className = 'host-status-badge connected';
+        badgeEl.textContent = '● Connected';
+        if (detailEl) detailEl.textContent = 'Local hardware-accelerated AI host is active';
+      } else {
+        badgeEl.className = 'host-status-badge disconnected';
+        badgeEl.textContent = '○ Not Connected';
+        if (detailEl) detailEl.textContent = 'Run Install-FireVsFire-NativeHost.bat to connect';
+      }
+    } catch (_) {
+      badgeEl.className = 'host-status-badge disconnected';
+      badgeEl.textContent = '○ Disconnected';
+    }
+  }
+
+  if (checkUpdateBtn && updateStatusEl) {
+    checkUpdateBtn.addEventListener('click', async () => {
+      checkUpdateBtn.disabled = true;
+      checkUpdateBtn.innerHTML = '<span>Checking for updates…</span>';
+      updateStatusEl.style.display = 'block';
+      updateStatusEl.innerHTML = '<span style="color: #f1c40f;">Connecting to GitHub / Native Host…</span>';
+
+      try {
+        const resp = await ext.runtime.sendMessage({ type: 'CHECK_NATIVE_UPDATE' });
+        checkUpdateBtn.disabled = false;
+        checkUpdateBtn.innerHTML = '<span>↻ Check for Updates</span>';
+
+        if (resp && resp.ok && resp.updateInfo) {
+          const info = resp.updateInfo;
+          if (info.updateAvailable) {
+            updateStatusEl.innerHTML = `
+              <div style="color: #ff9d66; font-weight: 600; margin-bottom: 4px;">⚡ Update Available: v${info.latestVersion} (Current: ${info.currentVersion})</div>
+              <div style="color: var(--text-muted); font-size: 11px; margin-bottom: 8px;">${info.releaseNotes || 'Includes new features & optimizations.'}</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                ${resp.connected ? '<button type="button" id="apply-native-update-btn" class="btn btn-outline" style="font-size: 11px; padding: 4px 10px; border-color: #2ecc71; color: #2ecc71;">⚡ Update In-Place Now</button>' : ''}
+                <a href="${info.downloadUrl || 'https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/tag/v2.0'}" target="_blank" class="btn btn-outline" style="font-size: 11px; padding: 4px 10px; text-decoration: none;">Download ZIP</a>
+              </div>
+            `;
+
+            const applyBtn = document.getElementById('apply-native-update-btn');
+            if (applyBtn) {
+              applyBtn.addEventListener('click', async () => {
+                applyBtn.disabled = true;
+                applyBtn.textContent = 'Updating components…';
+                try {
+                  const applyResp = await ext.runtime.sendMessage({ type: 'APPLY_NATIVE_UPDATE' });
+                  if (applyResp && applyResp.ok) {
+                    updateStatusEl.innerHTML = `<span style="color: #2ecc71; font-weight: 600;">✅ ${applyResp.result?.message || 'Updated successfully!'}</span>`;
+                    refreshHostStatus();
+                  } else {
+                    updateStatusEl.innerHTML = `<span style="color: #e74c3c;">❌ Update failed: ${applyResp?.error || 'Unknown error'}</span>`;
+                  }
+                } catch (e) {
+                  updateStatusEl.innerHTML = `<span style="color: #e74c3c;">❌ Error: ${e.message}</span>`;
+                }
+              });
+            }
+          } else {
+            updateStatusEl.innerHTML = `<span style="color: #2ecc71;">✅ Native Host is up to date (v${info.currentVersion || '2.1.0'}).</span>`;
+          }
+        } else {
+          updateStatusEl.innerHTML = `<span style="color: #e74c3c;">Could not check updates: ${resp?.error || 'Native Host not responding'}</span>`;
+        }
+      } catch (err) {
+        checkUpdateBtn.disabled = false;
+        checkUpdateBtn.innerHTML = '<span>↻ Check for Updates</span>';
+        updateStatusEl.innerHTML = `<span style="color: #e74c3c;">Error: ${err.message || String(err)}</span>`;
+      }
+    });
+  }
+
+  refreshHostStatus();
+}
+
+initFloatingEmbers();
+initNavButtonsAndHostUpdater();

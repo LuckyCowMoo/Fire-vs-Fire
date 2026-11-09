@@ -909,6 +909,7 @@ def list_models(request_id: Optional[str] = None):
 # Main Loop
 # ----------------------------------------------------------------------------
 
+HOST_VERSION = "2.1.0"
 OFFICIAL_CATALOG_URL = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json"
 ALLOWED_GITHUB_PREFIXES = (
     "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/",
@@ -1188,6 +1189,76 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
     return resp
 
 
+def check_for_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
+    catalog = _load_official_catalog()
+    remote_version = catalog.get("host_version", HOST_VERSION)
+    update_available = (remote_version != HOST_VERSION)
+    resp = {
+        "ok": True,
+        "type": "checkUpdateResponse",
+        "currentVersion": HOST_VERSION,
+        "latestVersion": remote_version,
+        "updateAvailable": update_available,
+        "releaseNotes": catalog.get("release_notes", "Performance improvements and new model support."),
+        "downloadUrl": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip",
+        "timestamp": int(time.time() * 1000)
+    }
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
+def apply_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
+    files_to_update = [
+        "native/echo_host_V2.py",
+        "native/model_registry.py",
+        "native/official_models.json",
+        "native/classifiers/base_classifier.py",
+        "native/classifiers/fvf_heimdall_02_classifier.py",
+        "native/classifiers/fvf_heimdall_03_classifier.py",
+        "native/classifiers/Resnet50_spider.py"
+    ]
+    base_raw_url = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/"
+    updated_files = []
+    errors = []
+
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parent
+
+    for rel_path in files_to_update:
+        target_path = repo_root / rel_path
+        remote_url = base_raw_url + rel_path
+        try:
+            req = Request(remote_url, headers={"User-Agent": f"FireVsFire-Updater/{HOST_VERSION}", "Cache-Control": "no-cache"})
+            with urlopen(req, timeout=12) as resp_stream:
+                content = resp_stream.read()
+                if content and len(content) > 50:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_path.write_bytes(content)
+                    updated_files.append(rel_path)
+                    log(f"[Updater] Successfully updated {rel_path}")
+        except Exception as exc:
+            log(f"[Updater] Failed updating {rel_path}: {exc}")
+            errors.append(f"{rel_path}: {exc}")
+
+    catalog = _load_official_catalog()
+    new_version = catalog.get("host_version", HOST_VERSION)
+
+    resp = {
+        "ok": len(updated_files) > 0,
+        "type": "applyUpdateResponse",
+        "updatedFiles": updated_files,
+        "version": new_version,
+        "message": f"Successfully updated {len(updated_files)} native host component(s) to v{new_version}. Please reload the extension or restart your browser.",
+        "timestamp": int(time.time() * 1000)
+    }
+    if errors:
+        resp["errors"] = errors
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
 job_assembler = JobAssembler()
 
 def main():
@@ -1205,7 +1276,31 @@ def main():
             log(f"[Main] Received message type: {mtype}")
             
             if mtype == 'ping' or mtype == 'PING':
-                send_message({'ok': True, 'time': int(time.time() * 1000)})
+                req_id = msg.get('requestId')
+                resp = {
+                    'ok': True,
+                    'type': 'pong',
+                    'version': HOST_VERSION,
+                    'time': int(time.time() * 1000)
+                }
+                if req_id:
+                    resp['requestId'] = req_id
+                send_message(resp)
+                continue
+
+            elif mtype == 'checkUpdate' or mtype == 'checkNativeHostUpdate':
+                req_id = msg.get('requestId')
+                resp = check_for_host_updates(req_id)
+                send_message(resp)
+                continue
+
+            elif mtype == 'applyUpdate' or mtype == 'applyNativeHostUpdate':
+                req_id = msg.get('requestId')
+                resp = apply_host_updates(req_id)
+                send_message(resp)
+                continue
+
+            # Ping handled above
             
             elif mtype == 'classifyJobChunk':
                 job_id = msg.get('jobId') or msg.get('requestId') or f"job-{int(time.time()*1000)}"

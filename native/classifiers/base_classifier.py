@@ -22,6 +22,7 @@ QUICK CHECKLIST FOR NEW CLASSIFIERS:
 7. Set self._is_loaded = True after successful load_model()
 8. Use _log_to_stderr() for all debug messages (avoids corrupting native messaging)
 9. Optionally override get_label() to provide a human-readable badge label
+10. Declare any extra PyPI dependencies in REQUIRED_PACKAGES (e.g. REQUIRED_PACKAGES = ["timm>=0.9.0"])
 
 COMMON GOTCHAS:
 - Don't use print() directly - use sys.stderr or _log_to_stderr()
@@ -40,6 +41,12 @@ import sys
 
 class BaseClassifier(ABC):
     """Abstract base class for AI detection classifiers (multi-modal)."""
+    
+    # Class-level list of required PyPI packages for this classifier.
+    # Third-party / custom classifiers can declare any extra libraries they need:
+    # e.g. REQUIRED_PACKAGES = ["timm>=0.9.0", "transformers", "scikit-image"]
+    # The native host checks dependencies in-memory on load and auto-installs missing packages.
+    REQUIRED_PACKAGES: List[str] = []
     
     def __init__(self, model_path: Optional[Path] = None):
         """

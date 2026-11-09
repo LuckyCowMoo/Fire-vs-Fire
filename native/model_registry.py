@@ -6,6 +6,7 @@ lazy loading, caching, and ensemble management.
 """
 
 import sys
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Type, Any
 import importlib.util
@@ -25,6 +26,46 @@ class ModelRegistry:
         self._classifiers: Dict[str, Type[BaseClassifier]] = {}
         self._loaded_instances: Dict[str, BaseClassifier] = {}
         self._discovered = False
+
+    def _ensure_dependencies(self, classifier_class: Type[BaseClassifier]) -> bool:
+        """
+        Checks if REQUIRED_PACKAGES defined on classifier_class are installed.
+        Uses importlib.util.find_spec for sub-millisecond in-memory checking.
+        Only invokes pip install if a dependency is actually missing.
+        """
+        required = getattr(classifier_class, 'REQUIRED_PACKAGES', None)
+        if not required:
+            return True
+
+        missing = []
+        overrides = {
+            'scikit-learn': 'sklearn',
+            'scikit-image': 'skimage',
+            'opencv-python': 'cv2',
+            'pillow': 'PIL',
+            'pyyaml': 'yaml',
+        }
+
+        for pkg in required:
+            base_name = pkg.split('>=')[0].split('<=')[0].split('==')[0].split('>')[0].split('<')[0].strip()
+            module_name = overrides.get(base_name.lower(), base_name)
+            try:
+                if importlib.util.find_spec(module_name) is None:
+                    missing.append(pkg)
+            except Exception:
+                missing.append(pkg)
+
+        if not missing:
+            return True
+
+        print(f"[Model Registry] Auto-installing missing dependencies for {classifier_class.__name__}: {missing}", file=sys.stderr)
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--default-timeout=1000", *missing])
+            print(f"[Model Registry] Successfully installed {missing}", file=sys.stderr)
+            return True
+        except Exception as e:
+            print(f"[Model Registry] Failed to install dependencies {missing}: {e}", file=sys.stderr)
+            return False
 
     def discover_classifiers(self, force: bool = False):
         """
@@ -189,9 +230,12 @@ class ModelRegistry:
         if lazy_load and cache_key in self._loaded_instances:
             return self._loaded_instances[cache_key]
 
+        # Ensure declared dependencies are present before instantiation
+        classifier_class = self._classifiers[classifier_id]
+        self._ensure_dependencies(classifier_class)
+
         # Create new instance
         try:
-            classifier_class = self._classifiers[classifier_id]
             instance = classifier_class(model_path=model_path)
 
             if lazy_load:

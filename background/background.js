@@ -148,6 +148,16 @@ function ensureNativePort() {
     }
 
     if (!reqId || !pendingNativeRequests.has(reqId)) {
+      if (response && (response.type === 'pong' || response.ok)) {
+        for (const [id] of pendingNativeRequests.entries()) {
+          if (id.startsWith('req-ping-') || pendingNativeRequests.size === 1) {
+            reqId = id;
+            break;
+          }
+        }
+      }
+    }
+    if (!reqId || !pendingNativeRequests.has(reqId)) {
       console.warn('[Native] Unmatched response:', response);
       return;
     }
@@ -277,29 +287,11 @@ function handleClassifyJobChunk(message, sender) {
   return { ok, jobId };
 }
 
-async function openOnboardingExperience() {
-  const localOnboardingUrl = ext.runtime.getURL('docs/index.html?onboarding=1');
-  let targetUrl = localOnboardingUrl;
-
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1800);
-    const resp = await fetch('https://luckycowmoo.github.io/Fire-vs-Fire/official_models.json', {
-      method: 'HEAD',
-      cache: 'no-store',
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    if (resp && resp.ok) {
-      targetUrl = GITHUB_PAGES_ONBOARDING_URL;
-    }
-  } catch (_) {
-    // GitHub Pages not yet published or offline; use built-in docs/index.html seamlessly
-    targetUrl = localOnboardingUrl;
-  }
-
+async function openOnboardingExperience(targetScreen = 1) {
+  // Always use local extension docs page for zero-latency direct native messaging
+  const localOnboardingUrl = ext.runtime.getURL(`docs/index.html?screen=${targetScreen}`);
   if (ext.tabs && ext.tabs.create) {
-    ext.tabs.create({ url: targetUrl });
+    ext.tabs.create({ url: localOnboardingUrl });
   }
 }
 
@@ -520,8 +512,70 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message && message.type === 'OPEN_OPTIONS_FULLPAGE') {
+    const optionsUrl = ext.runtime.getURL('options/options.html');
+    if (ext.tabs && ext.tabs.create) {
+      ext.tabs.create({ url: optionsUrl });
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'OPEN_MODELS_HUB') {
+    openOnboardingExperience(2);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'OPEN_GUIDE_PAGE') {
+    openOnboardingExperience(3);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'CHECK_NATIVE_UPDATE') {
+    sendToNative({ type: 'checkUpdate', version: 2 }, { timeoutMs: 5000 })
+      .then((res) => {
+        sendResponse({ ok: true, connected: true, updateInfo: res });
+      })
+      .catch(async (err) => {
+        try {
+          const resp = await fetch('https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json', { cache: 'no-store' });
+          if (resp && resp.ok) {
+            const cat = await resp.json();
+            sendResponse({
+              ok: true,
+              connected: false,
+              updateInfo: {
+                currentVersion: 'Not connected',
+                latestVersion: cat.host_version || '2.1.0',
+                updateAvailable: true,
+                releaseNotes: cat.release_notes || 'Updated Native Host installer',
+                downloadUrl: 'https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip'
+              }
+            });
+            return;
+          }
+        } catch (_) {}
+        sendResponse({ ok: false, connected: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'APPLY_NATIVE_UPDATE') {
+    sendToNative({ type: 'applyUpdate', version: 2 }, { timeoutMs: 30000 })
+      .then((res) => {
+        sendResponse({ ok: true, result: res });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
   if (message && message.type === 'CHECK_NATIVE_HOST') {
-    sendToNative({ type: 'ping', version: 2 }, { timeoutMs: 4000 })
+    const pingReqId = 'req-ping-' + Date.now();
+    sendToNative({ type: 'ping', requestId: pingReqId, version: 2 }, { timeoutMs: 4000 })
       .then((res) => {
         sendResponse({ ok: true, connected: Boolean(res && res.ok), hostResponse: res });
       })

@@ -28,6 +28,15 @@ if (-not $HostName) {
   $HostName = 'com.aidetector.classifier'
 }
 
+# Stop any running native host process before unregistering
+try {
+  $hostProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match 'echo_host_V2\.py' }
+  foreach ($proc in $hostProcs) {
+    Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    Write-Host "Stopped running Native Host process (PID $($proc.ProcessId))" -ForegroundColor Green
+  }
+} catch {}
+
 $targets = @(
   @{ Path = "HKCU:\Software\Mozilla\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName" },
   @{ Path = "HKLM:\Software\Mozilla\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Mozilla\NativeMessagingHosts\$HostName" },

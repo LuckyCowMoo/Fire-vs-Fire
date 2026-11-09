@@ -183,5 +183,7 @@
       "download_size": "210 MB",
       "ram_size": "600 MB RAM"
     }
-  ]
+  ],
+  "host_version": "2.1.0",
+  "release_notes": "FvF v2.1.0: Self-healing Native Host, 1-click updates, declared classifier dependencies, and responsive quadrant UI."
 }

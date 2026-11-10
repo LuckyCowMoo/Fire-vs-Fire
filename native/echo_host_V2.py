@@ -1081,6 +1081,8 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
         if m.get("status") == "available" and files:
             all_present = True
             for f_entry in files:
+                if not f_entry.get("required", True):
+                    continue
                 rel_path = f_entry.get("relative_path", "")
                 safe_path = _resolve_safe_repo_path(rel_path)
                 if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:

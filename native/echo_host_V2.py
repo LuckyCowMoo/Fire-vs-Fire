@@ -15,6 +15,7 @@ from urllib.error import URLError, HTTPError
 import base64
 import urllib.parse
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 import os
 
@@ -32,6 +33,11 @@ log(f"[START] Echo Host V2 starting")
 # Global set to track cancelled jobs
 cancelled_jobs = set()
 
+# Global classification cache (RAM-based, max 5000 items)
+# Maps (item_id, ensemble_id) -> {score, label, display_label, classifiers, timestamp}
+classification_cache = {}
+MAX_CACHE_SIZE = 5000
+
 # Import classifier registry
 from model_registry import get_registry
 
@@ -39,21 +45,48 @@ from model_registry import get_registry
 # Native Messaging Protocol
 # ============================================================================
 
+# Preserve raw stdout binary buffer for Native Messaging protocol
+_raw_stdout = sys.stdout.buffer
+# Redirect text stdout to stderr so ANY accidental print() never corrupts native messaging!
+sys.stdout = sys.stderr
+
 def read_message():
-    # Read one message from browser via stdin
+    # Read 4-byte message length
     raw_length = sys.stdin.buffer.read(4)
-    if len(raw_length) == 0:
+    if not raw_length or len(raw_length) < 4:
         return None
     message_length = struct.unpack('<I', raw_length)[0]
-    message = sys.stdin.buffer.read(message_length).decode('utf-8')
-    return json.loads(message)
+
+    # Read message_length bytes in a loop (handles partial reads on Windows pipes)
+    chunks = []
+    bytes_read = 0
+    while bytes_read < message_length:
+        to_read = min(message_length - bytes_read, 65536)
+        chunk = sys.stdin.buffer.read(to_read)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        bytes_read += len(chunk)
+
+    if bytes_read < message_length:
+        log(f"[Native] Incomplete message read: expected {message_length}, got {bytes_read}")
+        return None
+
+    raw_message = b''.join(chunks).decode('utf-8')
+    return json.loads(raw_message)
 
 def send_message(message):
-    # Send one message to browser via stdout
     encoded = json.dumps(message, separators=(',', ':')).encode('utf-8')
-    sys.stdout.buffer.write(struct.pack('<I', len(encoded)))
-    sys.stdout.buffer.write(encoded)
-    sys.stdout.buffer.flush()
+    # Firefox strict 1MB native messaging limit: truncate gracefully so port NEVER disconnects
+    max_safe_bytes = 750 * 1024
+    if len(encoded) >= max_safe_bytes and isinstance(message, dict) and 'results' in message and isinstance(message['results'], list):
+        log(f"[Native] Warning: message size ({len(encoded)} bytes) exceeds safe limit; truncating results to protect connection")
+        while len(encoded) >= max_safe_bytes and len(message['results']) > 1:
+            message['results'] = message['results'][:len(message['results']) // 2]
+            encoded = json.dumps(message, separators=(',', ':')).encode('utf-8')
+    _raw_stdout.write(struct.pack('<I', len(encoded)))
+    _raw_stdout.write(encoded)
+    _raw_stdout.flush()
 
 
 # ============================================================================
@@ -61,7 +94,7 @@ def send_message(message):
 # ============================================================================
 
 class JobAssembler:
-    def __init__(self, ttl_seconds: int = 120, max_bytes: int = 30 * 1024 * 1024):
+    def __init__(self, ttl_seconds: int = 300, max_bytes: int = 250 * 1024 * 1024):
         self.ttl_seconds = ttl_seconds
         self.max_bytes = max_bytes
         self.jobs = {}
@@ -161,80 +194,46 @@ def fetch_text_from_items(text_items: List[Dict[str, Any]]) -> List[tuple]:
     return results
 
 
-def fetch_images_from_urls(image_items: List[Dict[str, Any]]) -> List[tuple]:
-    
-    # Fetch images from URLs or decode base64 data URLs
-    
-    # Returns 4-tuples per image: (item_id, PIL.Image or None, error_reason or None, fetch_duration_ms)
-        
-    results = []
-    base64_count = 0
-    http_count = 0
-    
-    for item in image_items:
-        item_id = item.get('id')
-        url = item.get('url')
-        t0 = time.time()
-        
-        try:
-            # Handle data URLs (base64-encoded images from browser)
-            if url and url.startswith('data:'):
-                base64_count += 1
-                header, data_part = url.split(',', 1)
-                if ';base64' in header:
-                    raw = base64.b64decode(data_part)
-                else:
-                    raw = urllib.parse.unquote_to_bytes(data_part)
-                # Optionally dump incoming raw bytes for debugging transport/preproc
-                try:
-                    if os.environ.get('FIRE_SAVE_INCOMING_IMAGES') == '1':
-                        dbg_dir = Path(__file__).resolve().parent / 'incoming_debug'
-                        dbg_dir.mkdir(exist_ok=True)
-                        # Guess extension from header
-                        ext = 'jpg' if 'jpeg' in header or 'jpg' in header else 'png'
-                        out_path = dbg_dir / f"{item_id}_{int(time.time()*1000)}.{ext}"
-                        with open(out_path, 'wb') as fh:
-                            fh.write(raw)
-                        log(f"[fetch_images] Saved incoming image for {item_id} -> {out_path} ({len(raw)} bytes)")
-                except Exception:
-                    pass
-
-                img = Image.open(BytesIO(raw)).convert('RGB')
-                results.append((item_id, img, None, int((time.time() - t0) * 1000)))
-            
-            # Handle HTTP/HTTPS URLs (fetch from network)
-            elif url and url.startswith(('http://', 'https://')):
-                http_count += 1
-                req = Request(url, headers={
-                    'User-Agent': 'Mozilla/5.0 (native-host)',
-                    'Accept': 'image/*,*/*;q=0.8'
-                })
-                with urlopen(req, timeout=15) as resp:
-                    data = resp.read()
-                try:
-                    if os.environ.get('FIRE_SAVE_INCOMING_IMAGES') == '1':
-                        dbg_dir = Path(__file__).resolve().parent / 'incoming_debug'
-                        dbg_dir.mkdir(exist_ok=True)
-                        out_path = dbg_dir / f"{item_id}_{int(time.time()*1000)}.jpg"
-                        with open(out_path, 'wb') as fh:
-                            fh.write(data)
-                        log(f"[fetch_images] Saved fetched image for {item_id} -> {out_path} ({len(data)} bytes)")
-                except Exception:
-                    pass
-                img = Image.open(BytesIO(data)).convert('RGB')
-                results.append((item_id, img, None, int((time.time() - t0) * 1000)))
-            
+def _fetch_single_image(item: Dict[str, Any]) -> tuple:
+    item_id = item.get('id')
+    url = item.get('url')
+    t0 = time.time()
+    if not url:
+        return (item_id, None, 'errorus/no_url', 0)
+    try:
+        if url.startswith('data:'):
+            header, data_part = url.split(',', 1)
+            if ';base64' in header:
+                raw = base64.b64decode(data_part)
             else:
-                results.append((item_id, None, 'errorus/no_url', int((time.time() - t0) * 1000)))
-        
-        except (HTTPError, URLError) as e:
-            results.append((item_id, None, 'image_fetch_failed', int((time.time() - t0) * 1000)))
-        except Exception as e:
-            results.append((item_id, None, 'image_load_error', int((time.time() - t0) * 1000)))
+                raw = urllib.parse.unquote_to_bytes(data_part)
+            img = Image.open(BytesIO(raw)).convert('RGB')
+            return (item_id, img, None, int((time.time() - t0) * 1000))
+        elif url.startswith(('http://', 'https://')):
+            req = Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/*,*/*;q=0.8'
+            })
+            with urlopen(req, timeout=3.5) as resp:
+                data = resp.read()
+            img = Image.open(BytesIO(data)).convert('RGB')
+            return (item_id, img, None, int((time.time() - t0) * 1000))
+        else:
+            return (item_id, None, 'invalid_url_scheme', 0)
+    except Exception as e:
+        return (item_id, None, f'fetch_failed: {str(e)[:40]}', int((time.time() - t0) * 1000))
+
+def fetch_images_from_urls(image_items: List[Dict[str, Any]]) -> List[tuple]:
+    if not image_items:
+        return []
+    # If all items are base64, process in-thread directly for zero threading overhead
+    all_base64 = all(bool(it.get('url', '').startswith('data:')) for it in image_items)
+    if all_base64 or len(image_items) == 1:
+        return [_fetch_single_image(it) for it in image_items]
     
-    if base64_count > 0 or http_count > 0:
-        log(f"[fetch_images] Source breakdown: {base64_count} base64 (cached), {http_count} HTTP (network)")
-    
+    # Otherwise fetch concurrently with ThreadPoolExecutor so network delays never block host
+    with ThreadPoolExecutor(max_workers=min(6, len(image_items))) as executor:
+        results = list(executor.map(_fetch_single_image, image_items))
     return results
 
 
@@ -467,6 +466,18 @@ def _normalize_ensembles(model_config: Dict[str, Any], modality: str) -> List[Di
     }]
 
 
+def _manage_cache_size():
+    """Remove oldest entries if cache exceeds max size (FIFO eviction)."""
+    global classification_cache
+    evicted = 0
+    while len(classification_cache) > MAX_CACHE_SIZE:
+        oldest_key = next(iter(classification_cache))
+        classification_cache.pop(oldest_key, None)
+        evicted += 1
+    if evicted:
+        log(f"[Cache] Evicted {evicted} oldest entries, cache size now {len(classification_cache)}")
+
+
 def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
     """
     Main classification orchestrator with mini-batch support.
@@ -495,7 +506,10 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
     model_config = payload.get('model') or {}
 
     weights = model_config.get('weights', None)
-    mini_batch_size = model_config.get('miniBatchSize', 1000)
+    raw_mini_batch = model_config.get('miniBatchSize', 16)
+    # Cap image mini-batch size to 16 when streaming so pages with 80+ images
+    # stream badges progressively to the browser every ~100ms instead of blocking.
+    mini_batch_size = max(1, min(int(raw_mini_batch or 16), 16))
     lazy_load = model_config.get('lazyLoad', True)
     stream_results = model_config.get('streamResults', True)
 
@@ -520,21 +534,118 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
     results = []
     errors = []
 
+    # Separate items by modality
     image_items = [it for it in items if it.get('modality') == 'image' and it.get('url')]
     text_items = [it for it in items if it.get('modality') == 'text' and it.get('text')]
     other_items = [it for it in items if it not in image_items and it not in text_items]
 
     log(f"[classify_items] {len(image_items)} image items, {len(text_items)} text items, {len(other_items)} other items")
+    
+    # Check cache for already-classified items (right before processing starts)
+    # This catches rapid page refreshes where requests queue up
+    cached_results = []
+    cache_hits = 0
+    
+    # Get ensemble IDs for cache lookup
+    image_ensemble_ids = [e.get('id', 'image_ensemble') for e in _normalize_ensembles(model_config, 'image')]
+    text_ensemble_ids = [e.get('id', 'text_ensemble') for e in _normalize_ensembles(model_config, 'text')]
+    
+    # Filter out cached items from image_items
+    uncached_image_items = []
+    for item in image_items:
+        item_id = item.get('id')
+        if not item_id:
+            uncached_image_items.append(item)
+            continue
+        
+        # Check if ALL requested ensembles have cached results for this item
+        all_ensembles_cached = True
+        for ensemble_id in image_ensemble_ids:
+            cache_key = (item_id, ensemble_id)
+            if cache_key in classification_cache:
+                cached_data = classification_cache[cache_key]
+                cached_results.append({
+                    'id': item_id,
+                    'modality': 'image',
+                    'ensembleId': ensemble_id,
+                    'label': cached_data.get('label', 'uncertain'),
+                    'score': cached_data.get('score', 0.5),
+                    'display_label': cached_data.get('display_label', 'AI generated'),
+                    'classifiers': cached_data.get('classifiers', {}),
+                    'model': cached_data.get('model', 'cached'),
+                    'durationMs': 0,
+                    'cached': True
+                })
+                cache_hits += 1
+            else:
+                all_ensembles_cached = False
+        
+        # Only skip processing if ALL ensembles have cached results
+        if not all_ensembles_cached:
+            uncached_image_items.append(item)
+    
+    # Filter out cached items from text_items
+    uncached_text_items = []
+    for item in text_items:
+        item_id = item.get('id')
+        if not item_id:
+            uncached_text_items.append(item)
+            continue
+        
+        # Check if ALL requested ensembles have cached results for this item
+        all_ensembles_cached = True
+        for ensemble_id in text_ensemble_ids:
+            cache_key = (item_id, ensemble_id)
+            if cache_key in classification_cache:
+                cached_data = classification_cache[cache_key]
+                cached_results.append({
+                    'id': item_id,
+                    'modality': 'text',
+                    'ensembleId': ensemble_id,
+                    'label': cached_data.get('label', 'uncertain'),
+                    'score': cached_data.get('score', 0.5),
+                    'display_label': cached_data.get('display_label', 'AI generated'),
+                    'classifiers': cached_data.get('classifiers', {}),
+                    'model': cached_data.get('model', 'cached'),
+                    'durationMs': 0,
+                    'cached': True
+                })
+                cache_hits += 1
+            else:
+                all_ensembles_cached = False
+        
+        # Only skip processing if ALL ensembles have cached results
+        if not all_ensembles_cached:
+            uncached_text_items.append(item)
+    
+    # Replace with uncached items only
+    image_items = uncached_image_items
+    text_items = uncached_text_items
+    
+    if cache_hits > 0:
+        log(f"[Cache] {cache_hits} items found in cache, {len(image_items)} images and {len(text_items)} text items need classification")
+        # Send cached results as chunk if streaming, otherwise add to results array
+        if send_chunk and stream_results:
+            # Send cached results in batches to avoid overwhelming the browser
+            batch_size = 20
+            for i in range(0, len(cached_results), batch_size):
+                batch = cached_results[i:i+batch_size]
+                send_chunk({
+                    'version': 2,
+                    'type': 'classifyResultChunk',
+                    'jobId': job_id or req_id,
+                    'ensembleId': 'cached',
+                    'modality': 'mixed',
+                    'timestamp': int(time.time() * 1000),
+                    'results': batch,
+                    'errors': []
+                })
+        else:
+            results.extend(cached_results)
 
     if not image_items and not text_items:
-        return {
-            'version': 2,
-            'type': 'classifyResult',
-            'requestId': req_id,
-            'timestamp': int(time.time() * 1000),
-            'results': [],
-            'errors': [{'type': 'info', 'message': 'No images or text to classify'}]
-        }
+        # All items cached - add info message
+        errors.append({'type': 'info', 'message': f'All {cache_hits} items returned from cache'})
 
     image_results = []
     if image_items:
@@ -620,28 +731,39 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                 for idx, (item_id, result_data) in enumerate(zip(batch_ids, batch_results)):
                     fetch_err = batch_errors[idx]
                     if fetch_err:
-                        chunk_results.append({
+                        result = {
                             'id': item_id,
                             'modality': 'image',
-                            'ensembleId': ensemble_id,
                             'label': 'uncertain',
                             'score': 0.5,
                             'display_label': 'AI generated',
                             'model': ','.join(classifier_ids),
                             'notes': fetch_err
-                        })
+                        }
                     else:
-                        chunk_results.append({
+                        result = {
                             'id': item_id,
                             'modality': 'image',
-                            'ensembleId': ensemble_id,
                             'label': result_data['label'],
                             'score': result_data['score'],
                             'display_label': result_data.get('display_label', 'AI generated'),
                             'classifiers': result_data.get('classifiers', {}),
                             'model': ','.join(classifier_ids),
                             'durationMs': int(classify_ms / max(1, len(batch_slice)))
-                        })
+                        }
+                        # Cache successful classification
+                        if item_id:
+                            cache_key = (item_id, ensemble_id)
+                            classification_cache[cache_key] = {
+                                'label': result_data['label'],
+                                'score': result_data['score'],
+                                'display_label': result_data.get('display_label', 'AI generated'),
+                                'classifiers': result_data.get('classifiers', {}),
+                                'model': ','.join(classifier_ids),
+                                'timestamp': time.time()
+                            }
+                            _manage_cache_size()
+                    chunk_results.append(result)
 
                 if not emit_chunk(ensemble_id, 'image', chunk_results, chunk_errors):
                     results.extend(chunk_results)
@@ -696,28 +818,39 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
                 for idx, (item_id, result_data) in enumerate(zip(batch_ids, batch_results)):
                     fetch_err = batch_errors[idx]
                     if fetch_err:
-                        chunk_results.append({
+                        result = {
                             'id': item_id,
                             'modality': 'text',
-                            'ensembleId': ensemble_id,
                             'label': 'uncertain',
                             'score': 0.5,
                             'display_label': 'AI generated',
                             'model': ','.join(classifier_ids),
                             'notes': fetch_err
-                        })
+                        }
                     else:
-                        chunk_results.append({
+                        result = {
                             'id': item_id,
                             'modality': 'text',
-                            'ensembleId': ensemble_id,
                             'label': result_data['label'],
                             'score': result_data['score'],
                             'display_label': result_data.get('display_label', 'AI generated'),
                             'classifiers': result_data.get('classifiers', {}),
                             'model': ','.join(classifier_ids),
                             'durationMs': int(classify_ms / max(1, len(batch_slice)))
-                        })
+                        }
+                        # Cache successful classification
+                        if item_id:
+                            cache_key = (item_id, ensemble_id)
+                            classification_cache[cache_key] = {
+                                'label': result_data['label'],
+                                'score': result_data['score'],
+                                'display_label': result_data.get('display_label', 'AI generated'),
+                                'classifiers': result_data.get('classifiers', {}),
+                                'model': ','.join(classifier_ids),
+                                'timestamp': time.time()
+                            }
+                            _manage_cache_size()
+                    chunk_results.append(result)
 
                 if not emit_chunk(ensemble_id, 'text', chunk_results, chunk_errors):
                     results.extend(chunk_results)
@@ -745,9 +878,9 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
 
 
 def list_models(request_id: Optional[str] = None):
-    """List available classifiers from registry."""
+    """List available classifiers from registry with fresh folder scan."""
     registry = get_registry()
-    available = registry.list_available_details()
+    available = registry.list_available_details(force_rescan=True)
     
     # Also list .pt files in Immage Models for backward compatibility
     repo_root = Path(__file__).parent.parent
@@ -770,6 +903,459 @@ def list_models(request_id: Optional[str] = None):
 # Main Loop
 # ----------------------------------------------------------------------------
 
+HOST_VERSION = "2.1.0"
+OFFICIAL_CATALOG_URL = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json"
+ALLOWED_GITHUB_PREFIXES = (
+    "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/",
+    "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/",
+    "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/",
+)
+
+
+def _is_allowed_official_url(url: str) -> bool:
+    if not isinstance(url, str):
+        return False
+    return any(url.startswith(prefix) for prefix in ALLOWED_GITHUB_PREFIXES)
+
+
+def _resolve_safe_repo_path(relative_path: str) -> Optional[Path]:
+    """Ensure target path stays strictly inside repo_root."""
+    if not relative_path or ".." in relative_path:
+        return None
+    repo_root = Path(__file__).resolve().parent.parent
+    target = (repo_root / relative_path).resolve()
+    try:
+        target.relative_to(repo_root)
+    except ValueError:
+        return None
+    return target
+
+
+def _load_official_catalog() -> Dict[str, Any]:
+    """Load official first-party model catalog from GitHub with local fallback."""
+    local_catalog_path = Path(__file__).resolve().parent / "official_models.json"
+    catalog = None
+
+    try:
+        req = Request(
+            OFFICIAL_CATALOG_URL,
+            headers={"User-Agent": "FireVsFire-NativeHost/2.0", "Cache-Control": "no-cache"}
+        )
+        with urlopen(req, timeout=4) as resp:
+            raw = resp.read().decode("utf-8")
+            candidate = json.loads(raw)
+            if isinstance(candidate, dict) and isinstance(candidate.get("models"), list):
+                catalog = candidate
+                log("[Catalog] Loaded latest official_models.json from GitHub")
+    except Exception as exc:
+        log(f"[Catalog] Remote GitHub fetch fell back to local catalog: {exc}")
+
+    if local_catalog_path.exists():
+        try:
+            with open(local_catalog_path, "r", encoding="utf-8") as fh:
+                local_data = json.load(fh)
+                if isinstance(local_data, dict) and isinstance(local_data.get("models"), list):
+                    if catalog is None:
+                        catalog = local_data
+                    else:
+                        remote_ids = {m.get("id") for m in catalog.get("models", [])}
+                        for lm in local_data.get("models", []):
+                            if lm.get("id") not in remote_ids:
+                                catalog["models"].append(lm)
+        except Exception as exc:
+            log(f"[Catalog] Failed to load local official_models.json: {exc}")
+
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list):
+        catalog = {"catalog_version": 2, "repository": "LuckyCowMoo/Fire-vs-Fire", "models": []}
+
+    installed_ids = []
+    for model in catalog.get("models", []):
+        files = model.get("files") or []
+        if model.get("status") != "available" or not files:
+            model["installed"] = False
+            continue
+        all_present = True
+        for f_entry in files:
+            rel_path = f_entry.get("relative_path", "")
+            safe_path = _resolve_safe_repo_path(rel_path)
+            if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:
+                all_present = False
+                break
+        model["installed"] = all_present
+        if all_present:
+            installed_ids.append(model.get("id"))
+
+    catalog["installed_models"] = installed_ids
+    # Dynamically scan native/classifiers/ so ANY classifier or weights file
+    # placed directly in the folder is instantly registered automatically.
+    catalog = _sync_catalog_with_local_folder(catalog)
+    return catalog
+
+
+def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Dynamically scans native/classifiers/ directly on disk.
+    Any classifier Python module or model weights file found in the folder is
+    automatically added to the catalog and marked installed, completely
+    bypassing the need for manual JSON file edits or remote releases.
+    """
+    registry = get_registry()
+    details = registry.list_available_details(force_rescan=True)
+    models = catalog.setdefault("models", [])
+    models_by_id = {m.get("id"): m for m in models if isinstance(m, dict) and m.get("id")}
+    repo_root = Path(__file__).resolve().parent.parent
+
+    for detail in details:
+        cid = detail["id"]
+        weights_ready = detail.get("weights_ready", False)
+
+        if cid in models_by_id:
+            m = models_by_id[cid]
+            if weights_ready:
+                m["installed"] = True
+            if detail.get("download_size") and detail["download_size"] != "Local":
+                m["download_size"] = detail["download_size"]
+            if detail.get("size_mb") and detail["size_mb"] > 0:
+                m["size_mb"] = detail["size_mb"]
+        else:
+            modality = (detail.get("modalities") or ["image"])[0]
+            label = detail.get("label", "AI generated")
+            is_ai = label.lower() not in ("spider", "object", "custom")
+            name = detail.get("name") or cid
+            is_recommended = ("04" in cid) or ("heimdall" in cid.lower() and "04" in cid)
+
+            files_list = []
+            if detail.get("py_file"):
+                files_list.append({
+                    "type": "classifier_py",
+                    "relative_path": detail["py_file"],
+                    "required": True
+                })
+            if detail.get("weight_path"):
+                try:
+                    rel_w = str(Path(detail["weight_path"]).resolve().relative_to(repo_root)).replace('\\', '/')
+                except Exception:
+                    rel_w = str(detail["weight_path"]).replace('\\', '/')
+                files_list.append({
+                    "type": "weights_pt" if rel_w.endswith(".pt") else "weights_onnx",
+                    "relative_path": rel_w,
+                    "required": True
+                })
+
+            new_model = {
+                "id": cid,
+                "name": name,
+                "version": detail.get("version", "1.0.0-local"),
+                "modality": modality,
+                "status": "available",
+                "recommended": is_recommended,
+                "is_ai_detector": is_ai,
+                "category_name": name,
+                "label": label,
+                "default_threshold": 0.75,
+                "default_color": "#FF1744" if "04" in cid else ("#FF2E00" if "03" in cid else "#FF5722"),
+                "size_mb": detail.get("size_mb", 0.0),
+                "download_size": detail.get("download_size", "Local"),
+                "ram_size": "1.5 GB VRAM / RAM",
+                "architecture": name,
+                "tagline": detail.get("doc", "").split("\n")[0] if detail.get("doc") else "Local folder auto-discovered classifier",
+                "description": detail.get("doc") or f"Locally discovered classifier: {name}. Automatically loaded from native/classifiers/.",
+                "files": files_list,
+                "installed": weights_ready
+            }
+
+            if is_recommended:
+                models.insert(0, new_model)
+            else:
+                models.append(new_model)
+            models_by_id[cid] = new_model
+
+    installed_ids = []
+    for m in models:
+        if m.get("installed") is True:
+            installed_ids.append(m.get("id"))
+            continue
+        files = m.get("files") or []
+        if m.get("status") == "available" and files:
+            all_present = True
+            for f_entry in files:
+                rel_path = f_entry.get("relative_path", "")
+                safe_path = _resolve_safe_repo_path(rel_path)
+                if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:
+                    all_present = False
+                    break
+            if all_present:
+                m["installed"] = True
+                installed_ids.append(m.get("id"))
+
+    catalog["installed_models"] = sorted(list(set(installed_ids)))
+    return catalog
+
+
+def get_official_catalog_response(request_id: Optional[str] = None) -> Dict[str, Any]:
+    catalog = _load_official_catalog()
+    registry = get_registry()
+    classifiers = registry.list_available_details(force_rescan=True)
+    resp = {
+        "ok": True,
+        "type": "officialCatalog",
+        "catalog": catalog,
+        "installedModels": catalog.get("installed_models", []),
+        "classifiers": classifiers,
+        "timestamp": int(time.time() * 1000),
+    }
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
+def download_official_model(model_id: str, request_id: Optional[str] = None, force_download: bool = False) -> Dict[str, Any]:
+    """
+    Security-hardened downloader for first-party Fire vs Fire classifiers.
+    Accepts ONLY a model_id (never arbitrary URLs/repositories from the browser),
+    validates against the official LuckyCowMoo/Fire-vs-Fire catalog, and downloads
+    both the .py classifier module(s) and .pt model weights.
+    """
+    if not model_id or not isinstance(model_id, str):
+        resp = {"ok": False, "error": "Invalid modelId"}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    catalog = _load_official_catalog()
+    target_model = next((m for m in catalog.get("models", []) if m.get("id") == model_id), None)
+    if target_model is None:
+        resp = {"ok": False, "error": f"Model '{model_id}' is not in the official Fire vs Fire catalog."}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    if target_model.get("status") != "available":
+        resp = {"ok": False, "error": f"Model '{model_id}' is not yet released ({target_model.get('status')})."}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    files = target_model.get("files") or []
+    if not files:
+        resp = {"ok": False, "error": f"Model '{model_id}' has no downloadable files configured."}
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
+
+    total_files = len(files)
+    downloaded_files = []
+
+    for file_idx, f_entry in enumerate(files):
+        rel_path = f_entry.get("relative_path", "")
+        primary_url = f_entry.get("url", "")
+        fallback_url = f_entry.get("fallback_url", "")
+
+        dest_path = _resolve_safe_repo_path(rel_path)
+        if dest_path is None:
+            resp = {"ok": False, "error": f"Unsafe target path rejected: {rel_path}"}
+            if request_id:
+                resp["requestId"] = request_id
+            return resp
+
+        if not _is_allowed_official_url(primary_url):
+            resp = {"ok": False, "error": f"Untrusted download URL rejected: {primary_url}"}
+            if request_id:
+                resp["requestId"] = request_id
+            return resp
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not force_download and dest_path.exists() and dest_path.stat().st_size > 0:
+            file_size = dest_path.stat().st_size
+            overall_pct = int(((file_idx + 1) / total_files) * 100)
+            send_message({
+                "version": 2,
+                "type": "downloadProgress",
+                "requestId": request_id,
+                "modelId": model_id,
+                "file": dest_path.name,
+                "fileIndex": file_idx + 1,
+                "totalFiles": total_files,
+                "bytesDownloaded": file_size,
+                "totalBytes": file_size,
+                "percent": overall_pct,
+                "status": f"Verified {dest_path.name}"
+            })
+            downloaded_files.append(rel_path)
+            continue
+
+        urls_to_try = [primary_url]
+        if fallback_url and _is_allowed_official_url(fallback_url) and fallback_url != primary_url:
+            urls_to_try.append(fallback_url)
+
+        last_err = None
+        success = False
+        tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
+
+        for candidate_url in urls_to_try:
+            try:
+                log(f"[Downloader] Fetching {model_id} file {rel_path} from {candidate_url}")
+                req = Request(candidate_url, headers={"User-Agent": "FireVsFire-NativeHost/2.0"})
+                with urlopen(req, timeout=30) as response:
+                    total_bytes = int(response.headers.get("Content-Length") or 0)
+                    bytes_so_far = 0
+                    chunk_size = 256 * 1024
+                    last_emit = 0.0
+
+                    with open(tmp_path, "wb") as out_fh:
+                        while True:
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
+                            out_fh.write(chunk)
+                            bytes_so_far += len(chunk)
+                            now = time.time()
+                            if now - last_emit >= 0.12:
+                                last_emit = now
+                                file_frac = (bytes_so_far / total_bytes) if total_bytes > 0 else 0.5
+                                overall_pct = int(((file_idx + file_frac) / total_files) * 100)
+                                send_message({
+                                    "version": 2,
+                                    "type": "downloadProgress",
+                                    "requestId": request_id,
+                                    "modelId": model_id,
+                                    "file": dest_path.name,
+                                    "fileIndex": file_idx + 1,
+                                    "totalFiles": total_files,
+                                    "bytesDownloaded": bytes_so_far,
+                                    "totalBytes": total_bytes,
+                                    "percent": min(99, max(1, overall_pct)),
+                                    "status": f"Downloading {dest_path.name}..."
+                                })
+
+                if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                    os.replace(tmp_path, dest_path)
+                    success = True
+                    downloaded_files.append(rel_path)
+                    send_message({
+                        "version": 2,
+                        "type": "downloadProgress",
+                        "requestId": request_id,
+                        "modelId": model_id,
+                        "file": dest_path.name,
+                        "fileIndex": file_idx + 1,
+                        "totalFiles": total_files,
+                        "bytesDownloaded": dest_path.stat().st_size,
+                        "totalBytes": dest_path.stat().st_size,
+                        "percent": int(((file_idx + 1) / total_files) * 100),
+                        "status": f"Installed {dest_path.name}"
+                    })
+                    break
+            except Exception as exc:
+                last_err = str(exc)
+                log(f"[Downloader] Error downloading {candidate_url}: {exc}")
+                try:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                except Exception:
+                    pass
+
+        if not success:
+            if dest_path.exists() and dest_path.stat().st_size > 0:
+                downloaded_files.append(rel_path)
+                continue
+            resp = {
+                "ok": False,
+                "modelId": model_id,
+                "error": f"Failed to download {dest_path.name} from official GitHub: {last_err}"
+            }
+            if request_id:
+                resp["requestId"] = request_id
+            return resp
+
+    registry = get_registry()
+    registry.discover_classifiers(force=True)
+    available = registry.list_available_details()
+
+    resp = {
+        "ok": True,
+        "type": "downloadComplete",
+        "modelId": model_id,
+        "files": downloaded_files,
+        "classifiers": available,
+        "timestamp": int(time.time() * 1000)
+    }
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
+def check_for_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
+    catalog = _load_official_catalog()
+    remote_version = catalog.get("host_version", HOST_VERSION)
+    update_available = (remote_version != HOST_VERSION)
+    resp = {
+        "ok": True,
+        "type": "checkUpdateResponse",
+        "currentVersion": HOST_VERSION,
+        "latestVersion": remote_version,
+        "updateAvailable": update_available,
+        "releaseNotes": catalog.get("release_notes", "Performance improvements and new model support."),
+        "downloadUrl": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip",
+        "timestamp": int(time.time() * 1000)
+    }
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
+def apply_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
+    files_to_update = [
+        "native/echo_host_V2.py",
+        "native/model_registry.py",
+        "native/official_models.json",
+        "native/classifiers/base_classifier.py",
+        "native/classifiers/fvf_heimdall_02_classifier.py",
+        "native/classifiers/fvf_heimdall_03_classifier.py",
+        "native/classifiers/Resnet50_spider.py"
+    ]
+    base_raw_url = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/"
+    updated_files = []
+    errors = []
+
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parent
+
+    for rel_path in files_to_update:
+        target_path = repo_root / rel_path
+        remote_url = base_raw_url + rel_path
+        try:
+            req = Request(remote_url, headers={"User-Agent": f"FireVsFire-Updater/{HOST_VERSION}", "Cache-Control": "no-cache"})
+            with urlopen(req, timeout=12) as resp_stream:
+                content = resp_stream.read()
+                if content and len(content) > 50:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_path.write_bytes(content)
+                    updated_files.append(rel_path)
+                    log(f"[Updater] Successfully updated {rel_path}")
+        except Exception as exc:
+            log(f"[Updater] Failed updating {rel_path}: {exc}")
+            errors.append(f"{rel_path}: {exc}")
+
+    catalog = _load_official_catalog()
+    new_version = catalog.get("host_version", HOST_VERSION)
+
+    resp = {
+        "ok": len(updated_files) > 0,
+        "type": "applyUpdateResponse",
+        "updatedFiles": updated_files,
+        "version": new_version,
+        "message": f"Successfully updated {len(updated_files)} native host component(s) to v{new_version}. Please reload the extension or restart your browser.",
+        "timestamp": int(time.time() * 1000)
+    }
+    if errors:
+        resp["errors"] = errors
+    if request_id:
+        resp["requestId"] = request_id
+    return resp
+
+
 job_assembler = JobAssembler()
 
 def main():
@@ -787,7 +1373,31 @@ def main():
             log(f"[Main] Received message type: {mtype}")
             
             if mtype == 'ping' or mtype == 'PING':
-                send_message({'ok': True, 'time': int(time.time() * 1000)})
+                req_id = msg.get('requestId')
+                resp = {
+                    'ok': True,
+                    'type': 'pong',
+                    'version': HOST_VERSION,
+                    'time': int(time.time() * 1000)
+                }
+                if req_id:
+                    resp['requestId'] = req_id
+                send_message(resp)
+                continue
+
+            elif mtype == 'checkUpdate' or mtype == 'checkNativeHostUpdate':
+                req_id = msg.get('requestId')
+                resp = check_for_host_updates(req_id)
+                send_message(resp)
+                continue
+
+            elif mtype == 'applyUpdate' or mtype == 'applyNativeHostUpdate':
+                req_id = msg.get('requestId')
+                resp = apply_host_updates(req_id)
+                send_message(resp)
+                continue
+
+            # Ping handled above
             
             elif mtype == 'classifyJobChunk':
                 job_id = msg.get('jobId') or msg.get('requestId') or f"job-{int(time.time()*1000)}"
@@ -817,6 +1427,16 @@ def main():
             elif mtype == 'listModels':
                 log("[Main] Listing available models")
                 send_message(list_models(msg.get('requestId')))
+
+            elif mtype == 'getOfficialCatalog':
+                log("[Main] Getting official first-party catalog")
+                send_message(get_official_catalog_response(msg.get('requestId')))
+
+            elif mtype == 'downloadOfficialModel':
+                model_id = msg.get('modelId')
+                force_dl = bool(msg.get('forceDownload', False))
+                log(f"[Main] Downloading official model: {model_id}")
+                send_message(download_official_model(model_id, msg.get('requestId'), force_dl))
             
             elif mtype == 'cancelJob':
                 job_key = msg.get('jobId') or msg.get('requestId')
@@ -831,6 +1451,24 @@ def main():
                     })
                 else:
                     send_message({'ok': False, 'error': 'No jobId provided'})
+            
+            elif mtype == 'clearCache':
+                log(f"[Main] Clearing classification cache ({len(classification_cache)} items)")
+                classification_cache.clear()
+                send_message({
+                    'ok': True,
+                    'type': 'cacheCleared',
+                    'timestamp': int(time.time() * 1000)
+                })
+            
+            elif mtype == 'getCacheStats':
+                send_message({
+                    'ok': True,
+                    'type': 'cacheStats',
+                    'size': len(classification_cache),
+                    'maxSize': MAX_CACHE_SIZE,
+                    'timestamp': int(time.time() * 1000)
+                })
             
             else:
                 log(f"[Main] Unknown message type: {mtype}")

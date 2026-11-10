@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en" data-fvf-onboarding="true">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fire vs Fire — Local AI Detection &amp; Setup</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/icon-red.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- Interactive Ember Canvas -->
+    <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
+
+    <div class="site-shell">
+      <!-- ==================================================================
+           SCREEN 1: INSTALL NATIVE HOST (HARDWARE-ACCELERATED AI ENVIRONMENT)
+           ================================================================== -->
+      <section class="wizard-screen active" id="screen-1" data-screen="1">
+        <div class="screen-header">
+          <h1 class="display-title">Install the Local Native Host</h1>
+          <p class="lead-subtitle">
+            You’ve installed the <strong>Fire vs Fire</strong> browser extension! Next, install the
+            <strong>Native Host</strong>—the local environment where AI classification actually happens.
+          </p>
+        </div>
+
+        <div class="glass-card-3d native-hero-card" data-tilt style="max-width: 820px;">
+          <div id="native-why-section">
+            <h2 style="font-size: 1.45rem; font-weight: 800; margin-bottom: 12px;">
+              Why is the Native Host separate from the browser?
+            </h2>
+            <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 1.05rem; line-height: 1.6;">
+              Web browsers run inside a restricted sandbox with limited hardware access. Real AI classification needs direct hardware &amp; GPU acceleration to run fast enough to keep up with live web browsing.
+            </p>
+          </div>
+
+          <!-- Post-download step-by-step instructions (revealed after clicking download) -->
+          <div id="native-install-instructions" style="display: none;">
+            <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 16px; color: #ffb38a;">
+              How to Install in File Explorer (2 Quick Steps)
+            </h2>
+            <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px;">
+              <div style="display: flex; gap: 14px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);">
+                <div style="background: rgba(255,98,24,0.25); color: #ff8a3d; font-weight: 800; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.95rem;">1</div>
+                <div>
+                  <strong style="color: #ffffff; font-size: 1rem;">Extract the downloaded ZIP</strong>
+                  <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px; line-height: 1.5;">
+                    Open your <code>Downloads</code> folder, right-click <code>FireVsFire-NativeHost.zip</code>, and choose <strong>Extract All…</strong>.
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 14px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);">
+                <div style="background: rgba(255,98,24,0.25); color: #ff8a3d; font-weight: 800; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.95rem;">2</div>
+                <div>
+                  <strong style="color: #ffffff; font-size: 1rem;">Double-click <code>Install-FireVsFire-NativeHost.bat</code></strong>
+                  <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px; line-height: 1.5;">
+                    Inside the extracted folder, simply double-click <strong>Install-FireVsFire-NativeHost.bat</strong> in File Explorer.
+                    <span style="display: block; margin-top: 4px; color: #a3ff70; font-size: 0.85rem;">✓ No terminal needed! It auto-configures Python, GPU acceleration, and registers the browser bridge in 1 click.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live detection status callout -->
+            <div id="native-live-status-box" style="padding: 14px 18px; border-radius: 14px; background: rgba(255, 140, 0, 0.1); border: 1px solid rgba(255, 140, 0, 0.35); display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span id="native-pulse-icon" style="font-size: 1.3rem;">⏳</span>
+                <div>
+                  <div id="native-status-heading" style="font-weight: 700; color: #ffb020; font-size: 0.98rem;">Waiting for Native Host connection…</div>
+                  <div id="native-status-detail" style="font-size: 0.84rem; color: var(--text-secondary); margin-top: 2px;">
+                    Keep this tab open. As soon as the installer completes, this page will automatically advance!
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="btn-ember-outline" id="check-connection-btn" style="padding: 8px 16px; font-size: 0.84rem; white-space: nowrap;">
+                ↻ Check Now
+              </button>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="native-action-bar">
+              <a
+                href="https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn-fire"
+                id="download-native-host-btn"
+              >
+                <span>Download Native Host</span>
+              </a>
+              <button type="button" class="btn-ember-outline" id="skip-to-models-btn" disabled style="opacity: 0.45; cursor: not-allowed;">
+                <span>Choose Models →</span>
+              </button>
+            </div>
+            <div id="native-not-connected-hint" style="font-size: 0.84rem; color: #ff9d66; display: none;">
+              ⚠️ Native Host must be installed and connected before proceeding to model downloads.
+              <a href="#" id="force-proceed-models-btn" style="color: #ffc299; text-decoration: underline; margin-left: 8px;">Already installed? Choose Models →</a>
+            </div>
+            <div>
+              <a
+                href="https://github.com/LuckyCowMoo/Fire-vs-Fire"
+                target="_blank"
+                rel="noopener noreferrer"
+                style="font-size: 0.88rem; color: #ffb38a; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;"
+              >
+                View Source on GitHub ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================================================================
+           SCREEN 2: 4 MODALITY QUADRANTS (FIRST-PARTY CLASSIFIER SELECTOR)
+           ================================================================== -->
+      <section class="wizard-screen" id="screen-2" data-screen="2">
+        <div class="screen-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px;">
+          <div>
+            <h1 class="display-title" style="margin-bottom: 4px;">Choose Your First-Party Classifiers</h1>
+            <p style="color: var(--text-secondary); font-size: 0.88rem; margin: 0;">Auto-discovers any classifier or weights in <code>native/classifiers/</code></p>
+          </div>
+          <button id="rescan-folder-btn" type="button" class="btn btn-outline" style="font-size: 0.85rem; padding: 8px 18px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(255, 110, 40, 0.45); background: rgba(255, 80, 20, 0.08); color: #ffb38a; cursor: pointer; transition: all 0.2s ease;">
+            <span>↻ Rescan Local Folder</span>
+          </button>
+        </div>
+
+        <!-- 4 Modality Quadrants Grid (Populated dynamically from official_models.json) -->
+        <div class="quadrants-grid" id="modality-quadrants-container">
+          <!-- Quadrants rendered dynamically by app.js -->
+        </div>
+
+        <!-- Expandable Developer Guide: Build Your Own Classifier with Full BaseClassifier API -->
+        <details class="glass-card-3d byo-classifier-card">
+          <summary>
+            <span>Want to build your own classifier? Click to see the BaseClassifier API</span>
+            <span style="font-size: 0.82rem; color: #ffb38a;">BaseClassifier API ▾</span>
+          </summary>
+          <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 14px; margin-bottom: 16px; line-height: 1.6;">
+            Fire vs Fire isn’t limited to AI detection—that’s why <strong>ResNet 50 - Spider</strong> exists! Any Python
+            class inheriting from <code>BaseClassifier</code> placed in <code>native/classifiers/</code> is
+            automatically discovered and loaded by the Native Host. Here is the complete interface:
+          </p>
+          <pre class="code-block-ember"><code>from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional, Set
+from pathlib import Path
+import sys
+
+class BaseClassifier(ABC):
+    """Abstract base class for AI detection classifiers (multi-modal)."""
+
+    def __init__(self, model_path: Optional[Path] = None):
+        self.model_path = model_path
+        self.model = None
+        self.device = None
+        self._is_loaded = False
+
+    @abstractmethod
+    def get_supported_modalities(self) -> Set[str]:
+        """Return supported modalities: {'image'}, {'text'}, {'audio'}, or {'video'}."""
+        pass
+
+    @abstractmethod
+    def load_model(self) -> tuple[bool, Optional[str]]:
+        """Load weights onto device. Return (success: bool, error_reason: Optional[str])."""
+        pass
+
+    @abstractmethod
+    def preprocess_batch(self, inputs: List[Any], modality: str) -> tuple[Any, List[int]]:
+        """Preprocess inputs for inference. Return (batch_tensor, valid_indices)."""
+        pass
+
+    @abstractmethod
+    def classify_batch(self, batch_tensor: Any) -> List[float]:
+        """Run model inference. Return List of scores in [0.0, 1.0], or -1.0 for error."""
+        pass
+
+    @abstractmethod
+    def get_device_info(self) -> Dict[str, Any]:
+        """Return dict with keys: 'device', 'name', 'backend' (e.g. CUDA, DirectML, CPU)."""
+        pass
+
+    @abstractmethod
+    def get_model_name(self) -> str:
+        """Return human-readable model name."""
+        pass
+
+    def get_label(self) -> str:
+        """Human-readable badge label (e.g. 'AI generated', 'Spider')."""
+        return "AI generated"
+
+    def is_loaded(self) -> bool:
+        """Check if model is currently loaded in memory."""
+        return self._is_loaded
+
+    def unload_model(self):
+        """Unload model from memory for resource efficiency."""
+        self.model = None
+        self._is_loaded = False
+
+    def process_batch(self, inputs: List[Any], modality: str) -> List[float]:
+        """Convenience method combining load_model, preprocess_batch, and classify_batch."""
+        if not self.is_loaded():
+            success, _ = self.load_model()
+            if not success:
+                return [-1.0] * len(inputs)
+        batch_tensor, valid_indices = self.preprocess_batch(inputs, modality)
+        if not valid_indices:
+            return [-1.0] * len(inputs)
+        scores = self.classify_batch(batch_tensor)
+        results = [-1.0] * len(inputs)
+        for idx, score in zip(valid_indices, scores):
+            results[idx] = score
+        return results
+
+    def _log_to_stderr(self, message: str) -> None:
+        """Safe stderr logging to avoid corrupting native messaging JSON on stdout."""
+        try:
+            print(message, file=sys.stderr, flush=True)
+        except Exception:
+            pass</code></pre>
+        </details>
+
+        <!-- Dedicated Live Model Download Progress Bar -->
+        <div id="models-download-progress-panel" class="glass-card-3d" style="display: none; padding: 22px 28px; margin-bottom: 16px; border: 1px solid rgba(255, 98, 24, 0.45); background: rgba(22, 8, 5, 0.9); box-shadow: 0 0 32px rgba(255, 98, 24, 0.25);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <strong id="download-progress-title" style="font-size: 1.1rem; color: #fff; font-weight: 800;">Downloading Classifiers…</strong>
+              <div id="download-progress-subtitle" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 3px;">
+                Downloading model weights directly into local native host…
+              </div>
+            </div>
+            <span id="download-progress-percent" style="font-size: 1.35rem; font-weight: 800; color: #ff8a3d;">0%</span>
+          </div>
+          <div style="height: 12px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.12);">
+            <div id="download-progress-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #ff4500, #ff8a3d, #ffb38a); border-radius: 999px; transition: width 0.3s ease; box-shadow: 0 0 16px rgba(255, 98, 24, 0.6);"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+            <span id="download-progress-status-text" style="font-size: 0.84rem; color: #ffb38a;">Initializing download stream…</span>
+            <span style="font-size: 0.82rem; color: var(--text-muted);">Please keep this tab open</span>
+          </div>
+        </div>
+
+        <div
+          class="glass-card-3d"
+          style="padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;"
+        >
+          <div>
+            <div style="font-weight: 800; font-size: 1.05rem;" id="selected-models-summary">
+              Selected: FvF Heimdall V2
+            </div>
+            <div style="font-size: 0.84rem; color: var(--text-secondary);" id="download-overall-status">
+              download selected models via the Native Host into <code>native/classifiers/</code>.
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <button type="button" class="btn-ember-outline" id="back-to-step1-btn">
+              ← Back
+            </button>
+            <button type="button" class="btn-fire" id="download-and-continue-btn">
+              <span>⬇ Download Selected &amp; Continue →</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================================================================
+           SCREEN 3: SETTING UP YOUR FIRST CLASSIFIER (BULLET POINTS)
+           ================================================================== -->
+      <section class="wizard-screen" id="screen-3" data-screen="3">
+        <div class="screen-header">
+          <h1 class="display-title">Setting Up Your First Classifier</h1>
+        </div>
+
+        <div class="glass-card-3d setup-guide-card" data-tilt style="max-width: 820px; padding: 32px 36px;">
+          <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 22px;">
+            How to set up your first classifier:
+          </h2>
+
+          <ul class="setup-steps-list">
+            <li>
+              <strong>Pin Fire vs Fire to your browser bar:</strong> Click your browser's extensions icon and pin the flame icon so it is always visible.
+            </li>
+            <li>
+              <strong>Open the Options menu:</strong> Click the flame icon in your toolbar, then click Options to open your Settings dashboard.
+            </li>
+            <li>
+              <strong>Create or edit a Category:</strong> Categories group your classifiers by rules (e.g. AI Images, Spiders, or custom concepts).
+            </li>
+            <li>
+              <strong>Assign your downloaded classifiers:</strong> Check the box next to your downloaded classifiers (e.g., FvF Heimdall V2) to enable them inside that category.
+            </li>
+            <li>
+              <strong>Set your sensitivity threshold:</strong> Adjust the threshold slider (recommended: 75%). Any image or text scoring above this threshold will trigger your chosen alert style.
+            </li>
+            <li>
+              <strong>Choose your display style:</strong> Select between Hover-to-Reveal Blur, an outline Border, and an Info Badge.
+            </li>
+            <li>
+              <strong>Toolbar flame indicators:</strong> A green flame logo with a counter means active scanning is underway; a red flame means the GPU/CPU is idle standing by.
+            </li>
+          </ul>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 32px; gap: 16px; flex-wrap: wrap;">
+            <button type="button" class="btn-ember-outline" id="back-to-step2-btn">
+              ← Back
+            </button>
+            <button type="button" class="btn-fire" id="finish-setup-btn">
+              <span>Finish Setup →</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================================================================
+           SCREEN 4: FINAL READY PAGE + OPTIONAL KO-FI SUPPORT
+           ================================================================== -->
+      <section class="wizard-screen" id="screen-4" data-screen="4">
+        <div class="glass-card-3d ready-hero-card" data-tilt>
+          <div class="ready-check-orb" style="background: transparent; border: none; box-shadow: none;">
+            <img src="./assets/icon.svg" alt="Fire vs Fire Logo" style="width: 76px; height: 76px; object-fit: contain;" />
+          </div>
+          <h1 class="display-title" style="margin-bottom: 14px;">
+            Fire vs Fire is now ready to go, you can close this page
+          </h1>
+          <p class="lead-subtitle" style="max-width: 700px; margin: 0 auto;" id="final-ready-summary">
+            Your extension is ready to scan. Open any website to see Fire vs Fire classify content locally on your hardware.
+          </p>
+          <div style="margin-top: 24px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap;">
+            <a href="./feed.html" class="btn-fire" style="display: inline-flex;">
+              <span>🧪 Test Extension on Sample Feed →</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Optional Ko-fi Support Card with Explicit Non-Paywall Guarantee -->
+        <div class="glass-card-3d kofi-support-card" data-tilt>
+          <div>
+            <h2 style="font-size: 1.65rem; font-weight: 800; margin-bottom: 14px;">
+              Help support Me &amp; my projects
+            </h2>
+            <p style="color: var(--text-secondary); font-size: 0.98rem; line-height: 1.6; margin-bottom: 16px;">
+              Fire vs Fire and all first-party models (Heimdall V2, Spider, and the upcoming Mímir , Huginn , and Bragi) are built independently and given to the community for free.
+            </p>
+
+            <div class="ethical-pledge-box" style="margin-bottom: 16px;">
+              <strong>💚 100% Free Forever — Zero Paywalls:</strong><br />
+              Making a donation on Ko-fi is purely optional to support me and my future projects. Making a payment will not unlock any additional features, models, or higher speeds.
+            </div>
+
+            <div style="margin-top: 22px;">
+              <a
+                href="https://luckycowmoo.github.io/simple-page/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn-fire"
+                style="display: inline-flex;"
+              >
+                <span>Check out my other projects</span>
+              </a>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;">
+            <iframe
+              id="kofiframe"
+              src="https://ko-fi.com/leaharmstrong/?hidefeed=true&widget=true&embed=true"
+              style="border: none; width: 100%; max-width: 320px; height: 520px; background: #ffffff; border-radius: 18px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);"
+              title="Support Leah Armstrong"
+              loading="lazy"
+            ></iframe>
+            <a
+              href="https://ko-fi.com/leaharmstrong"
+              target="_blank"
+              rel="noopener noreferrer"
+              style="margin-top: 10px; font-size: 0.8rem; color: #ffb38a; text-decoration: underline;"
+            >
+              Open Ko-fi in new tab ↗
+            </a>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="./app.js?v=2.1.0"></script>
+  </body>
+</html>

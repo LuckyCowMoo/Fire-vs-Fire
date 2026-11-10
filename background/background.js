@@ -5,12 +5,9 @@ console.log('[Background] Script loaded, ext:', ext ? 'Available' : 'Unavailable
 
 // Name of the native messaging host (update to match your installed host manifest)
 const HOST_NAME = 'com.aidetector.classifier';
+const GITHUB_PAGES_ONBOARDING_URL = 'https://luckycowmoo.github.io/Fire-vs-Fire/?onboarding=1';
+const RAW_GITHUB_CATALOG_URL = 'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json';
 
-// Default model hints sent with requests; the native app can ignore or override
-const DEFAULT_MODELS = { image: 'local-img-v1', text: 'local-text-v1' };
-
-let selectedImageModel = null;
-const STORAGE_KEY = 'selectedImageModel';
 let activeClassifyCount = 0;
 
 function setBadgeLoading(activeCount) {
@@ -48,34 +45,23 @@ function endClassificationActivity() {
   updateToolbarState();
 }
 
-// Helper function to change the extension icon
 function setIconLoading(isLoading) {
   const filename = isLoading ? 'icon-loading.svg' : 'icon.svg';
   const fullPath = ext.runtime.getURL('icons/' + filename);
-  console.log(`[Icon] Changing to ${filename}`);
-  console.log(`[Icon] Full path: ${fullPath}`);
-  
+
   try {
     if (ext.browserAction && typeof ext.browserAction.setIcon === 'function') {
-      console.log('[Icon] Using browserAction.setIcon()');
       ext.browserAction.setIcon({ path: fullPath }, () => {
         if (ext.runtime.lastError) {
           console.error('[Icon] setIcon error:', ext.runtime.lastError);
-        } else {
-          console.log('[Icon] Icon set successfully');
         }
       });
     } else if (ext.action && typeof ext.action.setIcon === 'function') {
-      console.log('[Icon] Using action.setIcon()');
       ext.action.setIcon({ path: fullPath }, () => {
         if (ext.runtime.lastError) {
           console.error('[Icon] setIcon error:', ext.runtime.lastError);
-        } else {
-          console.log('[Icon] Icon set successfully');
         }
       });
-    } else {
-      console.warn('[Icon] No icon API found. Available:', Object.keys(ext));
     }
   } catch (e) {
     console.error('[Icon] Exception:', e.message, e.stack);
@@ -86,61 +72,30 @@ function setIconLoading(isLoading) {
 // native messaging API isn't available yet.
 const ENABLE_FAKE_NATIVE = false;
 
-// Create a UUID without pulling in extra deps
 function makeRequestId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return 'req-' + Math.random().toString(16).slice(2) + Date.now();
 }
 
-// Build a classify request envelope following the agreed schema
-function buildClassifyRequest(items, modelOverrides) {
-  const model = { ...DEFAULT_MODELS, ...(modelOverrides || {}) };
-  return {
-    version: 1,
-    type: 'classify',
-    requestId: makeRequestId(),
-    timestamp: Date.now(),
-    payload: {
-      items,
-      model
-    }
-  };
-}
-
-function persistSelectedModel(value) {
-  if (!ext.storage || !ext.storage.local) return;
-  try {
-    ext.storage.local.set({ [STORAGE_KEY]: value });
-  } catch (err) {
-    console.warn('Failed to persist selected model', err);
-  }
-}
-
-function loadStoredModel() {
-  if (!ext.storage || !ext.storage.local) return;
-  try {
-    ext.storage.local.get(STORAGE_KEY, (result) => {
-      if (ext.runtime.lastError) {
-        console.warn('Storage get failed', ext.runtime.lastError);
-        return;
-      }
-      if (result && result[STORAGE_KEY]) {
-        selectedImageModel = result[STORAGE_KEY];
-        console.log('Restored selected image model:', selectedImageModel);
-      }
-    });
-  } catch (err) {
-    console.warn('Failed to load stored model', err);
-  }
-}
-
-loadStoredModel();
 updateToolbarState();
 
-// Native messaging persistent port + request tracking
 let nativePort = null;
 const pendingNativeRequests = new Map();
 const pendingJobs = new Map();
+const JOB_STALE_MS = 10 * 60 * 1000;
+
+function expireStaleJobs() {
+  const now = Date.now();
+  for (const [jobId, info] of pendingJobs) {
+    if (now - (info.createdAt || 0) > JOB_STALE_MS) {
+      pendingJobs.delete(jobId);
+      endClassificationActivity();
+      console.warn(`[Background] Expired stale job ${jobId}`);
+    }
+  }
+}
+
+setInterval(expireStaleJobs, 60000);
 
 function ensureNativePort() {
   if (nativePort) return nativePort;
@@ -156,11 +111,18 @@ function ensureNativePort() {
     const resType = response && response.type;
     const reqId = response && response.requestId;
 
-    // Handle job cancellation confirmation
     if (resType === 'jobCancelled') {
       const jobId = response.jobId;
       console.log(`[Native] Job ${jobId} cancellation confirmed`);
       pendingJobs.delete(jobId);
+      return;
+    }
+
+    if (resType === 'downloadProgress') {
+      const reqEntry = reqId ? pendingNativeRequests.get(reqId) : null;
+      if (reqEntry && typeof reqEntry.onProgress === 'function') {
+        reqEntry.onProgress(response);
+      }
       return;
     }
 
@@ -185,14 +147,24 @@ function ensureNativePort() {
       return;
     }
 
-    if (!reqId || !pendingNativeRequests.has(reqId)) {
+    let matchedReqId = reqId;
+    if (!matchedReqId || !pendingNativeRequests.has(matchedReqId)) {
+      if (response && (response.type === 'pong' || response.ok)) {
+        for (const [id] of pendingNativeRequests.entries()) {
+          if (id.startsWith('req-ping-') || pendingNativeRequests.size === 1) {
+            matchedReqId = id;
+            break;
+          }
+        }
+      }
+    }
+    if (!matchedReqId || !pendingNativeRequests.has(matchedReqId)) {
       console.warn('[Native] Unmatched response:', response);
       return;
     }
-    const { resolve, timeoutId } = pendingNativeRequests.get(reqId);
+    const { resolve, timeoutId } = pendingNativeRequests.get(matchedReqId);
     if (timeoutId) clearTimeout(timeoutId);
-    pendingNativeRequests.delete(reqId);
-    console.log('[Native] Response from host:', response);
+    pendingNativeRequests.delete(matchedReqId);
     resolve(response);
   });
 
@@ -201,7 +173,6 @@ function ensureNativePort() {
     console.warn('[Native] Port disconnected', err);
     nativePort = null;
 
-    // Reject all pending requests
     for (const [reqId, { reject, timeoutId }] of pendingNativeRequests) {
       if (timeoutId) clearTimeout(timeoutId);
       reject(new Error(err?.message || 'Native host disconnected'));
@@ -218,32 +189,17 @@ function ensureNativePort() {
   return nativePort;
 }
 
-// Send a message to the native host and return a promise for its response
-function sendToNative(message) {
-  // If dev mode is enabled, always use fake responses
+function sendToNative(message, options = {}) {
   if (ENABLE_FAKE_NATIVE) {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const results = (message.payload?.items || []).map((it) => ({
-          id: it.id,
-          modality: it.modality,
-          label: 'uncertain',
-          score: 0.5,
-          model: (message.payload?.model || {})[it.modality] || 'dev-fake',
-          durationMs: 5,
-          notes: 'Fake native response (dev)'
-        }));
-        resolve({
-          version: 1,
-          type: 'classifyResult',
-          requestId: message.requestId,
-          timestamp: Date.now(),
-          results,
-          errors: []
-        });
-      }, 25);
+    return Promise.resolve({
+      version: 2,
+      type: 'listModels',
+      classifiers: []
     });
   }
+
+  const timeoutMs = options.timeoutMs || 60000;
+  const onProgress = options.onProgress || null;
 
   const port = ensureNativePort();
   if (port) {
@@ -256,30 +212,25 @@ function sendToNative(message) {
           pendingNativeRequests.delete(requestId);
           reject(new Error('Native host timeout'));
         }
-      }, 60000);
+      }, timeoutMs);
 
-      pendingNativeRequests.set(requestId, { resolve, reject, timeoutId });
-      console.log('[Native] Sending to host (port):', HOST_NAME, message);
+      pendingNativeRequests.set(requestId, { resolve, reject, timeoutId, onProgress });
       port.postMessage(message);
     });
   }
 
-  // Fallback to one-off sendNativeMessage if connectNative isn't available
   const canSend = ext && ext.runtime && typeof ext.runtime.sendNativeMessage === 'function';
   if (!canSend) {
-    return Promise.reject(new Error('Native messaging API unavailable: ext.runtime.connectNative/sendNativeMessage not available. Ensure nativeMessaging permission, MV2 background page, and a supported browser.'));
+    return Promise.reject(new Error('Native messaging API unavailable: ext.runtime.connectNative/sendNativeMessage not available.'));
   }
 
   return new Promise((resolve, reject) => {
-    console.log('[Native] Sending to host:', HOST_NAME, message);
     ext.runtime.sendNativeMessage(HOST_NAME, message, (response) => {
       const err = ext.runtime.lastError;
       if (err) {
-        console.error('[Native] Error from host:', err);
         reject(new Error(`Native host error: ${err.message || JSON.stringify(err)}`));
         return;
       }
-      console.log('[Native] Response from host:', response);
       resolve(response);
     });
   });
@@ -288,9 +239,13 @@ function sendToNative(message) {
 function sendToNativeFireAndForget(message) {
   const port = ensureNativePort();
   if (port) {
-    console.log('[Native] Sending to host (port):', HOST_NAME, message);
-    port.postMessage(message);
-    return true;
+    try {
+      port.postMessage(message);
+      return true;
+    } catch (err) {
+      console.warn('[Native] port.postMessage failed; resetting port:', err);
+      nativePort = null;
+    }
   }
 
   const canSend = ext && ext.runtime && typeof ext.runtime.sendNativeMessage === 'function';
@@ -303,42 +258,6 @@ function sendToNativeFireAndForget(message) {
     }
   });
   return true;
-}
-
-// Handle CLASSIFY_ITEMS messages from content/popup
-async function handleClassifyItems(message) {
-  console.log('[Classify] handleClassifyItems called', message);
-  const items = Array.isArray(message.items) ? message.items : [];
-  if (!items.length) {
-    return { ok: false, error: 'No items to classify' };
-  }
-
-  const modelOverrides = { ...message.model };
-
-  if (selectedImageModel) {
-    // V2 expects classifier IDs
-    modelOverrides.classifiers = [selectedImageModel];
-  }
-  
-  // Pass lazyLoad setting from content script
-  if (typeof message.lazyLoad === 'boolean') {
-    modelOverrides.lazyLoad = message.lazyLoad;
-  }
-
-  const envelope = buildClassifyRequest(items, modelOverrides);
-
-  try {
-    console.log('[Classify] Setting icon to loading');
-    beginClassificationActivity();
-    const nativeResponse = await sendToNative(envelope);
-    console.log('[Classify] Setting icon back to idle');
-    endClassificationActivity();
-    return { ok: true, requestId: envelope.requestId, response: nativeResponse };
-  } catch (err) {
-    console.error('[Classify] Error, setting icon back to idle:', err);
-    endClassificationActivity();
-    return { ok: false, requestId: envelope.requestId, error: err.message || String(err) };
-  }
 }
 
 function handleClassifyJobChunk(message, sender) {
@@ -374,12 +293,181 @@ function handleClassifyJobChunk(message, sender) {
   return { ok, jobId };
 }
 
-ext.runtime.onInstalled.addListener(() => {
-  console.log('Extension installed');
+async function openOnboardingExperience(targetScreen = 1) {
+  // Always use local extension docs page for zero-latency direct native messaging
+  const localOnboardingUrl = ext.runtime.getURL(`docs/index.html?screen=${targetScreen}`);
+  if (ext.tabs && ext.tabs.create) {
+    ext.tabs.create({ url: localOnboardingUrl });
+  }
+}
+
+async function fetchFallbackCatalog() {
+  const urls = [
+    'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json',
+    'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json'
+  ];
+  for (const url of urls) {
+    try {
+      const resp = await fetch(`${url}?_t=${Date.now()}`, { cache: 'no-store' });
+      if (resp && resp.ok) {
+        return await resp.json();
+      }
+    } catch (_) {}
+  }
+
+  try {
+    const localUrl = ext.runtime.getURL('docs/official_models.json');
+    const resp = await fetch(`${localUrl}?_t=${Date.now()}`);
+    if (resp && resp.ok) {
+      return await resp.json();
+    }
+  } catch (_) {}
+
+  return { catalog_version: 2, repository: 'LuckyCowMoo/Fire-vs-Fire', models: [] };
+}
+
+async function buildAndSaveAutoCategories(downloadedModelIds = [], customThreshold = 0.75) {
+  const catalog = await fetchFallbackCatalog();
+  const models = Array.isArray(catalog.models) ? catalog.models : [];
+  const selectedSet = new Set(Array.isArray(downloadedModelIds) ? downloadedModelIds : []);
+
+  // If no explicit list was passed, check native host for installed models
+  if (selectedSet.size === 0) {
+    try {
+      const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2, force: true }, { timeoutMs: 8000 });
+      if (catResp && Array.isArray(catResp.installedModels)) {
+        catResp.installedModels.forEach((id) => selectedSet.add(id));
+      }
+    } catch (_) {}
+  }
+
+  // Always fallback to at least fvf_heimdall04 (and 03 / 02) if nothing was reported
+  if (selectedSet.size === 0) {
+    selectedSet.add('fvf_heimdall04');
+    selectedSet.add('fvf_heimdall03');
+    selectedSet.add('fvf_heimdall02');
+  }
+
+  const threshold = typeof customThreshold === 'number'
+    ? Math.max(0.05, Math.min(0.99, customThreshold))
+    : 0.75;
+
+  const newEnsembles = [];
+
+  // 1. Create a category for each selected/downloaded AI detector model
+  for (const m of models) {
+    if (!selectedSet.has(m.id) || m.is_ai_detector === false) continue;
+    const mod = m.modality || 'image';
+    const borderColor = m.default_color || '#FF4D1C';
+    const ensemble = {
+      id: `auto_${mod}_${m.id}`,
+      name: m.category_name || m.name || `AI ${mod}`,
+      modality: mod === 'text' ? 'text' : 'image',
+      enabled: true,
+      threshold,
+      classifiers: [m.id],
+      weights: [1],
+      styles: mod === 'text'
+        ? {
+            text: {
+              applyBlur: true,
+              blurMode: 'hover',
+              blurAmount: 2,
+              applyStrikethrough: true,
+              strikethroughMode: 'hover',
+              strikethroughColor: borderColor,
+              applyUnderline: false,
+              underlineMode: 'off',
+              underlineColor: borderColor,
+              applyHighlight: false,
+              highlightMode: 'off',
+              highlightColor: '#fff3a1'
+            }
+          }
+        : {
+            image: {
+              applyBlur: true,
+              blurAmount: 6,
+              blurMode: 'hover',
+              applyBorder: true,
+              borderMultiplier: 1.2,
+              borderColor,
+              borderMode: 'hover',
+              applyBadge: true,
+              badgeMode: 'hover'
+            }
+          }
+    };
+    newEnsembles.push(ensemble);
+  }
+
+  // 2. Also create dedicated categories for object classifiers (e.g. ResNet 50 - Spider)
+  for (const m of models) {
+    if (!selectedSet.has(m.id) || m.is_ai_detector !== false) continue;
+    const borderColor = m.default_color || '#FFB020';
+    newEnsembles.push({
+      id: `auto_image_${m.id}`,
+      name: m.category_name || m.name || 'Object Detector',
+      modality: 'image',
+      enabled: true,
+      threshold,
+      classifiers: [m.id],
+      weights: [1],
+      styles: {
+        image: {
+          applyBlur: true,
+          blurAmount: 8,
+          blurMode: 'hover',
+          applyBorder: true,
+          borderMultiplier: 1.2,
+          borderColor,
+          borderMode: 'hover',
+          applyBadge: true,
+          badgeMode: 'hover'
+        }
+      }
+    });
+  }
+
+  const storagePayload = {
+    enabled: true,
+    imageAiThreshold: threshold,
+    textAiThreshold: threshold,
+    ensembleConfigsV2: newEnsembles,
+    onboardingCompleted: true,
+    onboardingCompletedAt: Date.now()
+  };
+
+  const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+  if (storageArea && storageArea.set) {
+    await storageArea.set(storagePayload);
+  }
+  if (ext.storage && ext.storage.local && ext.storage.local !== storageArea) {
+    try {
+      await ext.storage.local.set(storagePayload);
+    } catch (_) {}
+  }
+
+  // Trigger reclassify on open tabs
+  if (ext.tabs && ext.tabs.query) {
+    try {
+      const tabs = await ext.tabs.query({});
+      tabs.forEach((tab) => {
+        if (tab && tab.id != null) {
+          ext.tabs.sendMessage(tab.id, { type: 'RECLASSIFY_ALL' }).catch(() => {});
+        }
+      });
+    } catch (_) {}
+  }
+
+  return newEnsembles;
+}
+
+ext.runtime.onInstalled.addListener((details) => {
+  console.log('Extension installed:', details && details.reason);
   updateToolbarState();
   if (ext.contextMenus && ext.contextMenus.create) {
     try {
-      // Context menu for images and all page content
       ext.contextMenus.create({
         id: 'toggle-blur',
         title: 'Toggle AI blur',
@@ -389,33 +477,31 @@ ext.runtime.onInstalled.addListener(() => {
       console.warn('Context menu create failed:', e);
     }
   }
+
+  if (!details || details.reason === 'install') {
+    openOnboardingExperience();
+  }
 });
 
 if (ext.contextMenus && ext.contextMenus.onClicked) {
   ext.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === 'toggle-blur' && tab && tab.id != null) {
-      // Send message to content script and wait for response to update menu
       const message = { type: 'TOGGLE_BLUR' };
-      
+
       if (info.srcUrl) {
-        // Image context
         message.srcUrl = info.srcUrl;
       } else if (info.selectionText) {
-        // Text context
         message.selectionText = info.selectionText;
       }
-      
+
       ext.tabs.sendMessage(tab.id, message)
         .then((response) => {
-          // Update context menu based on new state
           if (response && ext.contextMenus && ext.contextMenus.update) {
             let title;
             if (response.hasAiTags) {
-              // Just added tags, so next time show remove option
               const label = response.label || 'tag';
               title = `Remove ${label} tag`;
             } else {
-              // Just removed tags, so next time show blur option
               const modality = response.modality || 'this';
               title = modality === 'text' ? 'Blur this text' : 'Blur this image';
             }
@@ -427,20 +513,185 @@ if (ext.contextMenus && ext.contextMenus.onClicked) {
   });
 }
 
-// Test function - call from console: testIconChange()
-window.testIconChange = function() {
-  console.log('[Test] Changing icon to loading (green)');
-  setIconLoading(true);
-  setTimeout(() => {
-    console.log('[Test] Changing icon back to idle (red)');
-    setIconLoading(false);
-  }, 3000);
-};
-
 ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'PING') {
-    sendResponse({ ok: true, time: Date.now() });
+    sendResponse({ ok: true, time: Date.now(), extensionVersion: ext.runtime.getManifest?.()?.version || '0.1.0' });
     return false;
+  }
+
+  if (message && message.type === 'OPEN_ONBOARDING') {
+    openOnboardingExperience();
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'OPEN_OPTIONS_FULLPAGE') {
+    const optionsUrl = ext.runtime.getURL('options/options.html');
+    if (ext.tabs && ext.tabs.create) {
+      ext.tabs.create({ url: optionsUrl });
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'OPEN_MODELS_HUB') {
+    openOnboardingExperience(2);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'OPEN_GUIDE_PAGE') {
+    openOnboardingExperience(3);
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message && message.type === 'CHECK_NATIVE_UPDATE') {
+    sendToNative({ type: 'checkUpdate', version: 2 }, { timeoutMs: 5000 })
+      .then((res) => {
+        sendResponse({ ok: true, connected: true, updateInfo: res });
+      })
+      .catch(async (err) => {
+        try {
+          const resp = await fetch('https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json', { cache: 'no-store' });
+          if (resp && resp.ok) {
+            const cat = await resp.json();
+            sendResponse({
+              ok: true,
+              connected: false,
+              updateInfo: {
+                currentVersion: 'Not connected',
+                latestVersion: cat.host_version || '2.1.0',
+                updateAvailable: true,
+                releaseNotes: cat.release_notes || 'Updated Native Host installer',
+                downloadUrl: 'https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip'
+              }
+            });
+            return;
+          }
+        } catch (_) {}
+        sendResponse({ ok: false, connected: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'APPLY_NATIVE_UPDATE') {
+    sendToNative({ type: 'applyUpdate', version: 2 }, { timeoutMs: 30000 })
+      .then((res) => {
+        sendResponse({ ok: true, result: res });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'CHECK_NATIVE_HOST') {
+    const pingReqId = 'req-ping-' + Date.now();
+    sendToNative({ type: 'ping', requestId: pingReqId, version: 2 }, { timeoutMs: 4000 })
+      .then((res) => {
+        sendResponse({ ok: true, connected: Boolean(res && res.ok), hostResponse: res });
+      })
+      .catch((err) => {
+        sendResponse({ ok: true, connected: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'GET_OFFICIAL_CATALOG') {
+    sendToNative({ type: 'getOfficialCatalog', version: 2, force: Boolean(message.force) }, { timeoutMs: 8000 })
+      .then((res) => {
+        sendResponse({
+          ok: true,
+          nativeConnected: true,
+          catalog: res.catalog,
+          installedModels: res.installedModels || [],
+          classifiers: res.classifiers || []
+        });
+      })
+      .catch(async (err) => {
+        const fallbackCatalog = await fetchFallbackCatalog();
+        sendResponse({
+          ok: true,
+          nativeConnected: false,
+          catalog: fallbackCatalog,
+          installedModels: [],
+          classifiers: [],
+          nativeError: err.message || String(err)
+        });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'DOWNLOAD_OFFICIAL_MODEL') {
+    const modelId = message.modelId;
+    const forceDownload = Boolean(message.forceDownload);
+    const tabId = sender && sender.tab ? sender.tab.id : null;
+
+    sendToNative(
+      {
+        type: 'downloadOfficialModel',
+        version: 2,
+        modelId,
+        forceDownload
+      },
+      {
+        timeoutMs: 10 * 60 * 1000,
+        onProgress: (progressMsg) => {
+          if (tabId != null && ext.tabs && ext.tabs.sendMessage) {
+            ext.tabs.sendMessage(tabId, {
+              type: 'ONBOARDING_DOWNLOAD_PROGRESS',
+              payload: progressMsg
+            }).catch(() => {});
+          }
+          try {
+            ext.runtime.sendMessage({
+              type: 'ONBOARDING_DOWNLOAD_PROGRESS',
+              payload: progressMsg
+            }).catch(() => {});
+          } catch (_) {}
+        }
+      }
+    )
+      .then((res) => {
+        sendResponse(res);
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, modelId, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'AUTO_SETUP_CATEGORIES') {
+    const downloadedModels = Array.isArray(message.downloadedModels) ? message.downloadedModels : [];
+    const threshold = typeof message.threshold === 'number' ? message.threshold : 0.75;
+    buildAndSaveAutoCategories(downloadedModels, threshold)
+      .then((ensembles) => {
+        sendResponse({ ok: true, ensembles });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      });
+    return true;
+  }
+
+  if (message && message.type === 'SAVE_ONBOARDING_ENSEMBLES') {
+    const ensembles = Array.isArray(message.ensembles) ? message.ensembles : [];
+    const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+    const payload = {
+      enabled: true,
+      ensembleConfigsV2: ensembles,
+      onboardingCompleted: true,
+      onboardingCompletedAt: Date.now()
+    };
+    Promise.resolve(storageArea && storageArea.set ? storageArea.set(payload) : null)
+      .then(() => {
+        sendResponse({ ok: true, ensembles });
+      })
+      .catch((err) => {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      });
+    return true;
   }
 
   if (message && message.type === 'UPDATE_CONTEXT_MENU') {
@@ -464,13 +715,6 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  if (message && message.type === 'CLASSIFY_ITEMS') {
-    handleClassifyItems(message)
-      .then((result) => sendResponse(result))
-      .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }));
-    return true; // async response
-  }
-
   if (message && message.type === 'CLASSIFY_JOB_CHUNK') {
     const result = handleClassifyJobChunk(message, sender);
     sendResponse(result);
@@ -490,20 +734,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message && message.type === 'SET_MODEL') {
-    selectedImageModel = message.model || null;
-    persistSelectedModel(selectedImageModel);
-    sendResponse({ ok: true, selected: selectedImageModel });
-    return false;
-  }
-
-  if (message && message.type === 'GET_MODEL') {
-    sendResponse({ ok: true, selected: selectedImageModel });
-    return false;
-  }
-
   if (message && message.type === 'CANCEL_ALL') {
-    // Cancel all active native host jobs
     for (let jobId of pendingJobs.keys()) {
       try {
         const port = ensureNativePort();

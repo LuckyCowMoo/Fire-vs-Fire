@@ -77,6 +77,13 @@
       "description": "Our next-generation AI image classifier. Extracts 24 forensic channels including 2D Fast Fourier Transform (FFT) spectral log-magnitude, high-pass residual, chrominance spectrum, and directional grid harmonics, fused with a 14.5M parameter ForensicNeXt backbone and ConvNeXt-V2 Base semantic stream.",
       "files": [
         {
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/fvf_heimdall_03_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_int8.onnx",
+          "required": false
+        },
+        {
           "type": "classifier_py",
           "relative_path": "native/classifiers/fvf_heimdall_03_classifier.py",
           "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_03_classifier.py",
@@ -94,6 +101,13 @@
           "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_03_best.pt",
           "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.pt",
           "required": true
+        },
+        {
+          "type": "weights_onnx",
+          "relative_path": "native/classifiers/fvf_heimdall_03_best.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.onnx",
+          "required": false
         }
       ],
       "download_size": "207 MB",

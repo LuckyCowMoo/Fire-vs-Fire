@@ -55,6 +55,7 @@ class FvfHeimdall03Classifier(BaseClassifier):
         self.np = None
         self.Image = None
         self.ort_session = None
+        self._extractor = None
 
         self._device_info: Dict[str, Any] = {
             "device": "unknown",
@@ -110,8 +111,9 @@ class FvfHeimdall03Classifier(BaseClassifier):
         here = Path(__file__).resolve().parent
         repo_root = here.parents[1]
         candidates = [
-            here / "fvf_heimdall_03_best.pt",
+            here / "fvf_heimdall_03_int8.onnx",
             here / "fvf_heimdall_03_best.onnx",
+            here / "fvf_heimdall_03_best.pt",
             repo_root / "checkpoints" / "fvf_heimdall_03" / "best_inference_fp16.pt",
         ]
         for p in candidates:
@@ -196,8 +198,9 @@ class FvfHeimdall03Classifier(BaseClassifier):
                 "backend": active_ep.replace("ExecutionProvider", ""),
             }
             self.model_path = onnx_path
+            self._num_crops = 1
             self._is_loaded = True
-            self._log(f"Loaded ONNX model {onnx_path.name} via {active_ep}")
+            self._log(f"Loaded ONNX model {onnx_path.name} via {active_ep} (1-crop mode)")
             return True
         except Exception as exc:
             self._log(f"ONNX load skipped/failed ({exc}); falling back to PyTorch")
@@ -213,14 +216,19 @@ class FvfHeimdall03Classifier(BaseClassifier):
         if ckpt_path is None:
             return False, "FvF Heimdall 03 checkpoint not found (place fvf_heimdall_03_best.pt in native/classifiers/)"
 
-        onnx_candidate = ckpt_path.with_suffix(".onnx")
         if ckpt_path.suffix.lower() == ".onnx":
             if self._try_load_onnx(ckpt_path):
                 return True, None
             return False, "onnx_load_failed"
-        elif not self.torch.cuda.is_available() and onnx_candidate.is_file():
-            if self._try_load_onnx(onnx_candidate):
-                return True, None
+        elif not self.torch.cuda.is_available():
+            for candidate in [
+                ckpt_path.with_name("fvf_heimdall_03_int8.onnx"),
+                ckpt_path.with_name("fvf_heimdall_03_best.onnx"),
+                ckpt_path.with_suffix(".onnx"),
+            ]:
+                if candidate.is_file():
+                    if self._try_load_onnx(candidate):
+                        return True, None
 
         self._setup_device()
 
@@ -250,7 +258,7 @@ class FvfHeimdall03Classifier(BaseClassifier):
             model = FvfAresModel(
                 backbone_name=backbone_name,
                 pretrained=False,
-                num_crops=max(1, self._num_crops),
+                num_crops=has_crops,
                 use_forensicnext=True,
             )
             clean_state = {
@@ -379,6 +387,16 @@ class FvfHeimdall03Classifier(BaseClassifier):
 
         return {"global_rgb": glob_batch, "native_rgb": nat_batch}, valid_indices
 
+    def _get_extractor(self) -> Any:
+        if self._extractor is None:
+            try:
+                from ._heimdall_arch import ForensicChannelExtractor24
+            except Exception:
+                from _heimdall_arch import ForensicChannelExtractor24
+            self._extractor = ForensicChannelExtractor24(standardize_forensic=True)
+            self._extractor.eval()
+        return self._extractor
+
     def classify_batch(self, batch_tensor: Any) -> List[float]:
         if not self._is_loaded or batch_tensor is None:
             return []
@@ -389,13 +407,24 @@ class FvfHeimdall03Classifier(BaseClassifier):
 
         try:
             if self.ort_session is not None:
-                logits_np = self.ort_session.run(
-                    None,
-                    {
-                        "global_rgb": glob_rgb.cpu().numpy(),
-                        "native_rgb": nat_rgb.cpu().numpy(),
-                    },
-                )[0]
+                input_names = [inp.name for inp in self.ort_session.get_inputs()]
+                feed_dict: Dict[str, Any] = {}
+                if "global_rgb" in input_names:
+                    feed_dict["global_rgb"] = glob_rgb.cpu().numpy().astype(self.np.float32)
+
+                if "forensic_24ch" in input_names:
+                    # Deterministic 24-channel forensic feature extraction (including 2D FFT)
+                    with self.torch.no_grad():
+                        if nat_rgb.dim() == 5:
+                            crop_single = nat_rgb[:, 0]
+                            ch24 = self._get_extractor()(crop_single)
+                        else:
+                            ch24 = self._get_extractor()(nat_rgb)
+                    feed_dict["forensic_24ch"] = ch24.cpu().numpy().astype(self.np.float32)
+                elif "native_rgb" in input_names:
+                    feed_dict["native_rgb"] = nat_rgb.cpu().numpy().astype(self.np.float32)
+
+                logits_np = self.ort_session.run(None, feed_dict)[0]
                 logits = self.torch.from_numpy(logits_np)
                 probs = self.torch.softmax(logits, dim=-1)[:, self._ai_class_index]
                 return [float(x) for x in probs.tolist()]

@@ -68,6 +68,7 @@ def main():
         classifiers_dir = Path(__file__).resolve().parent / "classifiers"
         models = [
             classifiers_dir / "fvf_heimdall_02_best.onnx",
+            classifiers_dir / "fvf_heimdall_03_best.onnx",
             classifiers_dir / "spider_detector_resnet50.onnx",
         ]
         found = False

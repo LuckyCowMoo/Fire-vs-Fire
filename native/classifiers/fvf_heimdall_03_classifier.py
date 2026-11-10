@@ -198,9 +198,13 @@ class FvfHeimdall03Classifier(BaseClassifier):
                 "backend": active_ep.replace("ExecutionProvider", ""),
             }
             self.model_path = onnx_path
-            self._num_crops = 1
+            input_names = [inp.name for inp in self.ort_session.get_inputs()]
+            if "forensic_3crops_24ch" in input_names:
+                self._num_crops = 3
+            else:
+                self._num_crops = 1
             self._is_loaded = True
-            self._log(f"Loaded ONNX model {onnx_path.name} via {active_ep} (1-crop mode)")
+            self._log(f"Loaded ONNX model {onnx_path.name} via {active_ep} ({self._num_crops}-crop mode: Center, Corner, Edge)")
             return True
         except Exception as exc:
             self._log(f"ONNX load skipped/failed ({exc}); falling back to PyTorch")
@@ -344,14 +348,22 @@ class FvfHeimdall03Classifier(BaseClassifier):
             crop_t = x[0, :, mid_y : mid_y + s, mid_x : mid_x + s]
             return glob_t.contiguous(), crop_t.contiguous()
 
-        # 5 Canonical Crops: [0: Center, 1: Top-Left Corner, 2: Bottom-Right Corner, 3: Top Edge, 4: Right Edge]
-        coords = [
-            (mid_y, mid_x),  # 0: Center (Middle)
-            (0, 0),          # 1: Top-Left Corner
-            (max_y, max_x),  # 2: Bottom-Right Corner
-            (0, mid_x),      # 3: Top-Middle Edge
-            (mid_y, max_x),  # 4: Middle-Right Edge
-        ][: self._num_crops]
+        if self._num_crops == 3:
+            # 3 Canonical Crops: [0: Center, 1: Top-Left Corner, 2: Top-Middle Edge]
+            coords = [
+                (mid_y, mid_x),  # 0: Center
+                (0, 0),          # 1: Corner (Top-Left)
+                (0, mid_x),      # 2: Edge (Top-Middle)
+            ]
+        else:
+            # 5 Canonical Crops: [0: Center, 1: Top-Left Corner, 2: Bottom-Right Corner, 3: Top Edge, 4: Right Edge]
+            coords = [
+                (mid_y, mid_x),  # 0: Center (Middle)
+                (0, 0),          # 1: Top-Left Corner
+                (max_y, max_x),  # 2: Bottom-Right Corner
+                (0, mid_x),      # 3: Top-Middle Edge
+                (mid_y, max_x),  # 4: Middle-Right Edge
+            ][: self._num_crops]
 
         crops = [x[0, :, top : top + s, left : left + s] for top, left in coords]
         crops_t = torch.stack(crops, dim=0)  # (K, 3, s, s)
@@ -412,8 +424,19 @@ class FvfHeimdall03Classifier(BaseClassifier):
                 if "global_rgb" in input_names:
                     feed_dict["global_rgb"] = glob_rgb.cpu().numpy().astype(self.np.float32)
 
-                if "forensic_24ch" in input_names:
-                    # Deterministic 24-channel forensic feature extraction (including 2D FFT)
+                if "forensic_3crops_24ch" in input_names:
+                    # Deterministic 24-channel feature extraction across 3 crops (Center, Corner, Edge)
+                    with self.torch.no_grad():
+                        if nat_rgb.dim() == 5:
+                            b, k, c, h, w = nat_rgb.shape
+                            flat_crops = nat_rgb.reshape(b * k, c, h, w)
+                            ch24_flat = self._get_extractor()(flat_crops)
+                            ch24 = ch24_flat.reshape(b, k, 24, h, w)
+                        else:
+                            ch24_single = self._get_extractor()(nat_rgb).unsqueeze(1)
+                            ch24 = ch24_single.repeat(1, 3, 1, 1, 1)
+                    feed_dict["forensic_3crops_24ch"] = ch24.cpu().numpy().astype(self.np.float32)
+                elif "forensic_24ch" in input_names:
                     with self.torch.no_grad():
                         if nat_rgb.dim() == 5:
                             crop_single = nat_rgb[:, 0]

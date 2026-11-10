@@ -1201,7 +1201,7 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
             try:
                 log(f"[Downloader] Fetching {model_id} file {rel_path} from {candidate_url}")
                 req = Request(candidate_url, headers={"User-Agent": "FireVsFire-NativeHost/2.0"})
-                with urlopen(req, timeout=30) as response:
+                with urlopen(req, timeout=300) as response:
                     total_bytes = int(response.headers.get("Content-Length") or 0)
                     bytes_so_far = 0
                     chunk_size = 256 * 1024
@@ -1215,23 +1215,26 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
                             out_fh.write(chunk)
                             bytes_so_far += len(chunk)
                             now = time.time()
-                            if now - last_emit >= 0.12:
+                            if now - last_emit >= 0.5:
                                 last_emit = now
                                 file_frac = (bytes_so_far / total_bytes) if total_bytes > 0 else 0.5
                                 overall_pct = int(((file_idx + file_frac) / total_files) * 100)
-                                send_message({
-                                    "version": 2,
-                                    "type": "downloadProgress",
-                                    "requestId": request_id,
-                                    "modelId": model_id,
-                                    "file": dest_path.name,
-                                    "fileIndex": file_idx + 1,
-                                    "totalFiles": total_files,
-                                    "bytesDownloaded": bytes_so_far,
-                                    "totalBytes": total_bytes,
-                                    "percent": min(99, max(1, overall_pct)),
-                                    "status": f"Downloading {dest_path.name}..."
-                                })
+                                try:
+                                    send_message({
+                                        "version": 2,
+                                        "type": "downloadProgress",
+                                        "requestId": request_id,
+                                        "modelId": model_id,
+                                        "file": dest_path.name,
+                                        "fileIndex": file_idx + 1,
+                                        "totalFiles": total_files,
+                                        "bytesDownloaded": bytes_so_far,
+                                        "totalBytes": total_bytes,
+                                        "percent": min(99, max(1, overall_pct)),
+                                        "status": f"Downloading {dest_path.name}..."
+                                    })
+                                except Exception:
+                                    pass
 
                 if tmp_path.exists() and tmp_path.stat().st_size > 0:
                     os.replace(tmp_path, dest_path)

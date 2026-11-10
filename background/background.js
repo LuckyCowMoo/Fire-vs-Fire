@@ -327,7 +327,17 @@ async function fetchFallbackCatalog() {
 }
 
 async function buildAndSaveAutoCategories(downloadedModelIds = [], customThreshold = 0.75) {
-  const catalog = await fetchFallbackCatalog();
+  let catalog = null;
+  try {
+    const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2, force: true }, { timeoutMs: 5000 });
+    if (catResp && catResp.catalog && Array.isArray(catResp.catalog.models)) {
+      catalog = catResp.catalog;
+    }
+  } catch (_) {}
+
+  if (!catalog) {
+    catalog = await fetchFallbackCatalog();
+  }
   const models = Array.isArray(catalog.models) ? catalog.models : [];
   const selectedSet = new Set(Array.isArray(downloadedModelIds) ? downloadedModelIds : []);
 
@@ -353,10 +363,12 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     : 0.75;
 
   const newEnsembles = [];
+  const matchedModelIds = new Set();
 
   // 1. Create a category for each selected/downloaded AI detector model
   for (const m of models) {
     if (!selectedSet.has(m.id) || m.is_ai_detector === false) continue;
+    matchedModelIds.add(m.id);
     const mod = m.modality || 'image';
     const borderColor = m.default_color || '#FF4D1C';
     const ensemble = {
@@ -426,6 +438,53 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
           badgeMode: 'hover'
         }
       }
+    });
+  }
+
+  // 3. Fallback for any selected model not found in the catalog
+  for (const modelId of selectedSet) {
+    if (matchedModelIds.has(modelId)) continue;
+    const isText = modelId.includes('text') || modelId.includes('mimir');
+    const mod = isText ? 'text' : 'image';
+    const borderColor = modelId.includes('04') ? '#FF1744' : '#FF4D1C';
+    newEnsembles.push({
+      id: `auto_${mod}_${modelId}`,
+      name: modelId.replace(/^fvf_/, 'FvF ').replace(/_/g, ' '),
+      modality: mod,
+      enabled: true,
+      threshold,
+      classifiers: [modelId],
+      weights: [1],
+      styles: mod === 'text'
+        ? {
+            text: {
+              applyBlur: true,
+              blurMode: 'hover',
+              blurAmount: 2,
+              applyStrikethrough: true,
+              strikethroughMode: 'hover',
+              strikethroughColor: borderColor,
+              applyUnderline: false,
+              underlineMode: 'off',
+              underlineColor: borderColor,
+              applyHighlight: false,
+              highlightMode: 'off',
+              highlightColor: '#fff3a1'
+            }
+          }
+        : {
+            image: {
+              applyBlur: true,
+              blurAmount: 6,
+              blurMode: 'hover',
+              applyBorder: true,
+              borderMultiplier: 1.2,
+              borderColor,
+              borderMode: 'hover',
+              applyBadge: true,
+              badgeMode: 'hover'
+            }
+          }
     });
   }
 

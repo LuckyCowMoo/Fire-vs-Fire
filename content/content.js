@@ -16,7 +16,7 @@ const TU = globalThis.FVFTextUtils;
  */
 let settings = {
   enabled: true,                  // Master toggle for the extension
-  altTextOnly: true,              // If true, only process images with alt text
+  altTextOnly: false,             // If true, only process images with alt text
   blurAmount: 4,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
@@ -770,7 +770,7 @@ function buildClassificationBatches(images = cachedImages, textSections = cached
 
     if (settings.verboseLogs) {
       const isBase64 = Boolean(safeUrl && safeUrl.startsWith('data:'));
-      console.log([AI Detector] Batching : );
+      console.log(`[AI Detector] Batching ${isBase64 ? "base64" : "URL"}:`, itemId.substring(0, 80));
     }
 
     currentBatch.push(item);

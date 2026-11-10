@@ -6,7 +6,7 @@
 const ext = typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null);
 
 const RAW_GITHUB_CATALOG_URL =
-  'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json';
+  'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json';
 
 // Embedded Fallback Catalog: Guarantees full UI works immediately offline or on file:/// URLs
 const FALLBACK_CATALOG = {
@@ -310,16 +310,53 @@ async function checkBridgeAndNativeStatus() {
   updateNativeHostUI();
 }
 
-async function loadOfficialModelsCatalog() {
+async function loadOfficialModelsCatalog(force = false) {
   if (extensionConnected) {
     try {
-      const res = await sendBridgeMessage('GET_OFFICIAL_CATALOG', {}, 4000);
+      const res = await sendBridgeMessage('GET_OFFICIAL_CATALOG', { force }, 4000);
       if (res && res.ok && res.catalog && Array.isArray(res.catalog.models)) {
         officialCatalog = res.catalog;
         nativeHostConnected = Boolean(res.nativeConnected);
+
+        // Auto-merge any newly dropped local classifiers discovered on disk
+        if (Array.isArray(res.classifiers)) {
+          const knownIds = new Set(officialCatalog.models.map((m) => m.id));
+          res.classifiers.forEach((cls) => {
+            if (!knownIds.has(cls.id)) {
+              officialCatalog.models.push({
+                id: cls.id,
+                name: cls.name || cls.id,
+                version: cls.version || '1.0.0-local',
+                modality: (cls.modalities && cls.modalities[0]) || 'image',
+                status: 'available',
+                recommended: cls.id === 'fvf_heimdall04',
+                is_ai_detector: (cls.label || '').toLowerCase() !== 'spider',
+                category_name: cls.name || cls.id,
+                label: cls.label || 'AI generated',
+                default_threshold: 0.75,
+                default_color: cls.id.includes('heimdall') ? '#FF1744' : '#FF5722',
+                size_mb: cls.size_mb || 0,
+                download_size: cls.download_size || 'Local',
+                ram_size: '1.5 GB VRAM / RAM',
+                architecture: cls.name || cls.id,
+                tagline: cls.doc ? cls.doc.split('\n')[0] : 'Locally discovered classifier in native/classifiers/',
+                description: cls.doc || `Locally discovered classifier: ${cls.name}. Automatically loaded from native/classifiers/.`,
+                installed: cls.weights_ready !== false
+              });
+              knownIds.add(cls.id);
+            }
+          });
+        }
+
         (res.installedModels || []).forEach((id) => {
           installedModels.add(id);
           selectedModels.add(id);
+        });
+        officialCatalog.models.forEach((m) => {
+          if (m.installed) {
+            installedModels.add(m.id);
+            selectedModels.add(m.id);
+          }
         });
         renderModalityQuadrants();
         return;
@@ -328,7 +365,7 @@ async function loadOfficialModelsCatalog() {
   }
 
   try {
-    const resp = await fetch(RAW_GITHUB_CATALOG_URL, { cache: 'no-store' });
+    const resp = await fetch(`${RAW_GITHUB_CATALOG_URL}?_t=${Date.now()}`, { cache: 'no-store' });
     if (resp && resp.ok) {
       const data = await resp.json();
       if (data && Array.isArray(data.models)) {
@@ -340,7 +377,7 @@ async function loadOfficialModelsCatalog() {
   } catch (_) {}
 
   try {
-    const resp = await fetch('./official_models.json');
+    const resp = await fetch(`./official_models.json?_t=${Date.now()}`, { cache: 'no-store' });
     if (resp && resp.ok) {
       officialCatalog = await resp.json();
     }
@@ -872,6 +909,38 @@ function init() {
   } else if (window.location.hash === '#guide' || window.location.hash === '#screen-3') {
     goToScreen(3);
   }
+
+  // Rescan Local Folder button on Screen 2
+  const rescanBtn = document.getElementById('rescan-folder-btn');
+  if (rescanBtn) {
+    rescanBtn.addEventListener('click', async () => {
+      rescanBtn.disabled = true;
+      rescanBtn.style.opacity = '0.6';
+      const label = rescanBtn.querySelector('span');
+      if (label) label.textContent = 'Scanning native/classifiers/…';
+      await loadOfficialModelsCatalog(true);
+      setTimeout(() => {
+        rescanBtn.disabled = false;
+        rescanBtn.style.opacity = '1';
+        if (label) label.textContent = '✓ Rescanned Folder';
+        setTimeout(() => {
+          if (label) label.textContent = '↻ Rescan Local Folder';
+        }, 2200);
+      }, 400);
+    });
+  }
+
+  // Auto-refresh when tab regains focus or visibility (so dropping files updates immediately)
+  window.addEventListener('focus', () => {
+    if (currentScreen === 2) {
+      loadOfficialModelsCatalog(true).catch(() => {});
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && currentScreen === 2) {
+      loadOfficialModelsCatalog(true).catch(() => {});
+    }
+  });
 
   // Background status verification (non-blocking)
   checkBridgeAndNativeStatus().catch(() => {});

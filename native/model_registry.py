@@ -24,6 +24,7 @@ class ModelRegistry:
     def __init__(self):
         """Initialize empty registry."""
         self._classifiers: Dict[str, Type[BaseClassifier]] = {}
+        self._classifier_sources: Dict[str, Path] = {}
         self._loaded_instances: Dict[str, BaseClassifier] = {}
         self._discovered = False
 
@@ -78,6 +79,7 @@ class ModelRegistry:
             return
         if force:
             self._classifiers.clear()
+            self._classifier_sources.clear()
 
         classifiers_dir = Path(__file__).parent / 'classifiers'
         if not classifiers_dir.exists():
@@ -119,6 +121,7 @@ class ModelRegistry:
 
                         classifier_id = self._generate_id(name)
                         self._classifiers[classifier_id] = obj
+                        self._classifier_sources[classifier_id] = py_file
                         print(f"[Registry] Discovered: {classifier_id} -> {name}", file=sys.stderr)
 
             except Exception as e:
@@ -158,38 +161,81 @@ class ModelRegistry:
             self.discover_classifiers()
         return list(self._classifiers.keys())
 
-    def list_available_details(self) -> List[Dict[str, Any]]:
+    def list_available_details(self, force_rescan: bool = False) -> List[Dict[str, Any]]:
         """
-        Get detailed information about available classifiers.
+        Get rich information about available classifiers discovered directly on disk.
 
         Returns:
-            List of dicts with keys: id, name, label, modalities, weights_ready
+            List of dicts with keys: id, name, label, modalities, weights_ready,
+            weight_path, size_mb, download_size, doc, version, py_file
         """
-        if not self._discovered:
-            self.discover_classifiers()
+        if not self._discovered or force_rescan:
+            self.discover_classifiers(force=force_rescan)
 
+        repo_root = Path(__file__).resolve().parent.parent
+        classifiers_dir = Path(__file__).parent / 'classifiers'
         details = []
         for classifier_id, classifier_class in self._classifiers.items():
-            weights_ready = True
+            weights_ready = False
+            weight_path = None
+            size_mb = 0.0
+            download_size = "Local"
+            modalities = []
+            name = classifier_class.__name__
+            label = 'AI generated'
+            doc = (classifier_class.__doc__ or '').strip()
+            version = getattr(classifier_class, 'VERSION', '1.0.0-local')
+            py_path = self._classifier_sources.get(classifier_id)
+            rel_py = ""
+            if py_path:
+                try:
+                    rel_py = str(py_path.resolve().relative_to(repo_root)).replace('\\', '/')
+                except Exception:
+                    rel_py = str(py_path).replace('\\', '/')
+
             try:
                 instance = classifier_class(model_path=None)
                 modalities = sorted(list(instance.get_supported_modalities()))
                 name = instance.get_model_name()
                 label = instance.get_label()
+
+                # Check weights
                 mpath = getattr(instance, 'model_path', None)
-                if mpath is not None and not Path(mpath).exists():
-                    weights_ready = False
-            except Exception:
-                modalities = []
-                name = classifier_class.__name__
-                label = 'AI generated'
-                weights_ready = False
+                find_ckpt = getattr(instance, '_find_checkpoint', None)
+                if callable(find_ckpt):
+                    ckpt = find_ckpt()
+                    if ckpt and Path(ckpt).is_file():
+                        mpath = Path(ckpt)
+
+                # Fallback: look in classifiers_dir for matching weights
+                if (mpath is None or not Path(mpath).is_file()):
+                    for ext_pattern in (f"{classifier_id}*.pt", f"{classifier_id}*.onnx", f"*{classifier_id}*.pt"):
+                        found = list(classifiers_dir.glob(ext_pattern))
+                        if found:
+                            mpath = found[0]
+                            break
+
+                if mpath is not None and Path(mpath).is_file() and Path(mpath).stat().st_size > 0:
+                    weights_ready = True
+                    weight_path = str(Path(mpath).resolve())
+                    size_bytes = Path(mpath).stat().st_size
+                    size_mb = round(size_bytes / (1024 * 1024), 1)
+                    download_size = f"{round(size_mb)} MB"
+            except Exception as exc:
+                print(f"[Registry] Error getting details for {classifier_id}: {exc}", file=sys.stderr)
+
             details.append({
                 'id': classifier_id,
                 'name': name,
                 'label': label or 'AI generated',
-                'modalities': modalities,
-                'weights_ready': weights_ready
+                'modalities': modalities or ['image'],
+                'weights_ready': weights_ready,
+                'weight_path': weight_path,
+                'size_mb': size_mb,
+                'download_size': download_size,
+                'doc': doc,
+                'version': version,
+                'py_file': rel_py,
             })
 
         return details

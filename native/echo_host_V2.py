@@ -878,9 +878,9 @@ def classify_items(envelope, job_id: Optional[str] = None, send_chunk=None):
 
 
 def list_models(request_id: Optional[str] = None):
-    """List available classifiers from registry."""
+    """List available classifiers from registry with fresh folder scan."""
     registry = get_registry()
-    available = registry.list_available_details()
+    available = registry.list_available_details(force_rescan=True)
     
     # Also list .pt files in Immage Models for backward compatibility
     repo_root = Path(__file__).parent.parent
@@ -986,19 +986,122 @@ def _load_official_catalog() -> Dict[str, Any]:
             installed_ids.append(model.get("id"))
 
     catalog["installed_models"] = installed_ids
+    # Dynamically scan native/classifiers/ so ANY classifier or weights file
+    # placed directly in the folder is instantly registered automatically.
+    catalog = _sync_catalog_with_local_folder(catalog)
+    return catalog
+
+
+def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Dynamically scans native/classifiers/ directly on disk.
+    Any classifier Python module or model weights file found in the folder is
+    automatically added to the catalog and marked installed, completely
+    bypassing the need for manual JSON file edits or remote releases.
+    """
+    registry = get_registry()
+    details = registry.list_available_details(force_rescan=True)
+    models = catalog.setdefault("models", [])
+    models_by_id = {m.get("id"): m for m in models if isinstance(m, dict) and m.get("id")}
+    repo_root = Path(__file__).resolve().parent.parent
+
+    for detail in details:
+        cid = detail["id"]
+        weights_ready = detail.get("weights_ready", False)
+
+        if cid in models_by_id:
+            m = models_by_id[cid]
+            if weights_ready:
+                m["installed"] = True
+            if detail.get("download_size") and detail["download_size"] != "Local":
+                m["download_size"] = detail["download_size"]
+            if detail.get("size_mb") and detail["size_mb"] > 0:
+                m["size_mb"] = detail["size_mb"]
+        else:
+            modality = (detail.get("modalities") or ["image"])[0]
+            label = detail.get("label", "AI generated")
+            is_ai = label.lower() not in ("spider", "object", "custom")
+            name = detail.get("name") or cid
+            is_recommended = ("04" in cid) or ("heimdall" in cid.lower() and "04" in cid)
+
+            files_list = []
+            if detail.get("py_file"):
+                files_list.append({
+                    "type": "classifier_py",
+                    "relative_path": detail["py_file"],
+                    "required": True
+                })
+            if detail.get("weight_path"):
+                try:
+                    rel_w = str(Path(detail["weight_path"]).resolve().relative_to(repo_root)).replace('\\', '/')
+                except Exception:
+                    rel_w = str(detail["weight_path"]).replace('\\', '/')
+                files_list.append({
+                    "type": "weights_pt" if rel_w.endswith(".pt") else "weights_onnx",
+                    "relative_path": rel_w,
+                    "required": True
+                })
+
+            new_model = {
+                "id": cid,
+                "name": name,
+                "version": detail.get("version", "1.0.0-local"),
+                "modality": modality,
+                "status": "available",
+                "recommended": is_recommended,
+                "is_ai_detector": is_ai,
+                "category_name": name,
+                "label": label,
+                "default_threshold": 0.75,
+                "default_color": "#FF1744" if "04" in cid else ("#FF2E00" if "03" in cid else "#FF5722"),
+                "size_mb": detail.get("size_mb", 0.0),
+                "download_size": detail.get("download_size", "Local"),
+                "ram_size": "1.5 GB VRAM / RAM",
+                "architecture": name,
+                "tagline": detail.get("doc", "").split("\n")[0] if detail.get("doc") else "Local folder auto-discovered classifier",
+                "description": detail.get("doc") or f"Locally discovered classifier: {name}. Automatically loaded from native/classifiers/.",
+                "files": files_list,
+                "installed": weights_ready
+            }
+
+            if is_recommended:
+                models.insert(0, new_model)
+            else:
+                models.append(new_model)
+            models_by_id[cid] = new_model
+
+    installed_ids = []
+    for m in models:
+        if m.get("installed") is True:
+            installed_ids.append(m.get("id"))
+            continue
+        files = m.get("files") or []
+        if m.get("status") == "available" and files:
+            all_present = True
+            for f_entry in files:
+                rel_path = f_entry.get("relative_path", "")
+                safe_path = _resolve_safe_repo_path(rel_path)
+                if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:
+                    all_present = False
+                    break
+            if all_present:
+                m["installed"] = True
+                installed_ids.append(m.get("id"))
+
+    catalog["installed_models"] = sorted(list(set(installed_ids)))
     return catalog
 
 
 def get_official_catalog_response(request_id: Optional[str] = None) -> Dict[str, Any]:
     catalog = _load_official_catalog()
     registry = get_registry()
-    registry.discover_classifiers(force=True)
+    classifiers = registry.list_available_details(force_rescan=True)
     resp = {
         "ok": True,
         "type": "officialCatalog",
         "catalog": catalog,
         "installedModels": catalog.get("installed_models", []),
-        "classifiers": registry.list_available_details(),
+        "classifiers": classifiers,
         "timestamp": int(time.time() * 1000),
     }
     if request_id:

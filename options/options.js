@@ -1659,6 +1659,10 @@ if (refreshBtn) {
   await fetchModels();
 })();
 
+window.addEventListener('focus', () => {
+  fetchModels().catch(() => {});
+});
+
 // Initialize accent sliders on load
 [classificationDelayInput, imageCaptureQualityInput].forEach((el) => {
   if (el) updateSliderBackground(el);

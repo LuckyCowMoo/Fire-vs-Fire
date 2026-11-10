@@ -6,7 +6,7 @@ console.log('[Background] Script loaded, ext:', ext ? 'Available' : 'Unavailable
 // Name of the native messaging host (update to match your installed host manifest)
 const HOST_NAME = 'com.aidetector.classifier';
 const GITHUB_PAGES_ONBOARDING_URL = 'https://luckycowmoo.github.io/Fire-vs-Fire/?onboarding=1';
-const RAW_GITHUB_CATALOG_URL = 'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json';
+const RAW_GITHUB_CATALOG_URL = 'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json';
 
 let activeClassifyCount = 0;
 
@@ -302,16 +302,22 @@ async function openOnboardingExperience(targetScreen = 1) {
 }
 
 async function fetchFallbackCatalog() {
-  try {
-    const resp = await fetch(RAW_GITHUB_CATALOG_URL, { cache: 'no-store' });
-    if (resp && resp.ok) {
-      return await resp.json();
-    }
-  } catch (_) {}
+  const urls = [
+    'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json',
+    'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/official_models.json'
+  ];
+  for (const url of urls) {
+    try {
+      const resp = await fetch(`${url}?_t=${Date.now()}`, { cache: 'no-store' });
+      if (resp && resp.ok) {
+        return await resp.json();
+      }
+    } catch (_) {}
+  }
 
   try {
     const localUrl = ext.runtime.getURL('docs/official_models.json');
-    const resp = await fetch(localUrl);
+    const resp = await fetch(`${localUrl}?_t=${Date.now()}`);
     if (resp && resp.ok) {
       return await resp.json();
     }
@@ -328,15 +334,16 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
   // If no explicit list was passed, check native host for installed models
   if (selectedSet.size === 0) {
     try {
-      const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2 }, { timeoutMs: 8000 });
+      const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2, force: true }, { timeoutMs: 8000 });
       if (catResp && Array.isArray(catResp.installedModels)) {
         catResp.installedModels.forEach((id) => selectedSet.add(id));
       }
     } catch (_) {}
   }
 
-  // Always fallback to at least fvf_heimdall03 (and fvf_heimdall02) if nothing was reported
+  // Always fallback to at least fvf_heimdall04 (and 03 / 02) if nothing was reported
   if (selectedSet.size === 0) {
+    selectedSet.add('fvf_heimdall04');
     selectedSet.add('fvf_heimdall03');
     selectedSet.add('fvf_heimdall02');
   }
@@ -592,7 +599,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message && message.type === 'GET_OFFICIAL_CATALOG') {
-    sendToNative({ type: 'getOfficialCatalog', version: 2 }, { timeoutMs: 8000 })
+    sendToNative({ type: 'getOfficialCatalog', version: 2, force: Boolean(message.force) }, { timeoutMs: 8000 })
       .then((res) => {
         sendResponse({
           ok: true,

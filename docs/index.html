@@ -122,8 +122,14 @@
            SCREEN 2: 4 MODALITY QUADRANTS (FIRST-PARTY CLASSIFIER SELECTOR)
            ================================================================== -->
       <section class="wizard-screen" id="screen-2" data-screen="2">
-        <div class="screen-header">
-          <h1 class="display-title">Choose Your First-Party Classifiers</h1>
+        <div class="screen-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px;">
+          <div>
+            <h1 class="display-title" style="margin-bottom: 4px;">Choose Your First-Party Classifiers</h1>
+            <p style="color: var(--text-secondary); font-size: 0.88rem; margin: 0;">Auto-discovers any classifier or weights in <code>native/classifiers/</code></p>
+          </div>
+          <button id="rescan-folder-btn" type="button" class="btn btn-outline" style="font-size: 0.85rem; padding: 8px 18px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(255, 110, 40, 0.45); background: rgba(255, 80, 20, 0.08); color: #ffb38a; cursor: pointer; transition: all 0.2s ease;">
+            <span>↻ Rescan Local Folder</span>
+          </button>
         </div>
 
         <!-- 4 Modality Quadrants Grid (Populated dynamically from official_models.json) -->
@@ -384,6 +390,6 @@ class BaseClassifier(ABC):
       </section>
     </div>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=2.1.0"></script>
   </body>
 </html>

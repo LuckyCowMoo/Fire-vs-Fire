@@ -65,7 +65,7 @@
       "version": "3.0.0-preview",
       "modality": "image",
       "status": "available",
-      "recommended": true,
+      "recommended": false,
       "is_ai_detector": true,
       "category_name": "FvF Heimdall 03",
       "label": "AI generated",
@@ -111,6 +111,46 @@
         }
       ],
       "download_size": "207 MB",
+      "ram_size": "1.5 GB VRAM / RAM"
+    },
+    {
+      "id": "fvf_heimdall04",
+      "name": "FvF Heimdall 04",
+      "version": "4.0.0-preview",
+      "modality": "image",
+      "status": "available",
+      "recommended": true,
+      "is_ai_detector": true,
+      "category_name": "FvF Heimdall 04",
+      "label": "AI generated",
+      "default_threshold": 0.75,
+      "default_color": "#FF1744",
+      "size_mb": 198.3,
+      "architecture": "Quad-Stream 24-Ch FFT + ForensicNeXt + Intrinsic Structural Grouping + ConvNeXt-Base",
+      "tagline": "State-of-the-Art AI Image Detector with Intrinsic Grouping",
+      "description": "Our latest flagship AI image detector. Combines ConvNeXt-V2 Base semantics, 24-channel FFT & spatial noise forensics, and a lightweight Intrinsic Structural Grouping branch that dynamically conditions sensitivity based on hard-line energy, local contrast, and flat-patch ratio.",
+      "files": [
+        {
+          "type": "classifier_py",
+          "relative_path": "native/classifiers/fvf_heimdall_04_classifier.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_04_classifier.py",
+          "required": true
+        },
+        {
+          "type": "support_py",
+          "relative_path": "native/classifiers/_heimdall_arch.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/_heimdall_arch.py",
+          "required": true
+        },
+        {
+          "type": "weights_pt",
+          "relative_path": "native/classifiers/fvf_heimdall_04_best.pt",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_04_best.pt",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_04_best.pt",
+          "required": true
+        }
+      ],
+      "download_size": "198 MB",
       "ram_size": "1.5 GB VRAM / RAM"
     },
     {

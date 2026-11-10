@@ -39,7 +39,7 @@ const FALLBACK_CATALOG = {
       version: '3.0.0-preview',
       modality: 'image',
       status: 'available',
-      recommended: true,
+      recommended: false,
       is_ai_detector: true,
       category_name: 'FvF Heimdall 03',
       label: 'AI generated',
@@ -49,6 +49,23 @@ const FALLBACK_CATALOG = {
       ram_size: '1.5 GB VRAM / RAM',
       tagline: '24-Ch FFT + ForensicNeXt Image Classifier',
       description: 'Next-gen 24-channel FFT & ForensicNeXt AI image classifier with ConvNeXt-V2 Base.'
+    },
+    {
+      id: 'fvf_heimdall04',
+      name: 'FvF Heimdall 04',
+      version: '4.0.0-preview',
+      modality: 'image',
+      status: 'available',
+      recommended: true,
+      is_ai_detector: true,
+      category_name: 'FvF Heimdall 04',
+      label: 'AI generated',
+      default_threshold: 0.75,
+      default_color: '#FF1744',
+      download_size: '198 MB',
+      ram_size: '1.5 GB VRAM / RAM',
+      tagline: '24-Ch FFT + ForensicNeXt + Intrinsic Grouping',
+      description: 'Our latest flagship AI image detector with ConvNeXt-V2 Base, 24-ch FFT, and Intrinsic Structural Grouping.'
     },
     {
       id: 'res_net50_spider',

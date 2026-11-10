@@ -599,6 +599,8 @@ async function downloadSelectedModelsAndAdvance() {
   }
 
   const total = ids.length;
+  let hasErrors = false;
+  let lastErrorMessage = '';
 
   for (let i = 0; i < total; i++) {
     const modelId = ids[i];
@@ -629,7 +631,7 @@ async function downloadSelectedModelsAndAdvance() {
 
     if (extensionConnected) {
       if (statusEl) statusEl.textContent = `Installing ${modelName}...`;
-      const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000).catch(() => ({ ok: false }));
+      const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000).catch((err) => ({ ok: false, error: err?.message || String(err) }));
       clearInterval(simInterval);
 
       if (res && res.ok) {
@@ -640,10 +642,13 @@ async function downloadSelectedModelsAndAdvance() {
           status: '✓ Installed & Registered in Native Host'
         });
       } else {
+        hasErrors = true;
+        lastErrorMessage = (res && res.error) ? res.error : 'Download failed';
+        console.error(`[Download Error for ${modelId}]`, lastErrorMessage);
         handleDownloadProgressEvent({
           modelId,
           percent: 100,
-          status: 'Queued for install'
+          status: `❌ Failed: ${lastErrorMessage}`
         });
       }
     } else {
@@ -651,7 +656,7 @@ async function downloadSelectedModelsAndAdvance() {
       handleDownloadProgressEvent({
         modelId,
         percent: 100,
-        status: 'Selected for install'
+        status: 'Selected for install (Native Host not connected)'
       });
     }
 
@@ -659,7 +664,17 @@ async function downloadSelectedModelsAndAdvance() {
     if (progressPercent) progressPercent.textContent = `${targetPct}%`;
   }
 
-  if (progressTitle) progressTitle.textContent = '✅ All Classifiers Downloaded!';
+  if (hasErrors) {
+    if (progressTitle) progressTitle.textContent = '⚠️ Download Failed';
+    if (progressStatus) progressStatus.textContent = `Error: ${lastErrorMessage}. Check native/native_host.log for details.`;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>🔄 Retry Download</span>';
+    }
+    return;
+  }
+
+  if (progressTitle) progressTitle.textContent = '✓ All Classifiers Downloaded!';
   if (progressStatus) progressStatus.textContent = 'Hardware-accelerated environment is primed and ready.';
   if (progressFill) progressFill.style.width = '100%';
   if (progressPercent) progressPercent.textContent = '100%';
@@ -668,7 +683,7 @@ async function downloadSelectedModelsAndAdvance() {
 
   if (btn) {
     btn.disabled = false;
-    btn.innerHTML = '<span>⬇ Download Selected &amp; Continue →</span>';
+    btn.innerHTML = '<span>⚡ Download Selected &amp; Continue →</span>';
   }
 
   goToScreen(3);

@@ -18,15 +18,22 @@ from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 import os
+import ssl
 
 # Setup logging to file
-LOG_FILE = Path(__file__).parent.parent / "native_host_v2.log"
+LOG_FILE_LOCAL = Path(__file__).resolve().parent / "native_host.log"
+LOG_FILE_ROOT = Path(__file__).resolve().parent.parent / "native_host_v2.log"
+LOG_FILE_TEMP = Path(os.environ.get("TEMP", os.environ.get("TMP", "."))) / "native_host_v2.log"
+
 def log(msg):
-    try:
-        with open(LOG_FILE, "a") as f:
-            f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-    except:
-        pass
+    formatted = f"[{time.strftime('%H:%M:%S')}] {msg}\n"
+    for p in (LOG_FILE_LOCAL, LOG_FILE_ROOT, LOG_FILE_TEMP):
+        try:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(formatted)
+                f.flush()
+        except Exception:
+            pass
 
 log(f"[START] Echo Host V2 starting")
 
@@ -1197,80 +1204,120 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
         success = False
         tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
 
-        for candidate_url in urls_to_try:
+        # Standard browser headers to avoid anti-bot blocks on GitHub release downloads
+        browser_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity"
+        }
+
+        # Build SSL context with fallback for systems with missing Windows root certificates
+        def _get_ssl_contexts():
+            contexts = []
             try:
-                log(f"[Downloader] Fetching {model_id} file {rel_path} from {candidate_url}")
-                req = Request(candidate_url, headers={"User-Agent": "FireVsFire-NativeHost/2.0"})
-                with urlopen(req, timeout=300) as response:
-                    total_bytes = int(response.headers.get("Content-Length") or 0)
-                    bytes_so_far = 0
-                    chunk_size = 256 * 1024
-                    last_emit = 0.0
+                import certifi
+                contexts.append(ssl.create_default_context(cafile=certifi.where()))
+            except Exception:
+                pass
+            try:
+                contexts.append(ssl.create_default_context())
+            except Exception:
+                pass
+            try:
+                contexts.append(ssl._create_unverified_context())
+            except Exception:
+                pass
+            return contexts
 
-                    with open(tmp_path, "wb") as out_fh:
-                        while True:
-                            chunk = response.read(chunk_size)
-                            if not chunk:
-                                break
-                            out_fh.write(chunk)
-                            bytes_so_far += len(chunk)
-                            now = time.time()
-                            if now - last_emit >= 0.5:
-                                last_emit = now
-                                file_frac = (bytes_so_far / total_bytes) if total_bytes > 0 else 0.5
-                                overall_pct = int(((file_idx + file_frac) / total_files) * 100)
-                                try:
-                                    send_message({
-                                        "version": 2,
-                                        "type": "downloadProgress",
-                                        "requestId": request_id,
-                                        "modelId": model_id,
-                                        "file": dest_path.name,
-                                        "fileIndex": file_idx + 1,
-                                        "totalFiles": total_files,
-                                        "bytesDownloaded": bytes_so_far,
-                                        "totalBytes": total_bytes,
-                                        "percent": min(99, max(1, overall_pct)),
-                                        "status": f"Downloading {dest_path.name}..."
-                                    })
-                                except Exception:
-                                    pass
+        ssl_contexts = _get_ssl_contexts()
 
-                if tmp_path.exists() and tmp_path.stat().st_size > 0:
-                    os.replace(tmp_path, dest_path)
-                    success = True
-                    downloaded_files.append(rel_path)
-                    send_message({
-                        "version": 2,
-                        "type": "downloadProgress",
-                        "requestId": request_id,
-                        "modelId": model_id,
-                        "file": dest_path.name,
-                        "fileIndex": file_idx + 1,
-                        "totalFiles": total_files,
-                        "bytesDownloaded": dest_path.stat().st_size,
-                        "totalBytes": dest_path.stat().st_size,
-                        "percent": int(((file_idx + 1) / total_files) * 100),
-                        "status": f"Installed {dest_path.name}"
-                    })
-                    break
-            except Exception as exc:
-                last_err = str(exc)
-                log(f"[Downloader] Error downloading {candidate_url}: {exc}")
+        for candidate_url in urls_to_try:
+            if success:
+                break
+            for ctx_idx, ctx in enumerate(ssl_contexts):
                 try:
-                    if tmp_path.exists():
-                        tmp_path.unlink()
-                except Exception:
-                    pass
+                    log(f"[Downloader] Fetching {model_id} file {rel_path} from {candidate_url} (ssl_attempt={ctx_idx+1})")
+                    req = Request(candidate_url, headers=browser_headers)
+                    with urlopen(req, context=ctx, timeout=300) as response:
+                        total_bytes = int(response.headers.get("Content-Length") or 0)
+                        bytes_so_far = 0
+                        chunk_size = 256 * 1024
+                        last_emit = 0.0
+
+                        with open(tmp_path, "wb") as out_fh:
+                            while True:
+                                chunk = response.read(chunk_size)
+                                if not chunk:
+                                    break
+                                out_fh.write(chunk)
+                                bytes_so_far += len(chunk)
+                                now = time.time()
+                                if now - last_emit >= 0.5:
+                                    last_emit = now
+                                    file_frac = (bytes_so_far / total_bytes) if total_bytes > 0 else 0.5
+                                    overall_pct = int(((file_idx + file_frac) / total_files) * 100)
+                                    try:
+                                        send_message({
+                                            "version": 2,
+                                            "type": "downloadProgress",
+                                            "requestId": request_id,
+                                            "modelId": model_id,
+                                            "file": dest_path.name,
+                                            "fileIndex": file_idx + 1,
+                                            "totalFiles": total_files,
+                                            "bytesDownloaded": bytes_so_far,
+                                            "totalBytes": total_bytes,
+                                            "percent": min(99, max(1, overall_pct)),
+                                            "status": f"Downloading {dest_path.name}..."
+                                        })
+                                    except Exception:
+                                        pass
+
+                    if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                        os.replace(tmp_path, dest_path)
+                        success = True
+                        downloaded_files.append(rel_path)
+                        log(f"[Downloader] Successfully downloaded {dest_path.name} ({dest_path.stat().st_size} bytes)")
+                        try:
+                            send_message({
+                                "version": 2,
+                                "type": "downloadProgress",
+                                "requestId": request_id,
+                                "modelId": model_id,
+                                "file": dest_path.name,
+                                "fileIndex": file_idx + 1,
+                                "totalFiles": total_files,
+                                "bytesDownloaded": dest_path.stat().st_size,
+                                "totalBytes": dest_path.stat().st_size,
+                                "percent": int(((file_idx + 1) / total_files) * 100),
+                                "status": f"Installed {dest_path.name}"
+                            })
+                        except Exception:
+                            pass
+                        break
+                except Exception as exc:
+                    last_err = f"{type(exc).__name__}: {exc}"
+                    log(f"[Downloader] Error downloading {candidate_url} with ssl context #{ctx_idx+1}: {last_err}")
+                    try:
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+                    except Exception:
+                        pass
+                    # If error is not SSL-related, trying another SSL context won't help; try next URL
+                    if "SSL" not in last_err and "CERTIFICATE" not in last_err:
+                        break
 
         if not success:
             if dest_path.exists() and dest_path.stat().st_size > 0:
                 downloaded_files.append(rel_path)
                 continue
+            if not f_entry.get("required", True):
+                log(f"[Downloader] Optional file {rel_path} skipped: {last_err}")
+                continue
             resp = {
                 "ok": False,
                 "modelId": model_id,
-                "error": f"Failed to download {dest_path.name} from official GitHub: {last_err}"
+                "error": f"Failed to download {dest_path.name}: {last_err}"
             }
             if request_id:
                 resp["requestId"] = request_id

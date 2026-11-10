@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-"""Self-contained architecture definition for FvF Heimdall 02.
-Bakes in the 20-channel forensic extractor and multi-crop fusion backbone
-so native/classifiers/ runs completely standalone without external training dependencies.
-"""
-
 """Pure-PyTorch 20-Channel Forensic Feature Extractor for Fire vs Fire.
 
 All 20 channels are computed using vectorized tensor operations and fixed
@@ -349,6 +344,7 @@ class ForensicChannelExtractor24(nn.Module):
         return out
 
 
+
 """FvF-Ares: Asymmetric Dual-Resolution 20-Channel Forensic Classifier.
 
 Architecture overview:
@@ -392,7 +388,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# ForensicChannelExtractor20 defined above in this file
+# ForensicChannelExtractor20 & 24 defined above
 
 
 class SqueezeExcite(nn.Module):
@@ -663,8 +659,86 @@ class MultiCropForensicAggregator(nn.Module):
         return self.fusion_proj(combined)
 
 
+class GenreContextBranch(nn.Module):
+    """Lightweight RGB + Luminosity Genre / Content-Type Branch (~0.35M params).
+
+    Receives ONLY global RGB + Luminance Y (4 channels, downsampled to 128x128),
+    with zero access to the 24 forensic noise/FFT channels.
+    Trained via a separate genre grouping scorer to estimate the image's visual genre
+    (e.g., thumbnail/meme/poster, photorealistic scene, cartoon/art, document/text,
+    plus latent self-discovered sub-genres) and passes a 24-dim genre vector into
+    the final classification head.
+    """
+
+    def __init__(self, num_genres: int = 8, embed_dim: int = 16) -> None:
+        super().__init__()
+        self.num_genres = int(num_genres)
+        self.embed_dim = int(embed_dim)
+        self.out_dim = self.num_genres + self.embed_dim  # 8 + 16 = 24 inputs to main head
+
+        self.features = nn.Sequential(
+            # Stage 1: 128x128 -> 64x64 (4ch: R, G, B, Luminance Y)
+            nn.Conv2d(4, 32, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+            # Stage 2: 64x64 -> 32x32
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+            SqueezeExcite(64, reduction=4),
+            # Stage 3: 32x32 -> 16x16
+            nn.Conv2d(64, 96, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(96),
+            nn.GELU(),
+            # Stage 4: 16x16 -> 8x8
+            nn.Conv2d(96, 128, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.GELU(),
+            SqueezeExcite(128, reduction=4),
+        )
+
+        # Mean + Std pooling (128 * 2 = 256) captures global color palette + contrast layout
+        self.bottleneck = nn.Sequential(
+            nn.Linear(128 * 2, 64),
+            nn.LayerNorm(64),
+            nn.GELU(),
+        )
+        self.genre_logits_head = nn.Linear(64, self.num_genres)
+        self.genre_embed_head = nn.Sequential(
+            nn.Linear(64, self.embed_dim),
+            nn.LayerNorm(self.embed_dim),
+            nn.Tanh(),
+        )
+
+    def forward(self, global_rgb: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute (genre_head_inputs [B, 24], genre_logits [B, 8], genre_embed [B, 16])."""
+        if global_rgb.shape[-2] != 128 or global_rgb.shape[-1] != 128:
+            rgb_small = F.interpolate(global_rgb, size=(128, 128), mode="bilinear", align_corners=False)
+        else:
+            rgb_small = global_rgb
+
+        r = rgb_small[:, 0:1]
+        g = rgb_small[:, 1:2]
+        b = rgb_small[:, 2:3]
+        y = 0.299 * r + 0.587 * g + 0.114 * b
+        rgby = torch.cat([rgb_small, y], dim=1)  # (B, 4, 128, 128)
+        rgby = (rgby - 0.5) * 2.0
+
+        feat_map = self.features(rgby)
+        f_mean = feat_map.mean(dim=(-2, -1))
+        f_std = feat_map.var(dim=(-2, -1), unbiased=False).add(1e-5).sqrt()
+        pooled = torch.cat([f_mean, f_std], dim=1)  # (B, 256)
+
+        h = self.bottleneck(pooled)
+        genre_logits = self.genre_logits_head(h)  # (B, 8)
+        genre_probs = torch.softmax(genre_logits, dim=-1)  # (B, 8)
+        genre_embed = self.genre_embed_head(h)  # (B, 16)
+        genre_head_inputs = torch.cat([genre_probs, genre_embed], dim=1)  # (B, 24)
+        return genre_head_inputs, genre_logits, genre_embed
+
+
 class FvfAresModel(nn.Module):
-    """Dual-Stream Asymmetric AI Image Detector (Global Semantic + Multi-Crop 20-Channel Native Forensic)."""
+    """Dual-Stream Asymmetric AI Image Detector (Global Semantic + Multi-Crop 20/24-Ch Forensic + RGB/Y Genre Branch)."""
 
     def __init__(
         self,
@@ -676,8 +750,11 @@ class FvfAresModel(nn.Module):
         drop_path_rate: float = 0.0,
         num_classes: int = 2,
         num_crops: int = 5,
-        semantic_dropout_prob: float = 0.15,
-        use_forensicnext: bool = False,
+        semantic_dropout_prob: float = 0.0,
+        use_forensicnext: bool = True,
+        use_genre_branch: bool = True,
+        num_genres: int = 8,
+        genre_embed_dim: int = 16,
     ) -> None:
         super().__init__()
         import timm
@@ -688,13 +765,24 @@ class FvfAresModel(nn.Module):
         self.num_crops = int(num_crops)
         self.semantic_dropout_prob = float(semantic_dropout_prob)
         self.use_forensicnext = bool(use_forensicnext)
+        self.use_genre_branch = bool(use_genre_branch)
+        self.genre_enabled = True
 
+        # Forensic channel extractor & backbone
         if self.use_forensicnext:
             self.channel_extractor = ForensicChannelExtractor24(standardize_forensic=True)
             self.forensic_backbone = ForensicNeXtBranch24(in_channels=24, out_dim=forensic_dim)
         else:
             self.channel_extractor = ForensicChannelExtractor20(standardize_forensic=True)
             self.forensic_backbone = SRNetForensicBranch20(in_channels=20, out_dim=forensic_dim)
+
+        # Stream C (Auxiliary Genre / Content-Type Branch on RGB + Luminosity only)
+        if self.use_genre_branch:
+            self.genre_branch = GenreContextBranch(num_genres=num_genres, embed_dim=genre_embed_dim)
+            self.genre_dim = self.genre_branch.out_dim  # 24
+        else:
+            self.genre_branch = None
+            self.genre_dim = 0
 
         # ImageNet normalization buffers for Stream A (Global Semantic RGB)
         self.register_buffer(
@@ -717,7 +805,7 @@ class FvfAresModel(nn.Module):
         semantic_dim = int(self.semantic_backbone.num_features)
         self.semantic_norm = nn.LayerNorm(semantic_dim)
 
-        # Stream B: Multi-Crop Forensic Aggregator
+        # Stream B: Multi-Crop Aggregator
         self.multi_crop_aggregator = MultiCropForensicAggregator(
             forensic_dim=forensic_dim, num_crops=self.num_crops
         )
@@ -731,7 +819,8 @@ class FvfAresModel(nn.Module):
         # Initialized to 0.5 so cross-stream gradients flow actively from step 1
         self.fusion_gate = nn.Parameter(torch.tensor([0.5], dtype=torch.float32))
 
-        fusion_in_dim = semantic_dim + forensic_dim + semantic_dim
+        self.base_fusion_dim = semantic_dim + forensic_dim + semantic_dim
+        fusion_in_dim = self.base_fusion_dim + self.genre_dim
         self.head = nn.Sequential(
             nn.Linear(fusion_in_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -742,9 +831,42 @@ class FvfAresModel(nn.Module):
             nn.Dropout(p=dropout * 0.5),
             nn.Linear(hidden_dim // 2, num_classes),
         )
+        # Initialize the new genre input columns of head[0] with tiny noise (1e-4)
+        # so pre-trained heads treat the new genre inputs as near-zero noise initially
+        if self.genre_dim > 0:
+            with torch.no_grad():
+                self.head[0].weight[:, self.base_fusion_dim:].normal_(0.0, 1e-4)
 
         # Post-training temperature scaling parameter (default 1.0)
         self.register_buffer("temperature", torch.ones(1, dtype=torch.float32))
+
+    def load_state_dict(self, state_dict: Dict[str, torch.Tensor], strict: bool = True):
+        """Backwards-compatible state_dict loader that seamlessly expands `head.0.weight`
+        when loading checkpoints trained before the 24-input Genre Branch was added.
+        """
+        sd = dict(state_dict)
+        has_trained_genre = "genre_branch.features.0.weight" in sd
+        if "head.0.weight" in sd:
+            old_w = sd["head.0.weight"]
+            cur_w = self.head[0].weight
+            if old_w.dim() == 2 and old_w.shape[0] == cur_w.shape[0] and old_w.shape[1] < cur_w.shape[1]:
+                padded_w = torch.zeros_like(cur_w, device=old_w.device, dtype=old_w.dtype)
+                padded_w[:, : old_w.shape[1]] = old_w
+                # Small initial weights on the new genre columns so head treats them as near-zero noise initially
+                if self.training:
+                    padded_w[:, old_w.shape[1] :].normal_(0.0, 1e-4)
+                sd["head.0.weight"] = padded_w
+
+        # If loading a checkpoint saved before `genre_branch` existed, fill in current genre_branch params
+        cur_sd = self.state_dict()
+        for k, v in cur_sd.items():
+            if k.startswith("genre_branch.") and k not in sd:
+                sd[k] = v
+
+        if not has_trained_genre and not self.training:
+            self.genre_enabled = False
+
+        return super().load_state_dict(sd, strict=strict)
 
     def set_backbone_trainable(self, trainable: bool, unfreeze_last_stage_only: bool = False) -> None:
         """Freeze or unfreeze the semantic backbone for two-phase training."""
@@ -802,8 +924,13 @@ class FvfAresModel(nn.Module):
         for_feat = self.multi_crop_aggregator(crop_feats)
         return sem_feat, for_feat
 
-    def _fuse_and_classify(self, sem_feat: torch.Tensor, for_feat: torch.Tensor) -> torch.Tensor:
-        """Fuse Stream A and multi-crop Stream B into the One Final Head."""
+    def _fuse_and_classify(
+        self,
+        sem_feat: torch.Tensor,
+        for_feat: torch.Tensor,
+        genre_inputs: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Fuse Stream A, multi-crop Stream B, and Genre Branch inputs into the One Final Head."""
         # During training, randomly drop out the semantic stream on a fraction of samples
         # so the final head is forced to rely heavily on the multi-crop forensic representation.
         if self.training and self.semantic_dropout_prob > 0.0:
@@ -817,21 +944,49 @@ class FvfAresModel(nn.Module):
         sem_modulated = sem_feat + gate * for_projected
         cross_interaction = sem_feat * torch.sigmoid(for_projected)
 
-        fused = torch.cat([sem_modulated, for_feat, cross_interaction], dim=1)
+        if self.genre_dim > 0:
+            if genre_inputs is not None and self.genre_enabled:
+                # Detach genre_inputs so the main AI-vs-Real loss trains the head to USE the genre signal,
+                # while the separate GenreGroupingScorer exclusively hones the GenreContextBranch weights.
+                g_vec = genre_inputs.detach().to(dtype=sem_modulated.dtype)
+            else:
+                g_vec = torch.zeros(
+                    (sem_modulated.size(0), self.genre_dim),
+                    device=sem_modulated.device,
+                    dtype=sem_modulated.dtype,
+                )
+            fused = torch.cat([sem_modulated, for_feat, cross_interaction, g_vec], dim=1)
+        else:
+            fused = torch.cat([sem_modulated, for_feat, cross_interaction], dim=1)
+
         logits = self.head(fused)
 
         temp = self.temperature.clamp_min(0.05)
         return logits / temp
 
+    def forward_with_aux_and_genre(
+        self, global_rgb: torch.Tensor, native_crop_rgb: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Forward pass returning (final_head_logits, forensic_aux_logits, genre_logits, genre_embed)."""
+        if native_crop_rgb is None:
+            native_crop_rgb = global_rgb
+        sem_feat, for_feat = self.extract_streams(global_rgb, native_crop_rgb)
+
+        genre_inputs: Optional[torch.Tensor] = None
+        genre_logits: Optional[torch.Tensor] = None
+        genre_embed: Optional[torch.Tensor] = None
+        if self.use_genre_branch and self.genre_branch is not None and self.genre_enabled:
+            genre_inputs, genre_logits, genre_embed = self.genre_branch(global_rgb)
+
+        logits = self._fuse_and_classify(sem_feat, for_feat, genre_inputs=genre_inputs)
+        aux_logits = self.forensic_aux_head(for_feat)
+        return logits, aux_logits, genre_logits, genre_embed
+
     def forward_with_aux(
         self, global_rgb: torch.Tensor, native_crop_rgb: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass returning (final_head_logits, forensic_aux_logits) for training."""
-        if native_crop_rgb is None:
-            native_crop_rgb = global_rgb
-        sem_feat, for_feat = self.extract_streams(global_rgb, native_crop_rgb)
-        logits = self._fuse_and_classify(sem_feat, for_feat)
-        aux_logits = self.forensic_aux_head(for_feat)
+        logits, aux_logits, _, _ = self.forward_with_aux_and_genre(global_rgb, native_crop_rgb)
         return logits, aux_logits
 
     def forward(
@@ -845,10 +1000,11 @@ class FvfAresModel(nn.Module):
             native_crop_rgb = global_rgb
 
         sem_feat, for_feat = self.extract_streams(global_rgb, native_crop_rgb)
-        return self._fuse_and_classify(sem_feat, for_feat)
+        genre_inputs: Optional[torch.Tensor] = None
+        if self.use_genre_branch and self.genre_branch is not None and self.genre_enabled:
+            genre_inputs, _, _ = self.genre_branch(global_rgb)
+        return self._fuse_and_classify(sem_feat, for_feat, genre_inputs=genre_inputs)
 
 
-# Alias for naming consistency
 FvfHeimdall02Model = FvfAresModel
-
 FvfHeimdall03Model = FvfAresModel

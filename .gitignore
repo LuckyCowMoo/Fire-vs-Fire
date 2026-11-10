@@ -45,7 +45,6 @@ build/
 # Training pipeline & datasets - Internal Research Only (Do not commit to public repo)
 training/
 checkpoints/
-channel_extractions/
 run_monitor.bat
 run_review_gui.bat
 test_image.py

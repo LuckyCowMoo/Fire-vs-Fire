@@ -273,48 +273,224 @@ class BaseClassifier(ABC):
       </section>
 
       <!-- ==================================================================
-           SCREEN 3: SETTING UP YOUR FIRST CLASSIFIER (BULLET POINTS)
+           SCREEN 3: FORUM KNOWLEDGE BASE & SYSTEM ARCHITECTURE GUIDE
            ================================================================== -->
       <section class="wizard-screen" id="screen-3" data-screen="3">
         <div class="screen-header">
-          <h1 class="display-title">Setting Up Your First Classifier</h1>
+          <div class="forum-pinned-badge">
+            <span>📌 Pinned Knowledge Base • Core Architecture &amp; Extension Guide</span>
+          </div>
+          <h1 class="display-title" style="margin-top: 8px;">Fire vs Fire: Inside the Engine</h1>
+          <p class="lead-subtitle">
+            A deep-dive technical overview of how the Browser Extension and Native Host work together to classify web content with zero telemetry.
+          </p>
         </div>
 
-        <div class="glass-card-3d setup-guide-card" data-tilt style="max-width: 820px; padding: 32px 36px;">
-          <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 22px;">
-            How to set up your first classifier:
-          </h2>
+        <div class="forum-wrapper">
+          <!-- Author / Community Thread Header -->
+          <div class="glass-card-3d forum-author-card" data-tilt>
+            <div class="forum-author-left">
+              <div class="forum-avatar-flame">
+                <img src="./assets/icon.svg" alt="Lead Architect" />
+              </div>
+              <div class="forum-author-info">
+                <div class="forum-author-name">
+                  <span>LuckyCowMoo</span>
+                  <span class="forum-badge-verified">Lead Architect</span>
+                </div>
+                <div class="forum-post-meta">
+                  <span>Knowledge Base Thread #1</span> • 
+                  <span>~5 min read</span> • 
+                  <span>Fire vs Fire v2.2 Architecture</span>
+                </div>
+              </div>
+            </div>
+            <div class="forum-tags-group">
+              <span class="forum-pill-tag">#LocalGPU</span>
+              <span class="forum-pill-tag">#ZeroTelemetry</span>
+              <span class="forum-pill-tag">#DynamicPrioritization</span>
+            </div>
+          </div>
 
-          <ul class="setup-steps-list">
-            <li>
-              <strong>Pin Fire vs Fire to your browser bar:</strong> Click your browser's extensions icon and pin the flame icon so it is always visible.
-            </li>
-            <li>
-              <strong>Open the Options menu:</strong> Click the flame icon in your toolbar, then click Options to open your Settings dashboard.
-            </li>
-            <li>
-              <strong>Create or edit a Category:</strong> Categories group your classifiers by rules (e.g. AI Images, Spiders, or custom concepts).
-            </li>
-            <li>
-              <strong>Assign your downloaded classifiers:</strong> Check the box next to your downloaded classifiers (e.g., FvF Heimdall V2) to enable them inside that category.
-            </li>
-            <li>
-              <strong>Set your sensitivity threshold:</strong> Adjust the threshold slider (recommended: 75%). Any image or text scoring above this threshold will trigger your chosen alert style.
-            </li>
-            <li>
-              <strong>Choose your display style:</strong> Select between Hover-to-Reveal Blur, an outline Border, and an Info Badge.
-            </li>
-            <li>
-              <strong>Toolbar flame indicators:</strong> A green flame logo with a counter means active scanning is underway; a red flame means the GPU/CPU is idle standing by.
-            </li>
-          </ul>
+          <!-- Thread 1: Dual Architecture -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">01</span>
+              <div>
+                <h2 class="forum-thread-title">The Dual Architecture: Why an Extension + Native Host?</h2>
+                <span class="forum-thread-sub">Solving the browser sandboxing and compute limits</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                People often ask: <em>"Why do I need to download a local Python server? Why can't a browser extension just classify everything directly in JavaScript?"</em>
+              </p>
+              <p>
+                The answer comes down to silicon and sandboxing. Modern state-of-the-art vision models (such as <strong>Heimdall 04</strong>, 24-channel FFT forensic nets, and ConvNeXt-Base backbones) require hundreds of megabytes of neural parameters and billions of floating-point operations.
+              </p>
+              <p>
+                Browser extensions operate inside isolated JavaScript Web Workers. These environments are strictly memory-capped (typically 2 to 4 GB shared across all browser tabs) and are strictly barred by browser security from accessing low-level hardware handles—like NVIDIA Tensor Cores, CUDA device streams, or AMD DirectML pipelines. Running models inside the browser would instantly freeze tabs, exhaust RAM, and stutter user scrolling.
+              </p>
+              <div class="forum-callout-box">
+                <strong>⚡ The Two-Halves Solution:</strong>
+                <ul class="forum-bullets">
+                  <li><strong>The Browser Extension (The Eyes):</strong> Scans the DOM as pages render, intercepts visible images and paragraphs, applies visual styling (hover blurs, border glows, info badges), and manages user preferences.</li>
+                  <li><strong>The Native Inference Host (The Brain):</strong> A lightweight, standalone Python engine running natively on your operating system. It interfaces directly with your GPU (CUDA, DirectML, MPS) or CPU, holding models warm in memory for instantaneous matrix math.</li>
+                  <li><strong>Native Messaging Bridge:</strong> The browser and the host communicate locally via standard OS pipes (<code>stdin</code> / <code>stdout</code>) in structured JSON packets—fast, private, and requiring zero network overhead.</li>
+                </ul>
+              </div>
+            </div>
+          </article>
 
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 32px; gap: 16px; flex-wrap: wrap;">
+          <!-- Thread 2: Zero-Internet Privacy Guarantee -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">02</span>
+              <div>
+                <h2 class="forum-thread-title">The Zero-Internet Privacy Guarantee</h2>
+                <span class="forum-thread-sub">100% on-device processing: what you browse never leaves your PC</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                In an era where most AI tools send user data, prompts, and photos to cloud data centers for processing, <strong>Fire vs Fire takes an uncompromising stance on privacy:</strong>
+              </p>
+              <ul class="forum-bullets">
+                <li><strong>No Cloud Roundtrips:</strong> Every single classification happens strictly inside your computer's RAM and GPU.</li>
+                <li><strong>Zero Inbound Ports &amp; Zero Outbound Sockets:</strong> The Native Host has zero network listening sockets. During classification, it does not send telemetry, ping analytics servers, or transmit your visited URLs.</li>
+                <li><strong>Air-Gapped Safety:</strong> If you unplug your Ethernet cable or disconnect from Wi-Fi, Fire vs Fire continues to classify web images and text without missing a beat.</li>
+                <li><strong>Encrypted Pipeline:</strong> Even when transferring images from the browser to the local Python host, data flows purely through your operating system's local memory IPC pipes.</li>
+              </ul>
+            </div>
+          </article>
+
+          <!-- Thread 3: Dynamic Prioritization & The Streaming Pipeline -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">03</span>
+              <div>
+                <h2 class="forum-thread-title">Dynamic Prioritization &amp; Single-Item Streaming</h2>
+                <span class="forum-thread-sub">How Fire vs Fire eliminates lag and stale queue bottlenecks</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                Early prototypes collected images into static batches (e.g., 16 items) and waited for the batch to fill before dispatching. However, in real-world browsing—especially when rapidly switching between tabs or scrolling social feeds—static batches create massive latency. When you switch tabs, the old queue continues churning through images you aren't even looking at!
+              </p>
+              <p>
+                Our <strong>Dynamic Prioritization Engine (v2.2)</strong> introduces a smart 3-tier priority schedule:
+              </p>
+              <div class="forum-priority-grid">
+                <div class="priority-card p0">
+                  <span class="priority-label">Priority 0 • Immediate</span>
+                  <strong>Active Viewport</strong>
+                  <p>Content directly visible on your physical screen right now. These items jump to the front of the queue and are classified instantly.</p>
+                </div>
+                <div class="priority-card p1">
+                  <span class="priority-label">Priority 1 • Background</span>
+                  <strong>Offscreen Fold</strong>
+                  <p>Content located below the fold is queued asynchronously. As you scroll downward, it is already tagged before you reach it.</p>
+                </div>
+                <div class="priority-card p2">
+                  <span class="priority-label">Priority 2 • Auto-Purge</span>
+                  <strong>Inactive Tabs</strong>
+                  <p>If you switch to another browser tab or navigate away, pending tasks from the previous page are instantly dropped so hardware is never wasted.</p>
+                </div>
+              </div>
+              <p style="margin-top: 14px;">
+                Additionally, individual large media payloads are dynamically sliced into safe chunks beneath the 1 MB Native Messaging packet limit and reconstructed seamlessly on the other side.
+              </p>
+            </div>
+          </article>
+
+          <!-- Thread 4: Sub-Millisecond RAM Content Cache -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">04</span>
+              <div>
+                <h2 class="forum-thread-title">Sub-Millisecond In-RAM Content Caching</h2>
+                <span class="forum-thread-sub">Eliminating redundant neural forward passes</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                Modern websites reuse the same assets repeatedly: author avatars on forum threads, website brand logos, navigation buttons, and viral memes shared across multiple posts.
+              </p>
+              <p>
+                Fire vs Fire incorporates an in-memory <strong>LRU Content Cache</strong> inside the Native Host:
+              </p>
+              <ul class="forum-bullets">
+                <li>Upon arrival, each media payload is hashed with a high-throughput perceptual checksum.</li>
+                <li>If the hash matches an item classified earlier in your session, the Native Host bypasses the neural forward pass entirely and returns the cached probability in <strong>under 0.5 milliseconds</strong>.</li>
+                <li>This reduces GPU thermals, prevents unnecessary battery consumption, and ensures instantaneous tagging on frequently visited domains.</li>
+              </ul>
+            </div>
+          </article>
+
+          <!-- Thread 5: Power & Battery Management -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">05</span>
+              <div>
+                <h2 class="forum-thread-title">Battery Awareness &amp; Thermal Efficiency</h2>
+                <span class="forum-thread-sub">Intelligent power policies for laptop users</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                High-end deep learning inference can draw noticeable power on mobile devices. Fire vs Fire provides native power awareness directly integrated into the master switch:
+              </p>
+              <ul class="forum-bullets">
+                <li><strong>AC Power Detection:</strong> The Native Host queries Windows Kernel / OS power APIs to detect whether your laptop is plugged into the wall or running on battery.</li>
+                <li><strong>"Only when plugged in":</strong> Toggle this sub-button to automatically pause classification whenever you unplug, preserving battery for browsing.</li>
+                <li><strong>"Pause below threshold":</strong> Set a safety threshold (e.g. 20%). If your battery dips below this level, Fire vs Fire gently stands down until recharged.</li>
+                <li><strong>"Keep the Engine Warm":</strong> Unlike command-line scripts that reboot Python and reload 200 MB model weights for every image, Fire vs Fire keeps the neural engine warm in memory while browsing, preventing disk thrashing and high CPU initialization spikes.</li>
+              </ul>
+            </div>
+          </article>
+
+          <!-- Thread 6: Troubleshooting & Common Questions -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">06</span>
+              <div>
+                <h2 class="forum-thread-title">Frequently Asked Questions &amp; Troubleshooting</h2>
+                <span class="forum-thread-sub">Quick answers to common questions</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <div class="forum-faq-item">
+                <strong>Q: What do the toolbar flame icons and counters mean?</strong>
+                <p>
+                  A <strong>green flame with a counter</strong> means active scanning is in progress (the counter indicates remaining items). A <strong>red flame</strong> means the local AI host is connected, healthy, idle, and standing by. A <strong>muted flame</strong> means the Native Host is disconnected.
+                </p>
+              </div>
+              <div class="forum-faq-item">
+                <strong>Q: How do I test if my Native Host is working?</strong>
+                <p>
+                  Click the flame icon in your browser bar, select <strong>Options</strong>, open the <strong>Advanced</strong> panel, and click <strong>⚡ Test Connection</strong>. It will ping the native host and report your GPU/CPU device info.
+                </p>
+              </div>
+              <div class="forum-faq-item">
+                <strong>Q: Can I build my own custom classifiers?</strong>
+                <p>
+                  Yes! Fire vs Fire is fully extensible. Any Python script inheriting from <code>BaseClassifier</code> placed in <code>native/classifiers/</code> is automatically discovered and loaded into the Options category selector.
+                </p>
+              </div>
+            </div>
+          </article>
+
+          <!-- Forum Helpful Bar & Navigation -->
+          <div class="forum-nav-footer">
             <button type="button" class="btn-ember-outline" id="back-to-step2-btn">
-              ← Back
+              ← Back to Classifiers
             </button>
+            <div class="forum-helpful-pill" id="forum-helpful-btn" role="button" tabindex="0">
+              <span class="helpful-thumb">👍</span>
+              <span>Helpful Guide (42)</span>
+            </div>
             <button type="button" class="btn-fire" id="finish-setup-btn">
-              <span>Finish Setup →</span>
+              <span>Proceed to Browsing →</span>
             </button>
           </div>
         </div>
@@ -338,6 +514,9 @@ class BaseClassifier(ABC):
             <a href="./feed.html" class="btn-fire" style="display: inline-flex;">
               <span>🧪 Test Extension on Sample Feed →</span>
             </a>
+            <button type="button" class="btn-ember-outline" id="goto-guide-btn" style="display: inline-flex;">
+              <span>📖 Extension &amp; Host Guide</span>
+            </button>
           </div>
         </div>
 

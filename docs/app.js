@@ -1,3 +1,32 @@
+// ============================================================================
+// DYNAMIC BASE CLASSIFIER SOURCE FETCHER
+// ============================================================================
+
+async function loadBaseClassifierCode() {
+  const codeEl = document.querySelector('.byo-classifier-card code');
+  if (!codeEl) return;
+  const urls = [
+    'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/dynamic-prioritisation/native/classifiers/base_classifier.py',
+    'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/base_classifier.py',
+    'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/main/native/classifiers/base_classifier.py',
+    '../native/classifiers/base_classifier.py'
+  ];
+  for (const url of urls) {
+    try {
+      const resp = await fetch(`${url}?_t=${Date.now()}`, { cache: 'no-store' });
+      if (resp && resp.ok) {
+        const text = await resp.text();
+        if (text && text.trim().length > 50) {
+          codeEl.textContent = text;
+          return;
+        }
+      }
+    } catch (_) {}
+  }
+}
+
+// Call on startup
+loadBaseClassifierCode().catch(() => {});
 /**
  * Fire vs Fire — Interactive Onboarding & Model Hub
  * Connects seamlessly to the Browser Extension & Local Native Host (V2)
@@ -73,9 +102,7 @@ const FALLBACK_CATALOG = {
       version: '1.0.0',
       modality: 'image',
       status: 'available',
-      recommended: false,
       is_ai_detector: false,
-      special_badge: 'Object classifier',
       category_name: 'ResNet50 Spider',
       label: 'Spider',
       default_threshold: 0.75,
@@ -151,7 +178,7 @@ let extensionConnected = false;
 let nativeHostConnected = false;
 let officialCatalog = FALLBACK_CATALOG;
 let installedModels = new Set();
-let selectedModels = new Set(['fvf_heimdall02', 'fvf_heimdall03']); // Recommended default selected
+let selectedModels = new Set(['fvf_heimdall04', 'fvf_mimir_02', 'fvf_huginn_01', 'fvf_bragi_01']); // 1 latest from each modality of main series
 
 // ============================================================================
 // EXTENSION BRIDGE (Supports Direct Extension Context + GitHub Pages postMessage)
@@ -459,17 +486,14 @@ function renderModalityQuadrants() {
       const isInstalled = installedModels.has(model.id);
 
       const tile = document.createElement('div');
-      tile.className = `model-tile ${isAvailable ? 'selectable' : 'upcoming'} ${isSelected ? 'selected' : ''}`;
+      tile.className = `model-tile ${isAvailable ? 'selectable' : 'upcoming'} ${isSelected ? 'selected' : ''} ${isInstalled ? 'installed' : ''}`;
       tile.dataset.modelId = model.id;
       tile.setAttribute('data-tilt', '');
 
-      // Stickers
+      // Stickers & Status Badges
       let stickersHtml = '';
-      if (model.recommended && model.is_ai_detector !== false) {
-        stickersHtml += `<span class="sticker-recommended">★ Recommended AI Classifier</span>`;
-      }
-      if (model.is_ai_detector === false) {
-        stickersHtml += `<span class="sticker-spider-warning">Object classifier</span>`;
+      if (isInstalled) {
+        stickersHtml += `<span class="sticker-downloaded">✓ Installed</span>`;
       } else if (!isAvailable) {
         const badgeText = model.status === 'coming_next' ? 'Coming Next' : 'Coming Soon';
         stickersHtml += `<span class="sticker-upcoming">⏳ ${badgeText}</span>`;
@@ -576,9 +600,13 @@ async function downloadSelectedModelsAndAdvance() {
   const statusEl = document.getElementById('download-overall-status');
   const ids = Array.from(selectedModels);
 
-  // If user chose 0 models, proceed immediately without blocking
+  const urlParams = new URLSearchParams(window.location.search);
+  const isInitialSetup = !urlParams.has('screen') && !urlParams.has('manage') && !urlParams.has('step');
+
+  // If user chose 0 models, proceed or stay
   if (ids.length === 0) {
-    goToScreen(3);
+    if (!isInitialSetup) return;
+    goToScreen(4);
     return;
   }
 
@@ -675,18 +703,28 @@ async function downloadSelectedModelsAndAdvance() {
   }
 
   if (progressTitle) progressTitle.textContent = '✓ All Classifiers Downloaded!';
-  if (progressStatus) progressStatus.textContent = 'Hardware-accelerated environment is primed and ready.';
+  if (progressStatus) progressStatus.textContent = 'Hardware-accelerated environment is primed and ready in native/classifiers/.';
   if (progressFill) progressFill.style.width = '100%';
   if (progressPercent) progressPercent.textContent = '100%';
 
   await new Promise((r) => setTimeout(r, 1200));
+
+  if (!isInitialSetup) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>✓ Classifiers Installed</span>';
+    }
+    renderModalityQuadrants();
+    return;
+  }
 
   if (btn) {
     btn.disabled = false;
     btn.innerHTML = '<span>⚡ Download Selected &amp; Continue →</span>';
   }
 
-  goToScreen(3);
+  // On first install, advance straight to Screen 4 (Final Ready page), skipping Screen 3 as requested
+  goToScreen(4);
 }
 
 // ============================================================================
@@ -895,11 +933,24 @@ function init() {
     downloadSelectedModelsAndAdvance();
   });
 
-  // Screen 3 buttons (Setting Up Your First Classifier)
+  // Screen 3 buttons (Forum Architecture Guide)
   document.getElementById('back-to-step2-btn')?.addEventListener('click', () => goToScreen(2));
   document.getElementById('finish-setup-btn')?.addEventListener('click', () => {
     runFinishSetup();
   });
+  document.getElementById('goto-guide-btn')?.addEventListener('click', () => goToScreen(3));
+
+  const helpfulBtn = document.getElementById('forum-helpful-btn');
+  if (helpfulBtn) {
+    let count = 42;
+    helpfulBtn.addEventListener('click', () => {
+      if (!helpfulBtn.classList.contains('voted')) {
+        helpfulBtn.classList.add('voted');
+        count += 1;
+        helpfulBtn.innerHTML = `<span class="helpful-thumb">✓</span> <span>Helpful Guide (${count})</span>`;
+      }
+    });
+  }
 
   // Bypass link for users who already installed or are testing
   const forceBtn = document.getElementById('force-proceed-models-btn');

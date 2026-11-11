@@ -18,7 +18,7 @@ let currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Da
  */
 let settings = {
   enabled: true,                  // Master toggle for the extension
-  altTextOnly: false,             // If true, only process images with alt text
+  altTextOnly: true,              // If true, only process images with alt text (default: true)
   blurAmount: 4,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)

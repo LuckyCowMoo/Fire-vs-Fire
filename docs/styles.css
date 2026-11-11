@@ -1472,3 +1472,321 @@ input[type='range'].ember-slider::-webkit-slider-thumb {
   box-shadow: 0 0 14px var(--flame-core);
   cursor: pointer;
 }
+
+
+/* ============================================================================
+   FORUM KNOWLEDGE BASE & SYSTEM ARCHITECTURE STYLES (Screen 3)
+   ============================================================================ */
+
+.forum-pinned-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 14px;
+  background: rgba(255, 98, 24, 0.15);
+  border: 1px solid rgba(255, 98, 24, 0.4);
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ff914d;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+  box-shadow: 0 0 16px rgba(255, 98, 24, 0.2);
+}
+
+.forum-wrapper {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  text-align: left;
+}
+
+.forum-author-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px 24px;
+  background: rgba(20, 9, 6, 0.85);
+  border: 1px solid rgba(255, 98, 24, 0.3);
+}
+
+.forum-author-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.forum-avatar-flame {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 98, 24, 0.3) 0%, rgba(10, 4, 3, 0.9) 80%);
+  border: 1.5px solid rgba(255, 98, 24, 0.5);
+  box-shadow: 0 0 14px rgba(255, 98, 24, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.forum-avatar-flame img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.forum-author-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.forum-author-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.forum-badge-verified {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: rgba(46, 204, 113, 0.2);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.4);
+}
+
+.forum-post-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.forum-tags-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.forum-pill-tag {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+}
+
+.forum-thread-card {
+  padding: 28px 32px;
+  background: rgba(18, 8, 6, 0.85);
+  border: 1px solid rgba(255, 98, 24, 0.25);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.forum-thread-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.forum-topic-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 98, 24, 0.35) 0%, rgba(255, 45, 0, 0.2) 100%);
+  border: 1.5px solid rgba(255, 98, 24, 0.5);
+  color: #ff914d;
+  font-weight: 800;
+  font-size: 1rem;
+  flex-shrink: 0;
+  box-shadow: 0 0 12px rgba(255, 98, 24, 0.25);
+}
+
+.forum-thread-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 4px 0;
+  line-height: 1.35;
+}
+
+.forum-thread-sub {
+  font-size: 0.85rem;
+  color: #ffb088;
+}
+
+.forum-thread-body {
+  font-size: 0.95rem;
+  line-height: 1.68;
+  color: var(--text-secondary);
+}
+
+.forum-thread-body p {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
+.forum-callout-box {
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: rgba(255, 98, 24, 0.08);
+  border: 1px solid rgba(255, 98, 24, 0.25);
+  margin: 16px 0;
+  color: #f0f0f0;
+}
+
+.forum-bullets {
+  margin: 8px 0 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.forum-bullets li strong {
+  color: #ffffff;
+}
+
+.forum-priority-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.priority-card {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.priority-card.p0 {
+  border-color: rgba(255, 77, 28, 0.5);
+  background: rgba(255, 77, 28, 0.06);
+}
+
+.priority-card.p1 {
+  border-color: rgba(255, 179, 32, 0.4);
+  background: rgba(255, 179, 32, 0.04);
+}
+
+.priority-card.p2 {
+  border-color: rgba(100, 116, 139, 0.3);
+  background: rgba(100, 116, 139, 0.04);
+}
+
+.priority-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #ff914d;
+}
+
+.priority-card strong {
+  font-size: 1rem;
+  color: #ffffff;
+}
+
+.priority-card p {
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.forum-faq-item {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.forum-faq-item:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.forum-faq-item strong {
+  display: block;
+  font-size: 0.98rem;
+  color: #ffffff;
+  margin-bottom: 6px;
+}
+
+.forum-faq-item p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.forum-nav-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 0;
+  margin-top: 10px;
+}
+
+.forum-helpful-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.forum-helpful-pill:hover,
+.forum-helpful-pill.voted {
+  background: rgba(46, 204, 113, 0.15);
+  border-color: rgba(46, 204, 113, 0.4);
+  color: #2ecc71;
+}
+
+/* Downloaded Sticker and Tile Installed State */
+.sticker-downloaded {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(46, 204, 113, 0.18);
+  border: 1px solid rgba(46, 204, 113, 0.45);
+  color: #2ecc71;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.model-tile.installed {
+  border-color: rgba(46, 204, 113, 0.35);
+  background: linear-gradient(135deg, rgba(16, 28, 20, 0.7) 0%, rgba(10, 16, 12, 0.8) 100%);
+}

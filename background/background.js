@@ -407,6 +407,10 @@ async function handleClassifySingleItem(message, sender) {
     return { ok: false, error: 'Missing itemId' };
   }
 
+  if (await isPowerPolicyPaused()) {
+    return { ok: false, error: 'paused_by_power_policy' };
+  }
+
   let dataPayload = message.data || message.text || '';
 
   // If content script could not extract base64 due to CORS canvas taint, capture it here in background.js
@@ -589,6 +593,94 @@ if (ext.windows && ext.windows.onFocusChanged) {
         .catch(() => {});
     }
   });
+}
+
+let powerSettings = {
+  pauseOnBattery: false,
+  pauseBelowThreshold: false,
+  batteryThreshold: 20
+};
+
+ext.storage.local.get(['pauseOnBattery', 'pauseBelowThreshold', 'batteryThreshold']).then((res) => {
+  if (res) {
+    if (typeof res.pauseOnBattery === 'boolean') powerSettings.pauseOnBattery = res.pauseOnBattery;
+    if (typeof res.pauseBelowThreshold === 'boolean') powerSettings.pauseBelowThreshold = res.pauseBelowThreshold;
+    if (typeof res.batteryThreshold === 'number') powerSettings.batteryThreshold = res.batteryThreshold;
+  }
+}).catch(() => {});
+
+ext.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    if (changes.pauseOnBattery) powerSettings.pauseOnBattery = Boolean(changes.pauseOnBattery.newValue);
+    if (changes.pauseBelowThreshold) powerSettings.pauseBelowThreshold = Boolean(changes.pauseBelowThreshold.newValue);
+    if (changes.batteryThreshold) powerSettings.batteryThreshold = Number(changes.batteryThreshold.newValue);
+  }
+});
+
+let cachedPowerStatus = {
+  ok: true,
+  is_plugged_in: true,
+  has_battery: false,
+  battery_percent: 100,
+  charging: false,
+  timestamp: 0
+};
+
+async function getSystemPowerStatus() {
+  const now = Date.now();
+  if (now - cachedPowerStatus.timestamp < 3000) {
+    return cachedPowerStatus;
+  }
+
+  // 1. Browser API check if available
+  if (typeof navigator !== 'undefined' && typeof navigator.getBattery === 'function') {
+    try {
+      const b = await navigator.getBattery();
+      cachedPowerStatus = {
+        ok: true,
+        is_plugged_in: Boolean(b.charging),
+        has_battery: true,
+        battery_percent: Math.round(b.level * 100),
+        charging: Boolean(b.charging),
+        source: 'browser_api',
+        timestamp: now
+      };
+      return cachedPowerStatus;
+    } catch (_) {}
+  }
+
+  // 2. Fallback to Native Host (Windows / Linux power detection)
+  try {
+    const res = await sendToNative({ type: 'getPowerStatus', requestId: makeRequestId() }, { timeoutMs: 3000 });
+    if (res && res.ok) {
+      cachedPowerStatus = {
+        ok: true,
+        is_plugged_in: res.is_plugged_in !== false,
+        has_battery: Boolean(res.has_battery),
+        battery_percent: typeof res.battery_percent === 'number' ? res.battery_percent : 100,
+        charging: Boolean(res.charging),
+        source: res.source || 'native_host',
+        timestamp: now
+      };
+      return cachedPowerStatus;
+    }
+  } catch (_) {}
+
+  return cachedPowerStatus;
+}
+
+async function isPowerPolicyPaused() {
+  if (!powerSettings.pauseOnBattery && !powerSettings.pauseBelowThreshold) {
+    return false;
+  }
+  const power = await getSystemPowerStatus();
+  if (powerSettings.pauseOnBattery && !power.is_plugged_in) {
+    return true;
+  }
+  if (powerSettings.pauseBelowThreshold && typeof power.battery_percent === 'number' && power.battery_percent <= powerSettings.batteryThreshold) {
+    return true;
+  }
+  return false;
 }
 
 async function openOnboardingExperience(targetScreen = 1) {
@@ -829,6 +921,11 @@ ext.runtime.onInstalled.addListener((details) => {
   }
 
   if (!details || details.reason === 'install') {
+    ext.storage.local.get(['altTextOnly']).then((existing) => {
+      if (typeof existing.altTextOnly !== 'boolean') {
+        ext.storage.local.set({ altTextOnly: true }).catch(() => {});
+      }
+    }).catch(() => {});
     openOnboardingExperience();
   }
 });
@@ -1101,9 +1198,28 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message && message.type === 'GET_POWER_STATUS') {
+    getSystemPowerStatus()
+      .then((status) => sendResponse(status))
+      .catch((err) => sendResponse({ ok: false, error: err && err.message ? err.message : String(err) }));
+    return true;
+  }
+
   if (message && message.type === 'GET_ACTIVITY_STATUS') {
-    sendResponse({ ok: true, isLoading: activeClassifyCount > 0, activeCount: activeClassifyCount });
-    return false;
+    getSystemPowerStatus().then((power) => {
+      const isPaused = (powerSettings.pauseOnBattery && !power.is_plugged_in) ||
+                       (powerSettings.pauseBelowThreshold && typeof power.battery_percent === 'number' && power.battery_percent <= powerSettings.batteryThreshold);
+      sendResponse({
+        ok: true,
+        isLoading: activeClassifyCount > 0,
+        activeCount: activeClassifyCount,
+        isPaused,
+        power
+      });
+    }).catch(() => {
+      sendResponse({ ok: true, isLoading: activeClassifyCount > 0, activeCount: activeClassifyCount, isPaused: false });
+    });
+    return true;
   }
 
   if (message && message.type === 'CLASSIFY_JOB_CHUNK') {

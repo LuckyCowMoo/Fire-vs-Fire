@@ -26,6 +26,19 @@ const verboseLogsInput = document.getElementById('verboseLogs');
 const lazyLoadInput = document.getElementById('lazyLoad');
 const minTextLengthInput = document.getElementById('minTextLength');
 
+const pauseOnBatteryInput = document.getElementById('pauseOnBattery');
+const pauseBelowThresholdInput = document.getElementById('pauseBelowThreshold');
+const batteryThresholdSelect = document.getElementById('batteryThreshold');
+const powerLiveBadge = document.getElementById('power-live-badge');
+const powerLiveDot = document.getElementById('power-live-dot');
+const powerLiveText = document.getElementById('power-live-text');
+
+let isHostConnected = false;
+let isClassifying = false;
+let classifyCount = 0;
+let isPowerPaused = false;
+let currentPowerStatus = null;
+
 const refreshBtn = document.getElementById('refresh-models');
 const modelStatusEl = document.getElementById('model-status');
 
@@ -352,32 +365,124 @@ function getPreviewImageUrl() {
   return './preview-fire.jpg';
 }
 
+function updateHeaderStatus() {
+  if (!runStateEl || !runStateTextEl) return;
+  runStateEl.className = 'run-state';
+
+  if (!isHostConnected) {
+    runStateEl.classList.add('disconnected');
+    runStateTextEl.textContent = 'Native Host Disconnected';
+    if (statusLogoEl && ext.runtime?.getURL) {
+      statusLogoEl.src = ext.runtime.getURL('icons/icon.svg');
+    }
+  } else if (isPowerPaused) {
+    runStateEl.classList.add('paused');
+    const reason = (currentPowerStatus && currentPowerStatus.is_plugged_in === false) ? 'On Battery' : 'Low Battery';
+    runStateTextEl.textContent = `Connected — Paused (${reason})`;
+    if (statusLogoEl && ext.runtime?.getURL) {
+      statusLogoEl.src = ext.runtime.getURL('icons/icon.svg');
+    }
+  } else if (isClassifying) {
+    runStateEl.classList.add('loading');
+    runStateTextEl.textContent = classifyCount > 0
+      ? `Connected — Classifying (${classifyCount})`
+      : 'Connected — Classifying';
+    if (statusLogoEl && ext.runtime?.getURL) {
+      statusLogoEl.src = ext.runtime.getURL('icons/icon-loading.svg');
+    }
+  } else {
+    runStateEl.classList.add('idle');
+    runStateTextEl.textContent = 'Connected — Idle';
+    if (statusLogoEl && ext.runtime?.getURL) {
+      statusLogoEl.src = ext.runtime.getURL('icons/icon.svg');
+    }
+  }
+}
+
 function setRunState(isLoading, activeCount = 0) {
-  if (runStateEl) {
-    runStateEl.classList.toggle('loading', !!isLoading);
-    runStateEl.classList.toggle('idle', !isLoading);
-  }
-
-  if (runStateTextEl) {
-    runStateTextEl.textContent = isLoading
-      ? `Classifying (${activeCount})`
-      : 'Idle';
-  }
-
-  if (statusLogoEl && ext.runtime && typeof ext.runtime.getURL === 'function') {
-    const nextIcon = isLoading ? 'icons/icon-loading.svg' : 'icons/icon.svg';
-    statusLogoEl.src = ext.runtime.getURL(nextIcon);
-  }
+  isClassifying = !!isLoading;
+  classifyCount = Math.max(0, Number(activeCount) || 0);
+  updateHeaderStatus();
 }
 
 async function refreshRunState() {
   try {
     const resp = await ext.runtime.sendMessage({ type: 'GET_ACTIVITY_STATUS' });
     if (!resp || resp.ok !== true) return;
-    setRunState(!!resp.isLoading, Number(resp.activeCount) || 0);
+    isClassifying = !!resp.isLoading;
+    classifyCount = Math.max(0, Number(resp.activeCount) || 0);
+    if (typeof resp.isPaused === 'boolean') {
+      isPowerPaused = resp.isPaused;
+    }
+    if (resp.power) {
+      currentPowerStatus = resp.power;
+      updatePowerUI(resp.power);
+    }
+    updateHeaderStatus();
   } catch {
-    // Ignore transient messaging failures while reloading extension pages.
+    // Ignore transient messaging failures
   }
+}
+
+async function refreshPowerStatus() {
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.getBattery === 'function') {
+      try {
+        const b = await navigator.getBattery();
+        currentPowerStatus = {
+          ok: true,
+          is_plugged_in: Boolean(b.charging),
+          battery_percent: Math.round(b.level * 100),
+          charging: Boolean(b.charging),
+          has_battery: true
+        };
+      } catch (_) {}
+    }
+
+    if (!currentPowerStatus) {
+      const resp = await ext.runtime.sendMessage({ type: 'GET_POWER_STATUS' }).catch(() => null);
+      if (resp && resp.ok) {
+        currentPowerStatus = resp;
+      }
+    }
+
+    if (currentPowerStatus) {
+      updatePowerUI(currentPowerStatus);
+    }
+  } catch (_) {}
+}
+
+function updatePowerUI(power) {
+  if (!powerLiveBadge || !powerLiveText) return;
+  const isPlugged = power.is_plugged_in !== false;
+  const pct = typeof power.battery_percent === 'number' ? power.battery_percent : null;
+  const hasBattery = power.has_battery !== false;
+
+  powerLiveBadge.className = 'power-live-badge';
+  if (isPlugged) {
+    powerLiveBadge.classList.add('plugged');
+    powerLiveText.textContent = pct != null ? `Plugged In (${pct}%)` : 'Plugged In';
+  } else if (hasBattery) {
+    if (pct != null && pct <= 20) {
+      powerLiveBadge.classList.add('low');
+      powerLiveText.textContent = `Low Battery: ${pct}%`;
+    } else {
+      powerLiveBadge.classList.add('battery');
+      powerLiveText.textContent = pct != null ? `Battery: ${pct}%` : 'On Battery';
+    }
+  } else {
+    powerLiveBadge.classList.add('plugged');
+    powerLiveText.textContent = 'AC Power';
+  }
+
+  const pauseOnBattery = pauseOnBatteryInput ? pauseOnBatteryInput.checked : false;
+  const pauseBelow = pauseBelowThresholdInput ? pauseBelowThresholdInput.checked : false;
+  const threshold = parseInt(batteryThresholdSelect ? batteryThresholdSelect.value : '20', 10);
+
+  isPowerPaused = (pauseOnBattery && !isPlugged) ||
+                  (pauseBelow && pct != null && pct <= threshold);
+
+  updateHeaderStatus();
 }
 
 function updateDisplays() {
@@ -1074,6 +1179,18 @@ function renderCategoryPanel(index, classifierNamesById) {
   if ((ensemble.modality || 'image') === 'image') {
     const imageStyles = ensemble.styles?.image || {};
 
+    // 1. Badge mode control is now FIRST
+    const badgeMode = imageStyles.badgeMode || (imageStyles.applyBadge === false ? 'off' : 'hover');
+    const badgeRow = createIconModeControl('Badge', badgeMode, (value) => {
+      ensemble.styles = ensemble.styles || {};
+      ensemble.styles.image = ensemble.styles.image || {};
+      ensemble.styles.image.badgeMode = value;
+      saveEnsembles();
+      onPreviewUpdate();
+    });
+    categoryPanelEl.appendChild(badgeRow);
+
+    // 2. Blur mode control
     const blurMode = imageStyles.blurMode || (imageStyles.applyBlur === false ? 'off' : 'hover');
     const blurRow = createIconModeControl('Blur', blurMode, (value) => {
       ensemble.styles = ensemble.styles || {};
@@ -1098,6 +1215,7 @@ function renderCategoryPanel(index, classifierNamesById) {
     appendSliderToRow(blurRow, blurRange);
     categoryPanelEl.appendChild(blurRow);
 
+    // 3. Border mode control
     const borderMode = imageStyles.borderMode || (imageStyles.applyBorder === false ? 'off' : 'hover');
     const borderRow = createIconModeControl('Border', borderMode, (value) => {
       ensemble.styles = ensemble.styles || {};
@@ -1123,9 +1241,10 @@ function renderCategoryPanel(index, classifierNamesById) {
     appendSliderToRow(borderRow, borderMultiplier);
     categoryPanelEl.appendChild(borderRow);
 
+    // 4. Renamed 'Border color' simply to 'Color'
     categoryPanelEl.appendChild(
       createColorSliders(
-        'Border color',
+        'Color',
         imageStyles.borderColor || '#ff0064',
         onColorChange((value) => {
           ensemble.styles = ensemble.styles || {};
@@ -1134,16 +1253,6 @@ function renderCategoryPanel(index, classifierNamesById) {
         })
       )
     );
-
-    const badgeMode = imageStyles.badgeMode || (imageStyles.applyBadge === false ? 'off' : 'hover');
-    const badgeRow = createIconModeControl('Badge', badgeMode, (value) => {
-      ensemble.styles = ensemble.styles || {};
-      ensemble.styles.image = ensemble.styles.image || {};
-      ensemble.styles.image.badgeMode = value;
-      saveEnsembles();
-      onPreviewUpdate();
-    });
-    categoryPanelEl.appendChild(badgeRow);
   } else {
     const textStyles = ensemble.styles?.text || {};
 
@@ -1399,6 +1508,9 @@ async function load() {
       ? await storageArea.get([
           'enabled',
           'altTextOnly',
+          'pauseOnBattery',
+          'pauseBelowThreshold',
+          'batteryThreshold',
           'classificationDelay',
           'imageCaptureQuality',
           'verboseLogs',
@@ -1409,7 +1521,20 @@ async function load() {
       : {};
 
     if (res && typeof res.enabled === 'boolean') enabledInput.checked = res.enabled;
-    if (res && typeof res.altTextOnly === 'boolean') altTextOnlyInput.checked = res.altTextOnly;
+    if (res && typeof res.altTextOnly === 'boolean') {
+      altTextOnlyInput.checked = res.altTextOnly;
+    } else {
+      altTextOnlyInput.checked = true; // Default true on first install
+    }
+    if (pauseOnBatteryInput && res && typeof res.pauseOnBattery === 'boolean') {
+      pauseOnBatteryInput.checked = res.pauseOnBattery;
+    }
+    if (pauseBelowThresholdInput && res && typeof res.pauseBelowThreshold === 'boolean') {
+      pauseBelowThresholdInput.checked = res.pauseBelowThreshold;
+    }
+    if (batteryThresholdSelect && res && (typeof res.batteryThreshold === 'number' || typeof res.batteryThreshold === 'string')) {
+      batteryThresholdSelect.value = String(res.batteryThreshold);
+    }
     if (res && typeof res.classificationDelay === 'number') {
       classificationDelayInput.value = res.classificationDelay;
     }
@@ -1510,6 +1635,27 @@ enabledInput.addEventListener('change', async () => {
 altTextOnlyInput.addEventListener('change', async () => {
   await saveSetting('altTextOnly', altTextOnlyInput.checked);
 });
+
+if (pauseOnBatteryInput) {
+  pauseOnBatteryInput.addEventListener('change', async () => {
+    await saveSetting('pauseOnBattery', pauseOnBatteryInput.checked);
+    await refreshPowerStatus();
+  });
+}
+
+if (pauseBelowThresholdInput) {
+  pauseBelowThresholdInput.addEventListener('change', async () => {
+    await saveSetting('pauseBelowThreshold', pauseBelowThresholdInput.checked);
+    await refreshPowerStatus();
+  });
+}
+
+if (batteryThresholdSelect) {
+  batteryThresholdSelect.addEventListener('change', async () => {
+    await saveSetting('batteryThreshold', parseInt(batteryThresholdSelect.value, 10));
+    await refreshPowerStatus();
+  });
+}
 
 verboseLogsInput.addEventListener('change', async () => {
   await saveSetting('verboseLogs', verboseLogsInput.checked);
@@ -1742,7 +1888,7 @@ function initNavButtonsAndHostUpdater() {
     modelsBtn.addEventListener('click', () => {
       ext.runtime.sendMessage({ type: 'OPEN_MODELS_HUB' }).catch(() => {
         if (ext.tabs && ext.tabs.create) {
-          ext.tabs.create({ url: ext.runtime.getURL('docs/index.html?screen=2') });
+          ext.tabs.create({ url: ext.runtime.getURL('docs/index.html?screen=2&manage=1') });
         }
       });
     });
@@ -1766,22 +1912,29 @@ function initNavButtonsAndHostUpdater() {
   const updateStatusEl = document.getElementById('host-update-status');
 
   async function refreshHostStatus() {
-    if (!badgeEl) return;
     try {
       const resp = await ext.runtime.sendMessage({ type: 'CHECK_NATIVE_HOST' });
-      if (resp && resp.connected) {
-        badgeEl.className = 'host-status-badge connected';
-        badgeEl.textContent = '● Connected';
-        if (detailEl) detailEl.textContent = 'Local hardware-accelerated AI host is active';
-      } else {
-        badgeEl.className = 'host-status-badge disconnected';
-        badgeEl.textContent = '○ Not Connected';
-        if (detailEl) detailEl.textContent = 'Run Install-FireVsFire-NativeHost.bat to connect';
+      isHostConnected = Boolean(resp && resp.connected);
+      if (badgeEl) {
+        if (isHostConnected) {
+          badgeEl.className = 'host-status-badge connected';
+          badgeEl.textContent = '● Connected';
+          if (detailEl) detailEl.textContent = 'Local hardware-accelerated AI host is active';
+        } else {
+          badgeEl.className = 'host-status-badge disconnected';
+          badgeEl.textContent = '○ Not Connected';
+          if (detailEl) detailEl.textContent = 'Run Install-FireVsFire-NativeHost.bat to connect';
+        }
       }
     } catch (_) {
-      badgeEl.className = 'host-status-badge disconnected';
-      badgeEl.textContent = '○ Disconnected';
+      isHostConnected = false;
+      if (badgeEl) {
+        badgeEl.className = 'host-status-badge disconnected';
+        badgeEl.textContent = '○ Disconnected';
+      }
     }
+    updateHeaderStatus();
+    await refreshPowerStatus();
   }
 
   const reconnectBtn = document.getElementById('reconnect-host-btn');

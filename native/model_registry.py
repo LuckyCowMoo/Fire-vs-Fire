@@ -265,6 +265,10 @@ class ModelRegistry:
                 "fvf_heimdall03": "fvf_heimdall_03",
                 "fvf_heimdall_04": "fvf_heimdall04",
                 "fvf_heimdall04": "fvf_heimdall_04",
+                "fvf_heimdall_04_b": "fvf_heimdall04_b",
+                "fvf_heimdall04_b": "fvf_heimdall_04_b",
+                "fvf_heimdall04b": "fvf_heimdall_04_b",
+                "fvf_heimdall_04b": "fvf_heimdall_04_b",
             }
             alias_target = aliases.get(classifier_id)
             if alias_target and alias_target in self._classifiers:

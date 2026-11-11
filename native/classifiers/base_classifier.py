@@ -12,10 +12,6 @@ Supports multi-modal pipelines:
 
 CORE CONTRACT:
 =============
-Each subclass is an independent Python class. Hardware acceleration, framework
-choice (PyTorch, ONNX Runtime, TensorRT, OpenVINO, TensorFlow, pure Python heuristics),
-device placement, and runtime management are entirely up to the classifier implementation.
-
 To integrate with the orchestrator, implement the 6 abstract methods:
 1. get_supported_modalities() -> Set[str]
    Return supported modalities (e.g. {'image'}, {'text'}).
@@ -59,12 +55,6 @@ import sys
 
 
 class BaseClassifier(ABC):
-    """Abstract base class for AI detection classifiers (multi-modal)."""
-    
-    # Class-level list of required PyPI packages for this classifier.
-    # Third-party / custom classifiers can declare any extra libraries they need:
-    # e.g. REQUIRED_PACKAGES = ["timm>=0.9.0", "transformers", "scikit-image"]
-    # The native host checks dependencies in-memory on load and auto-installs missing packages.
     REQUIRED_PACKAGES: List[str] = []
     
     def __init__(self, model_path: Optional[Path] = None):

@@ -138,20 +138,12 @@
             <span>Want to build your own classifier? Click to see the BaseClassifier API</span>
             <span style="font-size: 0.82rem; color: #ffb38a;">BaseClassifier API ▾</span>
           </summary>
-          <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 14px; margin-bottom: 16px; line-height: 1.6;">
-            Fire vs Fire isn’t limited to AI detection—that’s why <strong>ResNet 50 - Spider</strong> exists! Any Python
-            class inheriting from <code class="inline-code">BaseClassifier</code> placed in <code>native/classifiers/</code> is
-            automatically discovered and loaded by the Native Host. Here is the complete interface:
-          </p>
           <pre class="code-block-ember"><code id="base-classifier-code">from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 import sys
 
 class BaseClassifier(ABC):
-    """Abstract base class for AI detection classifiers (multi-modal)."""
-
-    # Optional: declare extra PyPI dependencies to auto-install
     REQUIRED_PACKAGES: List[str] = []
 
     def __init__(self, model_path: Optional[Path] = None):

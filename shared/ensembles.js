@@ -24,14 +24,14 @@
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor: '#FF1744',
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },
@@ -46,14 +46,14 @@
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor,
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },
@@ -68,14 +68,14 @@
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor: '#FF4D1C',
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },

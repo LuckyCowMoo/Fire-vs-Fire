@@ -19,7 +19,7 @@ let currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Da
 let settings = {
   enabled: true,                  // Master toggle for the extension
   altTextOnly: true,              // If true, only process images with alt text (default: true)
-  blurAmount: 4,                  // Blur radius (px) for flagged images
+  blurAmount: 3,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
   miniBatchSize: 16,              // Legacy setting
@@ -1480,12 +1480,12 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
                   applyBlur: true,
                   blurAmount: (settings.blurAmount ?? 4) * 2,
                   blurMode: 'hover',
-                  applyBorder: true,
+                  applyBorder: false,
                   borderMultiplier: (settings.borderMultiplier ?? 1) * 2,
                   borderColor: '#808080',
-                  borderMode: 'hover',
+                  borderMode: 'off',
                   applyBadge: true,
-                  badgeMode: 'hover'
+                  badgeMode: 'always'
                 }
               }
             });

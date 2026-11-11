@@ -832,14 +832,14 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
         : {
             image: {
               applyBlur: true,
-              blurAmount: 6,
+              blurAmount: 3,
               blurMode: 'hover',
-              applyBorder: true,
-              borderMultiplier: 1.2,
+              applyBorder: false,
+              borderMultiplier: 1,
               borderColor,
-              borderMode: 'hover',
+              borderMode: 'off',
               applyBadge: true,
-              badgeMode: 'hover'
+              badgeMode: 'always'
             }
           }
     };
@@ -863,14 +863,14 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
       styles: {
         image: {
           applyBlur: true,
-          blurAmount: 8,
+          blurAmount: 3,
           blurMode: 'hover',
-          applyBorder: true,
-          borderMultiplier: 1.2,
+          applyBorder: false,
+          borderMultiplier: 1,
           borderColor,
-          borderMode: 'hover',
+          borderMode: 'off',
           applyBadge: true,
-          badgeMode: 'hover'
+          badgeMode: 'always'
         }
       }
     });

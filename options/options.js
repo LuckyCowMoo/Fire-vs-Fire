@@ -656,7 +656,7 @@ function createLivePreview(ensemble) {
   let targetEl = null;
   let isHovered = false;
   const previewSettings = {
-    blurAmount: 4,
+    blurAmount: 3,
     borderMultiplier: 1,
     borderColor: '#ff0064',
     textBlurAmount: 2
@@ -1274,7 +1274,7 @@ function renderCategoryPanel(index, classifierNamesById) {
     blurRange.type = 'range';
     blurRange.min = '0';
     blurRange.max = '20';
-    blurRange.value = imageStyles.blurAmount ?? 4;
+    blurRange.value = imageStyles.blurAmount ?? 3;
     blurRange.addEventListener('input', () => {
       ensemble.styles = ensemble.styles || {};
       ensemble.styles.image = ensemble.styles.image || {};
@@ -1491,14 +1491,14 @@ function createNewEnsemble(modality = 'image') {
       styles: {
         image: {
           applyBlur: true,
-          blurAmount: 4,
-          applyBorder: true,
+          blurAmount: 3,
+          applyBorder: false,
           borderMultiplier: 1,
           borderColor: '#7C4DFF',
           applyBadge: true,
           blurMode: 'hover',
-          borderMode: 'hover',
-          badgeMode: 'hover'
+          borderMode: 'off',
+          badgeMode: 'always'
         }
       }
     };

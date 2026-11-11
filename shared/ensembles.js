@@ -14,6 +14,28 @@
     const borderColor = settings.borderColor || '#FF0064';
     return [
       {
+        id: 'auto_image_fvf_heimdall04_b',
+        name: 'FvF Heimdall 04 B',
+        modality: 'image',
+        enabled: true,
+        threshold: settings.imageAiThreshold ?? 0.5,
+        classifiers: ['fvf_heimdall04_b'],
+        weights: null,
+        styles: {
+          image: {
+            applyBlur: true,
+            blurAmount: settings.blurAmount ?? 4,
+            applyBorder: true,
+            borderMultiplier: settings.borderMultiplier ?? 1,
+            borderColor: '#FF0055',
+            applyBadge: true,
+            blurMode: 'hover',
+            borderMode: 'hover',
+            badgeMode: 'hover'
+          }
+        }
+      },
+      {
         id: 'auto_image_fvf_heimdall04',
         name: 'FvF Heimdall 04',
         modality: 'image',

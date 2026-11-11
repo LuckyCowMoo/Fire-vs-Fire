@@ -2092,6 +2092,7 @@ def apply_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
         "native/classifiers/fvf_heimdall_02_classifier.py",
         "native/classifiers/fvf_heimdall_03_classifier.py",
         "native/classifiers/fvf_heimdall_04_classifier.py",
+        "native/classifiers/fvf_heimdall_04_b_classifier.py",
         "native/classifiers/Resnet50_spider.py",
     ]
     base_raw_url = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/"

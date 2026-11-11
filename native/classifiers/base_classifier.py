@@ -161,7 +161,17 @@ class BaseClassifier(ABC):
         Override this method if you need custom cleanup.
         """
         self.model = None
+        if hasattr(self, "ort_session"):
+            self.ort_session = None
         self._is_loaded = False
+        try:
+            import gc
+            gc.collect()
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
     
     def process_batch(self, inputs: List[Any], modality: str) -> List[float]:
         """
@@ -193,6 +203,121 @@ class BaseClassifier(ABC):
             results[idx] = score
         
         return results
+
+    def process_item(self, item_input: Any, modality: str) -> float:
+        """
+        Convenience method for single-item inference (preprocess + classify 1 item).
+        Subclasses may override this if they have a specialized single-item path,
+        otherwise it delegates cleanly to process_batch([item_input], modality).
+
+        Args:
+            item_input: Single input item (PIL Image, text string, audio/video data)
+            modality: Type of input ('image', 'text', 'audio', 'video')
+
+        Returns:
+            Float score in [0.0, 1.0] or -1.0 on error
+        """
+        if item_input is None or (modality == 'text' and item_input == ''):
+            return -1.0
+        scores = self.process_batch([item_input], modality)
+        if not scores:
+            return -1.0
+        return float(scores[0])
+
+    def get_estimated_memory_mb(self) -> float:
+        """
+        Return the estimated RAM/VRAM footprint of this classifier in MB when loaded.
+        Used by the Native Host ModelMemoryManager to decide how many models can stay
+        warm concurrently in memory ("keep the engine running") without exhausting
+        hardware resources on lower-end consumer systems.
+
+        Subclasses can override this or set `ESTIMATED_MEMORY_MB` on the class.
+        Defaults to 2.2x the model weight file size on disk (plus 150 MB runtime buffer),
+        or 350.0 MB if the weight file size is unknown.
+        """
+        explicit = getattr(self, "ESTIMATED_MEMORY_MB", None)
+        if isinstance(explicit, (int, float)) and explicit > 0:
+            return float(explicit)
+        try:
+            mpath = getattr(self, "model_path", None)
+            if mpath is None and hasattr(self, "_find_checkpoint") and callable(self._find_checkpoint):
+                mpath = self._find_checkpoint()
+            if mpath and Path(mpath).is_file():
+                size_mb = Path(mpath).stat().st_size / (1024 * 1024)
+                return round(max(150.0, size_mb * 2.2 + 150.0), 1)
+        except Exception:
+            pass
+        return 350.0
+
+    @staticmethod
+    def get_system_memory_info() -> Dict[str, float]:
+        """
+        Probe current system RAM and GPU VRAM availability in MB.
+        Works zero-dependency across Windows, Linux, and macOS.
+
+        Returns:
+            Dict with keys:
+            - 'ram_total_mb': float
+            - 'ram_avail_mb': float
+            - 'vram_total_mb': float (0.0 if no dedicated CUDA GPU queried)
+            - 'vram_avail_mb': float (0.0 if no dedicated CUDA GPU queried)
+        """
+        ram_total_mb = 8192.0
+        ram_avail_mb = 4096.0
+        vram_total_mb = 0.0
+        vram_avail_mb = 0.0
+
+        try:
+            if sys.platform == "win32":
+                import ctypes
+
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                    ram_total_mb = stat.ullTotalPhys / (1024 * 1024)
+                    ram_avail_mb = stat.ullAvailPhys / (1024 * 1024)
+            elif hasattr(sys, "platform") and Path("/proc/meminfo").is_file():
+                meminfo = {}
+                with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.split(":")
+                        if len(parts) == 2:
+                            key = parts[0].strip()
+                            val_kb = int(parts[1].strip().split()[0])
+                            meminfo[key] = val_kb / 1024.0
+                ram_total_mb = meminfo.get("MemTotal", ram_total_mb)
+                ram_avail_mb = meminfo.get("MemAvailable", meminfo.get("MemFree", ram_avail_mb))
+        except Exception:
+            pass
+
+        try:
+            import torch
+            if torch.cuda.is_available():
+                free_b, total_b = torch.cuda.mem_get_info()
+                vram_avail_mb = free_b / (1024 * 1024)
+                vram_total_mb = total_b / (1024 * 1024)
+        except Exception:
+            pass
+
+        return {
+            "ram_total_mb": round(ram_total_mb, 1),
+            "ram_avail_mb": round(ram_avail_mb, 1),
+            "vram_total_mb": round(vram_total_mb, 1),
+            "vram_avail_mb": round(vram_avail_mb, 1),
+        }
 
     # ============================================================================
     # OPTIONAL HELPER METHODS (use these to avoid code duplication)

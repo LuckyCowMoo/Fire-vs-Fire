@@ -9,6 +9,8 @@ const VE = globalThis.FVFVisualEffects;
 const ENS = globalThis.FVFEnsembles;
 const TU = globalThis.FVFTextUtils;
 
+// Unique page context identifier for this page instance (used by Native Host to drop stale items on navigation)
+let currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Date.now();
 
 /**
  * USER SETTINGS - Loaded from extension storage
@@ -20,8 +22,8 @@ let settings = {
   blurAmount: 4,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
-  miniBatchSize: 16,              // Batch size for native host progressive streaming mini-batches
-  classificationDelay: 100,       // Debounce delay (ms) before batching and sending for classification
+  miniBatchSize: 16,              // Legacy setting
+  classificationDelay: 10,        // Minimal micro-task yield (ms)
   imageCaptureQuality: 1,         // JPEG quality (0.2-1) for image capture
   textBlurAmount: 2,              // Blur radius (px) for flagged text
   textStrikethroughEnabled: true, // Whether to apply strikethrough on AI text
@@ -37,18 +39,18 @@ let settings = {
 /**
  * PAGE TRACKING - Accumulating data and tracking
  */
-let cachedImages = [];           // Array of {src, alt, width, height, element, lazy}
-let cachedTextSections = [];     // Array of {index, selector, tag, length, text, element}
+let cachedImages = [];           // Legacy compatibility array
+let cachedTextSections = [];     // Legacy compatibility array
 let elementMap = new Map();      // Maps itemId to DOM elements
 let elementToItemId = new WeakMap(); // Reverse lookup: DOM element -> itemId
-let hoverHandlerAttached = false; // Tracks weather a global hover handler is actuive already
-let currentHoverEl = null;       // tracks the current hovered AI-detected element
+let hoverHandlerAttached = false; // Tracks whether a global hover handler is active already
+let currentHoverEl = null;       // Tracks the current hovered AI-detected element
 let hoverRafPending = false;     // Throttle pointermove hover updates to one per frame
 let lastPointerEvent = null;
 let scanPaused = false;            // Pause periodic scans while tab is hidden
-let processedImages = new Set(); // Set of img elements already added to cachedImages
-let activeJobIds = new Set(); // Track in-flight job IDs for chunked results
-let itemResults = new Map();  // itemId -> { modality, ensembles: { ensembleId: { score, label, displayLabel } } }
+let processedImages = new Set(); // Set of img elements already processed
+let activeJobIds = new Set();    // Legacy job ID tracking
+let itemResults = new Map();     // itemId -> { modality, ensembles: { ensembleId: { score, label, displayLabel } } }
 let lastEnsembleSignature = null;
 let lastEnsembleStyleSignature = null;
 let ensembleByIdCache = null;
@@ -58,32 +60,42 @@ let hoverPointerHandler = null;
 let aiDetectedImageCount = 0;
 let lastContextMenuState = null;
 const JOB_TRACKING_MS = 5 * 60 * 1000;
-const CHUNK_SEND_CONCURRENCY = 2;
 
 /**
- * OBSERVERS - Monitor page for dynamic content
+ * OBSERVERS - Monitor page for dynamic content & viewport visibility
  */
 let mutationObserver = null;     // Watches for new page updates
-let intersectionObserver = null; // Watches for images entering viewport
-let pendingClassification = [];   // Queue of images waiting to be classified
-let pendingTextSections = [];    // Queue of text sections waiting to be classified
-let classificationTimeout = null; // Debounce timer for batching classifications
+let intersectionObserver = null; // Watches for images entering viewport (lazy load + P0 priority boost)
+let pendingClassification = [];   // Legacy queue
+let pendingTextSections = [];    // Legacy queue
+let classificationTimeout = null;
 let scanIntervalId = null;       // Periodic scan interval
-let classificationInFlight = false; // Prevent overlapping classification requests
-let seenImageUrls = new Set();   // Image URLs already queued or classified (by URL, not element)
+let seenImageUrls = new Set();   // Image URLs already queued or classified
 let pendingMutations = [];       // Batched MutationObserver records
 let mutationFlushTimer = null;   // Debounce timer for mutation processing
-const MUTATION_FLUSH_MS = 300;
+const MUTATION_FLUSH_MS = 120;
 const MAX_ITEM_RESULTS = 3000;
 const PERIODIC_SCAN_MS = 30000;
 
-/**
- * ID SYSTEM - Uses content-based IDs that persist across page reloads
- * Images: Use their URL as the ID
- * Text: Use first 500 characters as the ID
- * The native host will remember classifications, browser just re-discovers content
- */
-let processedTextElements = new Set(); // Set of text elements already added to cachedTextSections
+let processedTextElements = new Set();
+
+function isElementInViewport(el) {
+  if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+  try {
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1280;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+    const margin = 200; // Include items just about to scroll into view
+    return (
+      rect.bottom >= -margin &&
+      rect.right >= -margin &&
+      rect.top <= vh + margin &&
+      rect.left <= vw + margin
+    );
+  } catch (_) {
+    return true;
+  }
+}
 
 function getEnsembleConfigs() {
   if (!Array.isArray(settings.ensembles) || settings.ensembles.length === 0) {
@@ -103,6 +115,26 @@ function getEnsemblesByModality() {
   return byModality;
 }
 
+function buildModelConfig() {
+  const ensemblesByModality = getEnsemblesByModality();
+  return {
+    ensemblesByModality: {
+      image: (ensemblesByModality.image || []).map((ens) => ({
+        id: ens.id,
+        classifiers: ens.classifiers || [],
+        weights: ens.weights || null
+      })),
+      text: (ensemblesByModality.text || []).map((ens) => ({
+        id: ens.id,
+        classifiers: ens.classifiers || [],
+        weights: ens.weights || null
+      }))
+    },
+    lazyLoad: settings.lazyLoad,
+    streamResults: true
+  };
+}
+
 function computeEnsembleSignature(ensembles, includeStyles) {
   if (!Array.isArray(ensembles)) return '';
   const normalized = ensembles.map((ens) => {
@@ -111,8 +143,6 @@ function computeEnsembleSignature(ensembles, includeStyles) {
       modality: ens.modality || '',
       enabled: ens.enabled !== false,
       classifiers: Array.isArray(ens.classifiers) ? [...ens.classifiers].sort() : [],
-      // weights are considered a visual-level setting and are included
-      // only when `includeStyles` is true below
     };
     if (includeStyles) {
       base.weights = Array.isArray(ens.weights) ? [...ens.weights] : null;
@@ -195,7 +225,6 @@ function releaseElementTracking(el) {
     } else if (tracked === el) {
       elementMap.delete(itemId);
     }
-    // Keep itemResults so styles can be re-applied if the element re-enters the DOM
   }
 
   if (el.tagName?.toLowerCase() === 'img') {
@@ -223,9 +252,7 @@ function cleanupRemovedSubtree(node) {
   try {
     node.querySelectorAll('img').forEach((img) => releaseElementTracking(img));
     node.querySelectorAll(TU.TEXT_SELECTORS).forEach((el) => releaseElementTracking(el));
-  } catch (_) {
-    // querySelectorAll may fail on some elements
-  }
+  } catch (_) {}
 }
 
 function pruneItemResults() {
@@ -337,60 +364,141 @@ function attachGlobalHoverHandler() {
   document.addEventListener('pointermove', hoverPointerHandler, true);
 }
 
+// ============================================================================
+// Single-Item Real-Time Streaming Dispatch
+// ============================================================================
+
+// Extract image as compact base64 from DOM; returns null if tainted by cross-origin CORS
+function imageToBase64(imgElement) {
+  try {
+    let w = imgElement.naturalWidth || imgElement.width || 0;
+    let h = imgElement.naturalHeight || imgElement.height || 0;
+    if (w < 48 || h < 48) return null;
+
+    const MAX_DIM = 768;
+    if (w > MAX_DIM || h > MAX_DIM) {
+      if (w >= h) {
+        h = Math.round((h * MAX_DIM) / w);
+        w = MAX_DIM;
+      } else {
+        w = Math.round((w * MAX_DIM) / h);
+        h = MAX_DIM;
+      }
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, w);
+    canvas.height = Math.max(1, h);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgElement, 0, 0, w, h);
+
+    const quality = typeof settings.imageCaptureQuality === 'number'
+      ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality))
+      : 0.90;
+    return canvas.toDataURL('image/jpeg', quality);
+  } catch (_) {
+    // Tainted cross-origin canvas: background.js will capture & downscale via extension `<all_urls>` privileges
+    return null;
+  }
+}
+
+function dispatchSingleImageItem(imgObj, modelConfig) {
+  if (!imgObj || !imgObj.element) return;
+  const itemId = imgObj.src || ('img-unknown-' + Math.random());
+  trackElement(itemId, imgObj.element);
+
+  const inViewport = Boolean(imgObj.inViewport ?? isElementInViewport(imgObj.element));
+
+  // If offscreen, keep observing so IntersectionObserver can boost its priority to P0 if user scrolls to it!
+  if (!inViewport) {
+    observeImage(imgObj.element);
+  }
+
+  const base64Data = imageToBase64(imgObj.element);
+  const quality = typeof settings.imageCaptureQuality === 'number'
+    ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality))
+    : 0.90;
+
+  if (settings.verboseLogs) {
+    console.log(
+      `[AI Detector] Streaming image (${inViewport ? 'P0 viewport' : 'P1 offscreen'}, ${base64Data ? 'canvas-b64' : 'bg-cors-fetch'}):`,
+      itemId.substring(0, 80)
+    );
+  }
+
+  ext.runtime.sendMessage({
+    type: 'CLASSIFY_SINGLE_ITEM',
+    pageId: currentPageId,
+    itemId,
+    modality: 'image',
+    inViewport,
+    data: base64Data,
+    src: imgObj.src,
+    captureQuality: quality,
+    width: imgObj.width || null,
+    height: imgObj.height || null,
+    model: modelConfig
+  }).catch((err) => {
+    if (settings.verboseLogs) {
+      console.warn('[AI Detector] Failed to send single image item:', err);
+    }
+  });
+}
+
+function dispatchSingleTextItem(section, modelConfig) {
+  if (!section || !section.text) return;
+  const itemId = section.text.substring(0, 500);
+  trackElement(itemId, section.element);
+
+  const inViewport = isElementInViewport(section.element);
+
+  ext.runtime.sendMessage({
+    type: 'CLASSIFY_SINGLE_ITEM',
+    pageId: currentPageId,
+    itemId,
+    modality: 'text',
+    inViewport,
+    data: section.text,
+    text: section.text,
+    length: section.text.length,
+    context: section.selector || section.tag,
+    model: modelConfig
+  }).catch((err) => {
+    if (settings.verboseLogs) {
+      console.warn('[AI Detector] Failed to send single text item:', err);
+    }
+  });
+}
+
 function scheduleClassification(images) {
   /**
-   * Queue new images for debounced classification
+   * Immediately streams discovered images individually to the Native Host,
+   * sending in-viewport (P0) images first followed by offscreen (P1) images.
    */
-  if (!settings.enabled) return;
-  if (!images || !images.length) return;
-  images.forEach(img => pendingClassification.push(img));
-  triggerDebouncedClassification();
+  if (!settings.enabled || !images || !images.length) return;
+  const modelConfig = buildModelConfig();
+
+  // Annotate viewport status and sort so in-viewport items are dispatched first
+  images.forEach((img) => {
+    img.inViewport = isElementInViewport(img.element);
+  });
+  const sorted = images.slice().sort((a, b) => (b.inViewport ? 1 : 0) - (a.inViewport ? 1 : 0));
+
+  sorted.forEach((img) => {
+    dispatchSingleImageItem(img, modelConfig);
+  });
 }
 
 function scheduleTextClassification(textSections) {
   /**
-   * Queue new text sections for debounced classification
+   * Immediately streams discovered text sections individually to the Native Host.
    */
-  if (!settings.enabled) return;
-  if (!textSections || !textSections.length) return;
-  textSections.forEach(text => pendingTextSections.push(text));
-  triggerDebouncedClassification();
-}
+  if (!settings.enabled || !textSections || !textSections.length) return;
+  const modelConfig = buildModelConfig();
 
-function triggerDebouncedClassification() {
-  /**
-   * Batches and detected content and sends them for classification
-   */
-  if (!settings.enabled) return;
-  
-  // Clear existing timeout
-  if (classificationTimeout) clearTimeout(classificationTimeout);
-  
-  // Debounce: wait for configured delay to batch mutations/loads
-  classificationTimeout = setTimeout(() => {
-    if (pendingClassification.length === 0 && pendingTextSections.length === 0) return;
-    
-    if (pendingClassification.length > 0) {
-      console.log(`[AI Detector] Scanning ${pendingClassification.length} new image(s)`);
-    }
-    if (pendingTextSections.length > 0) {
-      console.log(`[AI Detector] Scanning ${pendingTextSections.length} new text section(s)`);
-    }
-    
-    // Add pending images to cache
-    pendingClassification.forEach(img => {
-      cachedImages.push(img);
-    });
-    
-    // Add pending text sections to cache
-    pendingTextSections.forEach(text => {
-      cachedTextSections.push(text);
-    });
-    
-    pendingClassification = [];
-    pendingTextSections = [];
-    requestClassification();
-  }, settings.classificationDelay);
+  textSections.forEach((section) => {
+    dispatchSingleTextItem(section, modelConfig);
+  });
 }
 
 function processMutationBatch(mutations) {
@@ -452,9 +560,7 @@ function processMutationBatch(mutations) {
             if (text) newText.push(text);
           });
         }
-      } catch (_) {
-        // querySelectorAll may fail on some elements
-      }
+      } catch (_) {}
     });
   });
 
@@ -497,28 +603,49 @@ function initMutationObserver() {
   });
 }
 
-// Detect lazy-loaded images entering viewport using IntersectionObserver
+// Detect lazy-loaded images entering viewport AND boost already-queued offscreen images to P0
 function initIntersectionObserver() {
   if (intersectionObserver) return;
 
   intersectionObserver = new IntersectionObserver((entries) => {
     const newImages = [];
+    const boostItemIds = [];
 
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return;
       const el = entry.target;
       if (el.tagName && el.tagName.toLowerCase() === 'img') {
+        // Case 1: Image was already queued offscreen (P1) and just scrolled into view -> boost to P0!
+        if (processedImages.has(el)) {
+          const trackedId = elementToItemId.get(el) || el.src;
+          if (trackedId && !itemResults.has(trackedId)) {
+            boostItemIds.push(trackedId);
+          }
+          unobserveImage(el);
+          return;
+        }
+
+        // Case 2: Lazy-loaded image now has dimensions in viewport -> process & dispatch as P0
         if (el.naturalWidth > 0 && el.naturalHeight > 0) {
           const img = processImageElement(el);
           if (img) {
+            img.inViewport = true;
             newImages.push(img);
             if (settings.verboseLogs) {
-              console.log(`[AI Detector] IntersectionObserver: Image entered viewport and is loaded:`, el.src.substring(0, 80));
+              console.log(`[AI Detector] IntersectionObserver: Lazy image entered viewport:`, el.src.substring(0, 80));
             }
           }
         }
       }
     });
+
+    if (boostItemIds.length > 0) {
+      ext.runtime.sendMessage({
+        type: 'BOOST_ITEMS',
+        pageId: currentPageId,
+        itemIds: boostItemIds
+      }).catch(() => {});
+    }
 
     if (newImages.length > 0) {
       scheduleClassification(newImages);
@@ -528,54 +655,34 @@ function initIntersectionObserver() {
   });
 }
 
-// Process and extract text from a text element if not already seen
 function processTextElement(el) {
   if (!el || !(el instanceof Element)) return null;
-  
-  // Skip if already processed
   if (processedTextElements.has(el)) return null;
-  
-  const text = TU.normalizeElementText(el);
-  
-  // Skip if too short
-  if (!text || text.length < settings.minTextLength) return null;
-  
-  // Skip if we've already seen this exact text
-  if (seenTextContent.has(text)) return null;
-  for (let section of cachedTextSections) {
-    if (section.text === text) return null;
-  }
-  for (let section of pendingTextSections) {
-    if (section.text === text) return null;
-  }
 
+  const text = TU.normalizeElementText(el);
+  if (!text || text.length < settings.minTextLength) return null;
+
+  if (seenTextContent.has(text)) return null;
   seenTextContent.add(text);
-  
-  // Mark as processed
   processedTextElements.add(el);
-  
+
   const textPreview = text.substring(0, 500);
   if (itemResults.has(textPreview)) {
     trackElement(textPreview, el);
     applyStylesForItem(textPreview);
     return null;
   }
-  
-  return TU.buildTextSection(el, cachedTextSections.length + pendingTextSections.length, text);
+
+  return TU.buildTextSection(el, seenTextContent.size, text);
 }
 
-// Return the desired properties of an image element if it hasn't been seen before
 function processImageElement(el, isLazy = false) {
   if (!el || el.tagName.toLowerCase() !== 'img') return null;
-  
-  // Skip if already processed
   if (processedImages.has(el)) return null;
-  
-  // Skip if no src or src is invalid
+
   const src = el.src || el.getAttribute('src');
   if (!src) return null;
 
-  // Check if image has loaded
   const nw = el.naturalWidth || 0;
   const nh = el.naturalHeight || 0;
   if (nw === 0 || nh === 0) {
@@ -595,41 +702,34 @@ function processImageElement(el, isLazy = false) {
     return null;
   }
 
-  // Skip tiny/placeholder images and UI icons.
   const displayW = el.clientWidth || el.width || 0;
   const displayH = el.clientHeight || el.height || 0;
   const effectiveW = Math.max(nw, displayW);
   const effectiveH = Math.max(nh, displayH);
   const minDim = Number(settings.minImageDimension || 64);
-  // Skip if either dimension is below minimum (catches 1x1 tracking pixels)
   if (effectiveW < minDim || effectiveH < minDim) {
     return null;
   }
-  
-  // Check alt-text filter with exceptions
+
   if (settings.altTextOnly) {
     const alt = el.alt || el.getAttribute('alt') || '';
-    
-    // Bypass alt-text requirement for:
-    // - YouTube thumbnails: i.ytimg.com/vi/VIDEO_ID/...
-    // - Google Images: encrypted-tbn*.gstatic.com (Google's thumbnail CDN)
-    const isExemptAltTextRule = 
-      src.includes('i.ytimg.com/vi/') || 
+    const isExemptAltTextRule =
+      src.includes('i.ytimg.com/vi/') ||
       src.includes('i.ytimg.com/vi_webp/') ||
       src.includes('encrypted-tbn') ||
       src.includes('gstatic.com');
-    
+
     if (!isExemptAltTextRule && (!alt || !alt.trim().length)) {
       return null;
     }
   }
-  
+
   processedImages.add(el);
   unobserveImage(el);
 
   if (seenImageUrls.has(src)) {
+    trackElement(src, el);
     if (itemResults.has(src)) {
-      trackElement(src, el);
       applyStylesForItem(src);
     }
     return null;
@@ -641,277 +741,34 @@ function processImageElement(el, isLazy = false) {
     applyStylesForItem(src);
     return null;
   }
-  
-  if (settings.verboseLogs) {
-    console.log(`[AI Detector] Processing image (${nw}x${nh}):`, src.substring(0, 80));
-  }
 
   seenImageUrls.add(src);
-  
-  const img = {
-    src: src,
+
+  return {
+    src,
     alt: el.alt || '',
     width: el.naturalWidth || el.width || null,
     height: el.naturalHeight || el.height || null,
     element: el,
-    lazy: isLazy
+    lazy: isLazy,
+    inViewport: isElementInViewport(el)
   };
-
-  return img;
 }
 
-// Scan all current images for new ones (periodic scan + initial)
 function scanAllImages() {
   const images = Array.from(document.querySelectorAll('img'));
   const newImages = [];
-  
+
   images.forEach((el) => {
     const img = processImageElement(el);
     if (img) newImages.push(img);
   });
-  
+
   if (settings.verboseLogs && newImages.length > 0) {
-    console.log(`[AI Detector] scanAllImages found ${newImages.length} new images (total on page: ${images.length}, already processed: ${processedImages.size})`);
+    console.log(`[AI Detector] scanAllImages found ${newImages.length} new images (total on page: ${images.length})`);
   }
-  
+
   return newImages;
-}
-
-// Extract image as compact base64 from DOM (strictly budgeted to protect Firefox native messaging limit)
-function imageToBase64(imgElement) {
-  try {
-    let w = imgElement.naturalWidth || imgElement.width || 0;
-    let h = imgElement.naturalHeight || imgElement.height || 0;
-    if (w < 48 || h < 48) return null;
-
-    // Constrain dimensions to at most 768px (model analyzes 256x256 crops; 768 preserves full detail without blowing up memory)
-    const MAX_DIM = 768;
-    if (w > MAX_DIM || h > MAX_DIM) {
-      if (w >= h) {
-        h = Math.round((h * MAX_DIM) / w);
-        w = MAX_DIM;
-      } else {
-        w = Math.round((w * MAX_DIM) / h);
-        h = MAX_DIM;
-      }
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, w);
-    canvas.height = Math.max(1, h);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(imgElement, 0, 0, w, h);
-
-    // High quality JPEG (0.90) keeps size ~60-120KB per image, perfectly safe for Native Messaging
-    const quality = typeof settings.imageCaptureQuality === 'number' ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality)) : 0.90;
-    const base64 = canvas.toDataURL('image/jpeg', quality);
-    return base64;
-  } catch (e) {
-    // CORS or canvas error - falls back to direct URL fetch by native host
-    return null;
-  }
-}
-
-// Build classification batches - strictly limits chunk sizes to stay well below Firefox 1MB native messaging limit
-function buildClassificationBatches(images = cachedImages, textSections = cachedTextSections) {
-  const batches = [];
-  const MAX_MESSAGE_SIZE = 450000;   // 450KB target per chunk (Firefox hard crash limit is 1MB)
-  const MAX_ITEM_SIZE = 280000;      // 280KB max per single item base64
-  const MAX_ITEMS_PER_CHUNK = 16;    // Keep chunks compact so streaming starts immediately
-  let currentBatch = [];
-  let currentSize = 1000;
-
-  images.forEach((img) => {
-    const itemId = img.src || 'img-unknown-' + Math.random();
-    trackElement(itemId, img.element);
-
-    let imageData = null;
-    let itemSize = 500;
-
-    try {
-      imageData = imageToBase64(img.element);
-      // If base64 is too massive, discard base64 and let native host fetch HTTP directly
-      if (imageData && imageData.length > MAX_ITEM_SIZE) {
-        if (itemId.startsWith('http://') || itemId.startsWith('https://')) {
-          imageData = null; // Send lightweight URL
-        }
-      }
-      if (imageData) {
-        itemSize += imageData.length;
-      }
-    } catch (e) {
-      imageData = null;
-    }
-
-    // If adding item would exceed chunk limit, commit current batch
-    if ((currentSize + itemSize > MAX_MESSAGE_SIZE || currentBatch.length >= MAX_ITEMS_PER_CHUNK) && currentBatch.length > 0) {
-      batches.push(currentBatch);
-      currentBatch = [];
-      currentSize = 1000;
-    }
-
-    // Safety guard: if even by itself this single item exceeds MAX_MESSAGE_SIZE, fallback to URL
-    let safeUrl = imageData || img.src || null;
-    if (safeUrl && safeUrl.length > MAX_MESSAGE_SIZE) {
-      safeUrl = img.src || null;
-      itemSize = 500;
-    }
-
-    const item = {
-      id: itemId,
-      modality: 'image',
-      source: 'img',
-      url: safeUrl,
-      data: null,
-      mime: (safeUrl && safeUrl.startsWith('data:image/')) ? 'image/jpeg' : null,
-      width: img.width || null,
-      height: img.height || null
-    };
-
-    if (settings.verboseLogs) {
-      const isBase64 = Boolean(safeUrl && safeUrl.startsWith('data:'));
-      console.log(`[AI Detector] Batching ${isBase64 ? "base64" : "URL"}:`, itemId.substring(0, 80));
-    }
-
-    currentBatch.push(item);
-    currentSize += itemSize;
-  });
-
-  // Add text sections to FIRST batch only (they're small)
-  textSections.forEach((section) => {
-    // Use first 500 characters of text as the ID (persistent across page reloads)
-    const textPreview = section.text.substring(0, 500);
-    const itemId = textPreview;
-    
-    // Update elementMap to track this element
-    trackElement(itemId, section.element);
-    
-    currentBatch.push({
-      id: itemId,
-      modality: 'text',
-      text: section.text,
-      length: section.text.length,
-      context: section.selector || section.tag
-    });
-  });
-
-  if (currentBatch.length > 0) {
-    batches.push(currentBatch);
-  }
-  
-  if (settings.verboseLogs) {
-    if (batches.length > 1) {
-      console.log(`[AI Detector] Split into ${batches.length} batches (${batches.map(b => Math.round(JSON.stringify(b).length / 1024) + 'KB').join(', ')})`);
-    } else {
-      console.log(`[AI Detector] Message size: ~${Math.round(currentSize / 1024)}KB`);
-    }
-  }
-  
-  return batches;
-}
-
-// Send items to the background script for native classification
-async function sendClassificationChunks(jobId, batches, modelConfig) {
-  let nextIndex = 0;
-
-  async function sendOne() {
-    while (nextIndex < batches.length) {
-      const idx = nextIndex++;
-      await ext.runtime.sendMessage({
-        type: 'CLASSIFY_JOB_CHUNK',
-        jobId,
-        chunkIndex: idx,
-        totalChunks: batches.length,
-        items: batches[idx],
-        model: modelConfig
-      });
-    }
-  }
-
-  const workers = Math.min(CHUNK_SEND_CONCURRENCY, batches.length);
-  await Promise.all(Array.from({ length: workers }, () => sendOne()));
-}
-
-function trackActiveJob(jobId) {
-  activeJobIds.add(jobId);
-  if (activeJobTimeouts.has(jobId)) {
-    clearTimeout(activeJobTimeouts.get(jobId));
-  }
-  activeJobTimeouts.set(jobId, setTimeout(() => {
-    activeJobIds.delete(jobId);
-    activeJobTimeouts.delete(jobId);
-    if (settings.verboseLogs) {
-      console.warn(`[AI Detector] Job ${jobId} tracking expired before completion`);
-    }
-  }, JOB_TRACKING_MS));
-}
-
-function completeActiveJob(jobId) {
-  activeJobIds.delete(jobId);
-  if (activeJobTimeouts.has(jobId)) {
-    clearTimeout(activeJobTimeouts.get(jobId));
-    activeJobTimeouts.delete(jobId);
-  }
-}
-
-async function requestClassification() {
-  if (classificationInFlight) return;
-
-  const imagesToSend = cachedImages.slice();
-  const textToSend = cachedTextSections.slice();
-
-  // Build batches that respect message size limits from cached images/text
-  const batches = buildClassificationBatches(imagesToSend, textToSend);
-  if (!batches || !batches.length) return;
-
-  // Clear caches now; new items will accumulate separately while request is in-flight
-  cachedImages = [];
-  cachedTextSections = [];
-  classificationInFlight = true;
-
-  try {
-    const jobId = `job-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    trackActiveJob(jobId);
-
-    const t0 = performance.now();
-    if (settings.verboseLogs) console.log(`[AI Detector] Sending classification job ${jobId} with lazyLoad=${settings.lazyLoad}`);
-
-    const ensemblesByModality = getEnsemblesByModality();
-    const modelConfig = {
-      ensemblesByModality: {
-        image: (ensemblesByModality.image || []).map((ens) => ({
-          id: ens.id,
-          classifiers: ens.classifiers || [],
-          weights: ens.weights || null
-        })),
-        text: (ensemblesByModality.text || []).map((ens) => ({
-          id: ens.id,
-          classifiers: ens.classifiers || [],
-          weights: ens.weights || null
-        }))
-      },
-      lazyLoad: settings.lazyLoad,
-      miniBatchSize: settings.miniBatchSize || 1000,
-      streamResults: true
-    };
-
-    await sendClassificationChunks(jobId, batches, modelConfig);
-
-    const totalMs = Math.round(performance.now() - t0);
-    const totalSecs = (totalMs / 1000).toFixed(2);
-    console.log(`[AI Detector] Sent ${batches.length} chunk(s) for job ${jobId} in %c${totalSecs}s%c`, 'font-weight: bold', '');
-  } catch (err) {
-    console.warn('[AI Detector] Classification request error:', err);
-    // Re-queue items on failure so they aren't lost
-    cachedImages = imagesToSend.concat(cachedImages);
-    cachedTextSections = textToSend.concat(cachedTextSections);
-  } finally {
-    classificationInFlight = false;
-    // If new items arrived while we were in-flight, send them now
-    if (cachedImages.length > 0 || cachedTextSections.length > 0) {
-      requestClassification();
-    }
-  }
 }
 
 function getEnsembleDisplayLabel(ensembleCfg) {
@@ -988,28 +845,24 @@ async function updateClassifierTimings(results) {
     const res = await storageArea.get(['classifierTimings']);
     const timings = (res && res.classifierTimings) ? res.classifierTimings : {};
 
-    // Collect samples per classifier
     const samples = new Map();
     results.forEach((result) => {
       if (!result) return;
       const duration = typeof result.durationMs === 'number' ? result.durationMs : (result.duration || null);
       if (!Number.isFinite(duration) || duration <= 0) return;
 
-      // If classifiers map exists, use its keys; else, attempt to attribute from ensembleId
       const clsMap = result.classifiers && typeof result.classifiers === 'object' ? Object.keys(result.classifiers) : [];
       if (clsMap.length === 1) {
         const id = clsMap[0];
         if (!samples.has(id)) samples.set(id, []);
         samples.get(id).push(duration);
       } else if (clsMap.length > 1) {
-        // split evenly across participating classifiers
         const per = duration / clsMap.length;
         clsMap.forEach((id) => {
           if (!samples.has(id)) samples.set(id, []);
           samples.get(id).push(per);
         });
       } else {
-        // No classifiers map (legacy/ensemble-level only). Try to use ensembleId when single-classifier in config
         const ensembleId = result.ensembleId || (result.ensemble || null);
         if (ensembleId) {
           const cfg = getEnsembleById(ensembleId);
@@ -1022,23 +875,16 @@ async function updateClassifierTimings(results) {
       }
     });
 
-    // Merge samples into timings with simple running average and outlier filtering
     samples.forEach((vals, classifierId) => {
       if (!vals || !vals.length) return;
       for (const sample of vals) {
         const prev = timings[classifierId] || { avgMs: 0, count: 0, lastMs: 0, updatedAt: 0 };
-
-        // If we have history, treat very large samples as load-time outliers and skip them
         if (prev.count > 0 && sample > (prev.avgMs * 5 + 1e-6)) {
-          // skip this sample assuming it includes model load
           continue;
         }
-
-        // If no history and sample is extremely large (>10s), assume it's a load and skip
         if (prev.count === 0 && sample > 10000) {
           continue;
         }
-
         const newCount = prev.count + 1;
         const newAvg = prev.count === 0 ? sample : ((prev.avgMs * prev.count + sample) / newCount);
         timings[classifierId] = {
@@ -1080,7 +926,6 @@ function applyStylesForItem(itemId) {
   if (!entry) return;
   const elements = getElementsForItem(itemId).filter((el) => el && el.isConnected);
   if (!elements.length) {
-    // Fallback: if DOM element was recreated with same src on a dynamic page, re-link it
     if (entry.modality === 'image') {
       const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => img.src === itemId);
       if (liveImgs.length) {
@@ -1089,9 +934,6 @@ function applyStylesForItem(itemId) {
       }
     }
     if (!elements.length) {
-      if (settings.verboseLogs) {
-        console.log(`[AI Detector] Element ${itemId} no longer in DOM, skipping style application`);
-      }
       return;
     }
   }
@@ -1105,11 +947,9 @@ function applyStylesForItem(itemId) {
     if (cfg.modality !== modality) return;
     const threshold = typeof cfg.threshold === 'number' ? cfg.threshold : 0.5;
     if (data.score >= threshold) {
-      // For single-classifier ensembles, prefer the classifier's label; otherwise use ensemble name
       let displayLabel = 'AI generated';
       const isSingleClassifier = Array.isArray(cfg.classifiers) && cfg.classifiers.length === 1;
       if (isSingleClassifier) {
-        // Get label from the classifier's detail object
         const classifierId = cfg.classifiers[0];
         const classifierDetail = data.classifiers && data.classifiers[classifierId];
         displayLabel = (classifierDetail && classifierDetail.label) || getEnsembleDisplayLabel(cfg) || 'AI generated';
@@ -1163,9 +1003,6 @@ function applyResultChunk(response) {
     response.errors.filter((e) => e.type === 'info').forEach((log) => console.log(log.message));
   }
 
-  let appliedCount = 0;
-  let skippedCount = 0;
-  
   response.results.forEach((result) => {
     if (!result || !result.id) return;
     const entry = itemResults.get(result.id) || { modality: result.modality, ensembles: {} };
@@ -1180,29 +1017,23 @@ function applyResultChunk(response) {
       classifiers: finalResult.classifiers || {}
     };
     itemResults.set(result.id, entry);
-    
-    // Check if element still exists before applying styles
+
+    // Unobserve once classified
+    getElementsForItem(result.id).forEach((el) => unobserveImage(el));
+
     const elements = getElementsForItem(result.id);
     if (elements.some((el) => el && el.isConnected) || result.modality === 'image') {
       applyStylesForItem(result.id);
-      appliedCount++;
-    } else {
-      skippedCount++;
     }
   });
-  // Update classifier timing stats (async - don't block rendering)
+
   try {
     queueClassifierTimings(response.results);
   } catch (e) {
     if (settings.verboseLogs) console.warn('[AI Detector] queueClassifierTimings failed to start', e);
   }
-  
-  if (settings.verboseLogs && skippedCount > 0) {
-    console.log(`[AI Detector] Applied ${appliedCount} results, skipped ${skippedCount} (elements no longer in DOM)`);
-  }
 }
 
-// Extract long text sections from the page (>=250 chars)
 function extractLongText() {
   try {
     const nodes = Array.from(document.querySelectorAll(TU.TEXT_SELECTORS));
@@ -1225,7 +1056,6 @@ function extractLongText() {
   }
 }
 
-// Load settings from browser storage
 async function loadSettings() {
   try {
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
@@ -1233,7 +1063,7 @@ async function loadSettings() {
       console.warn('[Extension] Storage API not available');
       return;
     }
-    
+
     const res = await storageArea.get([
       'enabled',
       'altTextOnly',
@@ -1253,7 +1083,7 @@ async function loadSettings() {
       'minImageDimension',
       'ensembleConfigsV2'
     ]);
-    
+
     if (res && typeof res.enabled === 'boolean') settings.enabled = res.enabled;
     if (res && typeof res.altTextOnly === 'boolean') settings.altTextOnly = res.altTextOnly;
     if (res && typeof res.blurAmount === 'number') settings.blurAmount = res.blurAmount;
@@ -1277,19 +1107,32 @@ async function loadSettings() {
   }
 }
 
-// Auto-extract data when page loads
+// Drop pending items for this page context when the user navigates away or closes the tab
+function bindPageLifecycleCleanup() {
+  if (window.__aiDetectorPageHideBound) return;
+  window.__aiDetectorPageHideBound = true;
+  window.addEventListener('pagehide', () => {
+    try {
+      ext.runtime.sendMessage({
+        type: 'DROP_PAGE_CONTEXT',
+        pageId: currentPageId
+      }).catch(() => {});
+    } catch (_) {}
+  });
+}
+
 function initAutoExtract() {
-  // Wait for DOM to be fully loaded
+  bindPageLifecycleCleanup();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', async () => {
       await loadSettings();
-      performInitialExtraction();
       startDynamicDetection();
+      performInitialExtraction();
     });
   } else {
     loadSettings().then(() => {
-      performInitialExtraction();
       startDynamicDetection();
+      performInitialExtraction();
     });
   }
 }
@@ -1333,16 +1176,13 @@ function performInitialExtraction() {
     console.log('[AI Detector] Disabled in options; skipping scan');
     return;
   }
-  // Scan all images on page load
   const initialImages = scanAllImages();
   const initialTextSections = extractLongText();
 
-  // Only log if content was found
   if (initialImages.length > 0 || initialTextSections.length > 0) {
-    console.log(`[AI Detector] Scanning ${initialImages.length} images, ${initialTextSections.length} text sections`);
+    console.log(`[AI Detector] Streaming ${initialImages.length} images, ${initialTextSections.length} text sections individually`);
   }
 
-  // Debounce initial classification to allow late-arriving items to join the first batch
   if (initialImages.length > 0) {
     scheduleClassification(initialImages);
   }
@@ -1351,10 +1191,9 @@ function performInitialExtraction() {
   }
 }
 
-// Initialize
 initAutoExtract();
 
-// Onboarding Web-to-Extension Bridge (allows the GitHub Pages /docs onboarding app to communicate with the extension)
+// Onboarding Web-to-Extension Bridge
 const ALLOWED_ONBOARDING_ACTIONS = new Set([
   'PING',
   'CHECK_NATIVE_HOST',
@@ -1411,7 +1250,6 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// Track last right-clicked element for context menu
 let lastContextMenuTarget = null;
 
 function getTextLabelFromElement(element, fallback = 'AI text') {
@@ -1456,35 +1294,29 @@ function sendContextMenuUpdate(payload) {
   }).catch(() => {});
 }
 
-// Update context menu title when user right-clicks on an image or text
 document.addEventListener('contextmenu', (evt) => {
   lastContextMenuTarget = evt.target;
-  
-  // Check if it's an image
+
   if (evt.target && evt.target.tagName && evt.target.tagName.toLowerCase() === 'img') {
     const hasVisibleAiStyling = evt.target.classList.contains('ai-detected');
     let label = 'tag';
-    
+
     if (hasVisibleAiStyling) {
       label = VE.getImageBadgeLabel(evt.target, 'tag');
     }
-    
+
     sendContextMenuUpdate({
       hasAiTags: hasVisibleAiStyling,
       label: label,
       modality: 'image'
     });
-  }
-  // Check if it's text with ai-detected-text class
-  else if (evt.target && evt.target.classList && evt.target.classList.contains('ai-detected-text')) {
+  } else if (evt.target && evt.target.classList && evt.target.classList.contains('ai-detected-text')) {
     sendContextMenuUpdate({
       hasAiTags: true,
       label: getTextLabelFromElement(evt.target),
       modality: 'text'
     });
-  }
-  // Check if right-clicking on normal text (for adding blur)
-  else if (evt.target && evt.target.tagName) {
+  } else if (evt.target && evt.target.tagName) {
     const tag = evt.target.tagName.toLowerCase();
     if (TU.isTextTagName(tag)) {
       sendContextMenuUpdate({
@@ -1510,9 +1342,19 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
       return false;
     }
 
+    // Immediate single-item classification result from Native Host
+    if (message.type === 'CLASSIFY_ITEM_RESULT') {
+      const payload = message.payload;
+      if (payload && payload.pageId && payload.pageId !== currentPageId) {
+        return false;
+      }
+      applyResultChunk(payload);
+      return false;
+    }
+
     if (message.type === 'CLASSIFY_RESULT_CHUNK') {
       const payload = message.payload;
-      if (payload && payload.jobId && !activeJobIds.has(payload.jobId)) {
+      if (payload && payload.jobId && activeJobIds.size > 0 && !activeJobIds.has(payload.jobId)) {
         return false;
       }
       applyResultChunk(payload);
@@ -1521,7 +1363,13 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 
     if (message.type === 'CLASSIFY_JOB_COMPLETE') {
       const payload = message.payload;
-      if (payload && payload.jobId) completeActiveJob(payload.jobId);
+      if (payload && payload.jobId) {
+        activeJobIds.delete(payload.jobId);
+        if (activeJobTimeouts.has(payload.jobId)) {
+          clearTimeout(activeJobTimeouts.get(payload.jobId));
+          activeJobTimeouts.delete(payload.jobId);
+        }
+      }
       return false;
     }
 
@@ -1531,44 +1379,34 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
     }
 
     if (message.type === 'CANCEL_ALL_CLASSIFICATIONS') {
-      // Cancel all in-flight classifications (both browser-side and native host-side)
-      const jobCount = activeJobIds.size;
       activeJobIds.clear();
-      classificationInFlight = false;
       pendingClassification = [];
       pendingTextSections = [];
       if (classificationTimeout) {
         clearTimeout(classificationTimeout);
         classificationTimeout = null;
       }
-      
-      // Send cancel request to background script to cancel native host jobs
+
       ext.runtime.sendMessage({
         type: 'CANCEL_ALL'
       }).catch(() => {});
-      
-      console.log('[AI Detector] All classifications cancelled ('+jobCount+' jobs)');
+
+      console.log('[AI Detector] All classifications cancelled');
       return Promise.resolve({ success: true });
     }
 
     if (message.type === 'TOGGLE_BLUR') {
       const srcUrl = message.srcUrl;
-      const selectionText = message.selectionText;
-      
-      // Handle image toggle
+
       if (srcUrl) {
         const images = Array.from(document.querySelectorAll('img'));
-        const targetImage = images.find(img => img.src === srcUrl);
+        const targetImage = images.find((img) => img.src === srcUrl);
         if (targetImage) {
-          // Use URL as the itemId
           const itemId = targetImage.src;
-          
-          // Check if image has visible AI styling (ai-detected class)
           const hasVisibleAiStyling = targetImage.classList.contains('ai-detected');
-          
+
           if (hasVisibleAiStyling) {
             const badgeLabel = VE.getImageBadgeLabel(targetImage, 'AI');
-            
             if (itemId) {
               itemResults.delete(itemId);
             }
@@ -1580,7 +1418,6 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
             if (currentHoverEl === targetImage) {
               currentHoverEl = null;
             }
-            // Return new state: no AI tags, with the label that was removed
             return Promise.resolve({ hasAiTags: false, label: badgeLabel, modality: 'image' });
           } else {
             applyManualBlurStyles(itemId, targetImage, {
@@ -1609,22 +1446,18 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
           }
         }
       }
-      
-      // Handle text toggle
+
       if (!srcUrl && lastContextMenuTarget) {
         const targetText = lastContextMenuTarget;
         const tag = targetText.tagName ? targetText.tagName.toLowerCase() : '';
-        
-        // Check if it's a valid text element
+
         if (TU.isTextTagName(tag) || targetText.classList.contains('ai-detected-text')) {
           const text = TU.normalizeElementText(targetText);
           const itemId = text.substring(0, 500);
-          
           const hasVisibleAiStyling = targetText.classList.contains('ai-detected-text');
-          
+
           if (hasVisibleAiStyling) {
             const label = getTextLabelFromElement(targetText);
-            
             if (itemId) {
               itemResults.delete(itemId);
             }
@@ -1666,10 +1499,6 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 // ---------------------------------------------------------------------------
 
 function reapplyVisualEffects() {
-  /**
-   * Re-apply visual effects to already-classified elements without re-classifying.
-   * Called when visual settings change (blur, border, color, etc.)
-   */
   itemResults.forEach((_value, itemId) => {
     applyStylesForItem(itemId);
   });
@@ -1729,6 +1558,15 @@ function resetObservers() {
 }
 
 function resetState() {
+  // Drop any queued items on the Native Host for the previous page state before rescanning
+  try {
+    ext.runtime.sendMessage({
+      type: 'DROP_PAGE_CONTEXT',
+      pageId: currentPageId
+    }).catch(() => {});
+  } catch (_) {}
+
+  currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Date.now();
   cachedImages = [];
   cachedTextSections = [];
   elementMap.clear();
@@ -1761,21 +1599,16 @@ async function reloadSettingsAndRescan() {
   if (generation !== rescanGeneration) return;
   resetObservers();
   resetState();
-  performInitialExtraction();
   startDynamicDetection();
+  performInitialExtraction();
 }
 
 if (ext && ext.storage && ext.storage.onChanged) {
   ext.storage.onChanged.addListener((changes) => {
-    // Settings that require re-classification
     const classificationKeys = ['enabled', 'altTextOnly', 'minTextLength'];
-    
-    // Settings that only affect visual appearance (no re-classification needed)
     const visualKeys = ['blurAmount', 'borderMultiplier', 'borderColor', 'textBlurAmount', 'textStrikethroughEnabled', 'imageAiThreshold', 'textAiThreshold'];
-    
-    // Settings that don't affect existing results (logging, debounce, VRAM management)
     const performanceKeys = ['classificationDelay', 'verboseLogs', 'lazyLoad', 'imageCaptureQuality', 'miniBatchSize', 'minImageDimension'];
-    
+
     const ensembleChanged = Object.prototype.hasOwnProperty.call(changes, 'ensembleConfigsV2');
     let handledByEnsemble = false;
 

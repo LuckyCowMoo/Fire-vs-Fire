@@ -807,49 +807,72 @@ h1, h2, h3, strong {
   border-radius: 4px;
 }
 
-.category-tile {
+/* Category Card: Container holding indented tile and attached bottom button */
+.category-card {
   flex: 0 0 auto;
-  min-width: 128px;
-  max-width: 168px;
-  padding: 12px 14px;
-  border: 2px solid var(--tile-color, var(--accent));
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--tile-color, var(--accent)) 18%, transparent),
-    color-mix(in srgb, var(--tile-color, var(--accent)) 30%, transparent)
-  );
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
+  min-width: 134px;
+  max-width: 172px;
+  display: flex;
+  flex-direction: column;
   scroll-snap-align: center;
-  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s, opacity 0.15s;
-  font-family: inherit;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.4, 1), opacity 0.18s;
+  user-select: none;
 }
 
-.category-tile:hover {
+.category-card:hover {
   transform: translateY(-1px);
 }
 
-.category-tile.selected {
-  border-width: 3px;
-  padding: 11px 13px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tile-color, var(--accent)) 55%, transparent);
+.category-card.disabled-cat {
+  opacity: 0.55;
 }
 
-.category-tile.disabled-cat {
-  opacity: 0.55;
+/* Indented Hole in the Canvas (similar to toggled off switch tracks, with a tint of its color) */
+.category-tile {
+  width: 100%;
+  padding: 11px 13px 9px;
+  border-radius: 12px 12px 0 0;
+  background: #0d1117;
+  background: radial-gradient(
+    140% 120% at 50% 0%,
+    color-mix(in srgb, var(--tile-color, var(--accent)) 16%, transparent) 0%,
+    color-mix(in srgb, var(--tile-color, var(--accent)) 5%, #0b0f15) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--tile-color, var(--accent)) 30%, rgba(255, 255, 255, 0.08));
+  border-bottom: 1px solid rgba(0, 0, 0, 0.9);
+  box-shadow: 
+    inset 0 4px 8px rgba(0, 0, 0, 0.9),
+    inset 0 1px 3px rgba(0, 0, 0, 0.75),
+    inset 0 0 14px color-mix(in srgb, var(--tile-color, var(--accent)) 10%, transparent),
+    0 1px 1px rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.category-card.selected .category-tile,
+.category-tile.selected {
+  border-color: color-mix(in srgb, var(--tile-color, var(--accent)) 85%, #ffffff 15%);
+  border-bottom-color: rgba(0, 0, 0, 0.9);
+  box-shadow: 
+    inset 0 4px 9px rgba(0, 0, 0, 0.85),
+    inset 0 0 18px color-mix(in srgb, var(--tile-color, var(--accent)) 26%, transparent),
+    0 0 10px color-mix(in srgb, var(--tile-color, var(--accent)) 32%, transparent),
+    0 1px 2px rgba(255, 255, 255, 0.06);
 }
 
 .tile-name {
   display: block;
   font-size: 13px;
-  font-weight: 400;
-  margin-bottom: 4px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
 }
 
 .tile-status {
@@ -857,8 +880,93 @@ h1, h2, h3, strong {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  opacity: 0.85;
-  font-weight: 300;
+  color: color-mix(in srgb, var(--tile-color, var(--accent)) 85%, #ffffff 15%);
+  font-weight: 500;
+  opacity: 0.92;
+}
+
+/* Attached Button Area Beneath (Hold for 3s to remove) */
+.category-delete-btn {
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  padding: 5px 8px;
+  min-height: 25px;
+  border-radius: 0 0 12px 12px;
+  background: #090c12;
+  border: 1px solid color-mix(in srgb, var(--tile-color, var(--accent)) 30%, rgba(255, 255, 255, 0.08));
+  border-top: none;
+  box-shadow: 
+    inset 0 2px 4px rgba(0, 0, 0, 0.75),
+    0 2px 4px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  font-family: inherit;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.category-card.selected .category-delete-btn {
+  border-color: color-mix(in srgb, var(--tile-color, var(--accent)) 85%, #ffffff 15%);
+  border-top: none;
+  box-shadow: 
+    inset 0 2px 4px rgba(0, 0, 0, 0.75),
+    0 2px 8px color-mix(in srgb, var(--tile-color, var(--accent)) 22%, transparent);
+}
+
+/* Left-to-right filling progress bar */
+.category-delete-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 0%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--tile-color, var(--accent)) 70%, #ff2a2a) 0%,
+    var(--tile-color, var(--accent)) 95%,
+    #ffffff 100%
+  );
+  box-shadow: 0 0 10px var(--tile-color, var(--accent));
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Delete Button Text & Icon */
+.category-delete-label {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: color 0.15s ease;
+}
+
+.category-delete-btn:hover .category-delete-label {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.category-delete-btn.holding .category-delete-label {
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.category-delete-btn.deleted {
+  background: #ff3b30 !important;
+  box-shadow: 0 0 16px rgba(255, 59, 48, 0.8) !important;
+}
+
+.category-delete-btn svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .category-detail {

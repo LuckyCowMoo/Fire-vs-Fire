@@ -954,13 +954,17 @@ function renderCategoryStrip(classifierNamesById) {
     const isEnabled = ensemble.enabled !== false;
     const isSelected = index === selectedCategoryIndex;
 
+    // Card Container (Holds Indented Tile & Attached Delete Button Beneath)
+    const card = document.createElement('div');
+    card.className = `category-card ${isSelected ? 'selected' : ''} ${!isEnabled ? 'disabled-cat' : ''}`;
+    card.style.setProperty('--tile-color', color);
+
+    // Indented Tile (Hole in canvas with tint of category color)
     const tile = document.createElement('button');
     tile.type = 'button';
-    tile.className = 'category-tile';
+    tile.className = `category-tile ${isSelected ? 'selected' : ''} ${!isEnabled ? 'disabled-cat' : ''}`;
     tile.setAttribute('role', 'tab');
     tile.setAttribute('aria-selected', isSelected ? 'true' : 'false');
-    if (isSelected) tile.classList.add('selected');
-    if (!isEnabled) tile.classList.add('disabled-cat');
     tile.style.setProperty('--tile-color', color);
 
     const nameEl = document.createElement('span');
@@ -979,7 +983,86 @@ function renderCategoryStrip(classifierNamesById) {
       renderEnsembles({ scrollStripToSelection: true });
     });
 
-    categoryStripEl.appendChild(tile);
+    // Attached Remove Button beneath (3s hold to delete with left-to-right fill)
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'category-delete-btn';
+    deleteBtn.setAttribute('aria-label', `Hold for 3 seconds to remove category ${name}`);
+
+    const fillEl = document.createElement('div');
+    fillEl.className = 'category-delete-fill';
+
+    const labelWrap = document.createElement('span');
+    labelWrap.className = 'category-delete-label';
+    labelWrap.innerHTML = `
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+      <span class="delete-text">Hold to delete</span>
+    `;
+
+    deleteBtn.appendChild(fillEl);
+    deleteBtn.appendChild(labelWrap);
+
+    let holdTimeout = null;
+    let isHolding = false;
+    const HOLD_DURATION_MS = 3000;
+
+    const startHold = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.stopPropagation();
+      if (isHolding) return;
+      isHolding = true;
+
+      deleteBtn.classList.add('holding');
+      fillEl.style.transition = `width ${HOLD_DURATION_MS}ms linear`;
+      fillEl.style.width = '100%';
+
+      const deleteText = labelWrap.querySelector('.delete-text');
+      if (deleteText) deleteText.textContent = 'Deleting...';
+
+      holdTimeout = setTimeout(() => {
+        isHolding = false;
+        deleteBtn.classList.remove('holding');
+        deleteBtn.classList.add('deleted');
+
+        if (typeof spawnClickParticles === 'function') {
+          const rect = deleteBtn.getBoundingClientRect();
+          spawnClickParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, color);
+        }
+
+        ensembleConfigs = ensembleConfigs.filter((_, idx) => idx !== index);
+        normalizeSelectedIndex();
+        renderEnsembles({ scrollStripToSelection: true });
+        saveEnsembles();
+      }, HOLD_DURATION_MS);
+    };
+
+    const cancelHold = (e) => {
+      if (!isHolding) return;
+      isHolding = false;
+      if (holdTimeout) {
+        clearTimeout(holdTimeout);
+        holdTimeout = null;
+      }
+      deleteBtn.classList.remove('holding');
+      fillEl.style.transition = 'width 0.22s cubic-bezier(0.25, 1, 0.5, 1)';
+      fillEl.style.width = '0%';
+
+      const deleteText = labelWrap.querySelector('.delete-text');
+      if (deleteText) deleteText.textContent = 'Hold to delete';
+    };
+
+    deleteBtn.addEventListener('pointerdown', startHold);
+    deleteBtn.addEventListener('pointerup', cancelHold);
+    deleteBtn.addEventListener('pointercancel', cancelHold);
+    deleteBtn.addEventListener('pointerleave', cancelHold);
+    deleteBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    card.appendChild(tile);
+    card.appendChild(deleteBtn);
+    categoryStripEl.appendChild(card);
   });
 }
 
@@ -1337,49 +1420,7 @@ function renderCategoryPanel(index, classifierNamesById) {
     );
   }
 
-  const actions = document.createElement('div');
-  actions.className = 'category-detail-actions';
 
-  const removeBtn = document.createElement('button');
-  removeBtn.type = 'button';
-  removeBtn.className = 'btn btn-outline btn-danger';
-  removeBtn.textContent = 'Remove category';
-
-  removeBtn.addEventListener('click', () => {
-    const confirm = document.createElement('div');
-    confirm.className = 'confirm-inline';
-    confirm.innerHTML = '<span>Remove this category?</span>';
-
-    const yesBtn = document.createElement('button');
-    yesBtn.type = 'button';
-    yesBtn.className = 'btn btn-danger';
-    yesBtn.textContent = 'Yes';
-
-    const noBtn = document.createElement('button');
-    noBtn.type = 'button';
-    noBtn.className = 'btn btn-outline';
-    noBtn.textContent = 'No';
-
-    yesBtn.addEventListener('click', () => {
-      ensembleConfigs = ensembleConfigs.filter((_, idx) => idx !== index);
-      normalizeSelectedIndex();
-      renderEnsembles();
-      saveEnsembles();
-    });
-
-    noBtn.addEventListener('click', () => {
-      confirm.remove();
-      removeBtn.disabled = false;
-    });
-
-    confirm.appendChild(yesBtn);
-    confirm.appendChild(noBtn);
-    actions.appendChild(confirm);
-    removeBtn.disabled = true;
-  });
-
-  actions.appendChild(removeBtn);
-  categoryPanelEl.appendChild(actions);
 }
 
 function renderEnsembles(options = {}) {

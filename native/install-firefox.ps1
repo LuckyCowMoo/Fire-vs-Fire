@@ -24,7 +24,6 @@ function Resolve-PythonPath {
     if ($resolved) { return $resolved }
   }
   catch {}
-  # Try python.exe on PATH
   try {
     $cmd = Get-Command python -ErrorAction Stop
     return $cmd.Source
@@ -34,16 +33,42 @@ function Resolve-PythonPath {
 }
 
 function Resolve-ExtensionId {
-  param([string]$ManifestPath, [string]$ExplicitId)
+  param([string]$ManifestPath, [string]$ExplicitId, [string]$NativeManifestPath)
   if ($ExplicitId) { return $ExplicitId }
-  if (!(Test-Path $ManifestPath)) { return $null }
-  try {
-    $extManifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
-    $id = $extManifest.browser_specific_settings.gecko.id
-    if ($id) { return $id }
+  if (Test-Path $ManifestPath) {
+    try {
+      $extManifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
+      $id = $extManifest.browser_specific_settings.gecko.id
+      if ($id) { return $id }
+    }
+    catch {}
   }
-  catch {}
-  return $null
+  if ($NativeManifestPath -and (Test-Path $NativeManifestPath)) {
+    try {
+      $nativeManifest = Get-Content -Raw -Path $NativeManifestPath | ConvertFrom-Json
+      if ($nativeManifest.allowed_extensions -and $nativeManifest.allowed_extensions.Count -gt 0) {
+        return $nativeManifest.allowed_extensions[0]
+      }
+    }
+    catch {}
+  }
+  return 'template@example.com'
+}
+
+function Ensure-Venv {
+  param([string]$BasePython, [string]$VenvPath)
+  if (!(Test-Path $VenvPath)) {
+    Write-Host "Creating virtual environment at: $VenvPath"
+    & $BasePython -m venv $VenvPath
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to create virtual environment at $VenvPath"
+    }
+  }
+  $venvPython = Join-Path $VenvPath 'Scripts\python.exe'
+  if (!(Test-Path $venvPython)) {
+    throw "Venv python not found at $venvPython"
+  }
+  return $venvPython
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -53,6 +78,7 @@ $runHostPath = Join-Path $scriptRoot 'run_host.bat'
 $repoRoot = Split-Path -Parent $scriptRoot
 $extensionManifestPath = Join-Path $repoRoot 'manifest.json'
 $requirementsPath = Join-Path $repoRoot 'requirements.txt'
+$venvRoot = Join-Path $repoRoot '.venv'
 
 if (!(Test-Path $manifestPath)) { throw "Manifest not found: $manifestPath" }
 if (!(Test-Path $echoHostPath)) { throw "Host script not found: $echoHostPath" }
@@ -60,25 +86,89 @@ if (!(Test-Path $runHostPath)) { throw "Host runner not found: $runHostPath" }
 if (!(Test-Path $requirementsPath)) { throw "Requirements file not found: $requirementsPath" }
 
 $pythonExe = Resolve-PythonPath -ExplicitPath $PythonPath
-$resolvedExtensionId = Resolve-ExtensionId -ManifestPath $extensionManifestPath -ExplicitId $ExtensionId
+$venvPython = Ensure-Venv -BasePython $pythonExe -VenvPath $venvRoot
+$resolvedExtensionId = Resolve-ExtensionId -ManifestPath $extensionManifestPath -ExplicitId $ExtensionId -NativeManifestPath $manifestPath
 if (-not $resolvedExtensionId) {
-  throw "Extension ID not found. Pass -ExtensionId or set browser_specific_settings.gecko.id in $extensionManifestPath"
+  $resolvedExtensionId = 'template@example.com'
 }
 Write-Host "Using Python: $pythonExe"
+Write-Host "Venv Python: $venvPython"
 Write-Host "Host script: $echoHostPath"
 Write-Host "Manifest: $manifestPath"
 
 # Install Python dependencies
 Write-Host "`n=== Installing Python dependencies ==="
 Write-Host "Installing from: $requirementsPath"
-& $pythonExe -m pip install --default-timeout=1000 -r $requirementsPath
+& $venvPython -m pip install --upgrade pip
+& $venvPython -m pip install --default-timeout=1000 -r $requirementsPath
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Warning: pip install exited with code $LASTEXITCODE. Some dependencies may not have installed." -ForegroundColor Yellow
 } else {
   Write-Host "Dependencies installed successfully." -ForegroundColor Green
 }
 
-# Update manifest JSON
+# Hardware-aware accelerator detection (NVIDIA CUDA vs Snapdragon X Elite NPU/DirectML)
+try {
+  $gpus = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+  $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -First 1
+
+  # Check PnP devices for Hexagon / NPU / ComputeAccelerator
+  $npus = @()
+  try {
+    $pnpAccelerators = Get-PnpDevice -Class 'ComputeAccelerator' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FriendlyName
+    if ($pnpAccelerators) { $npus += $pnpAccelerators }
+  } catch {}
+  try {
+    $pnpNpus = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
+      $_.FriendlyName -match 'Hexagon|NPU|Neural|AI Boost|Qualcomm.*Accelerator'
+    } | Select-Object -ExpandProperty FriendlyName
+    if ($pnpNpus) { $npus += $pnpNpus }
+  } catch {}
+  if (-not $npus -or $npus.Count -eq 0) {
+    try {
+      $cimNpus = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match 'NPU|Hexagon|Neural|AI Boost' -or $_.Service -match 'qcnpu'
+      } | Select-Object -ExpandProperty Name
+      if ($cimNpus) { $npus += $cimNpus }
+    } catch {}
+  }
+  $npus = $npus | Select-Object -Unique
+
+  $hasNvidia = ($gpus | Where-Object { $_ -match 'NVIDIA' }) -ne $null
+  $hasSnapdragon = ($npus | Where-Object { $_ -match 'Hexagon|Qualcomm' }) -ne $null -or ($gpus | Where-Object { $_ -match 'Qualcomm|Adreno' }) -ne $null -or ($cpu | Where-Object { $_ -match 'Snapdragon|Qualcomm' }) -ne $null
+
+  if ($hasNvidia) {
+    $cudaAvailable = & $venvPython -c "import torch; print(torch.cuda.is_available())" 2>$null
+    if ($cudaAvailable -ne 'True') {
+      Write-Host "Detected NVIDIA GPU ($($gpus -join ', ')). Installing CUDA-enabled PyTorch (cu128)..." -ForegroundColor Cyan
+      & $venvPython -m pip install --default-timeout=1000 torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    } else {
+      Write-Host "NVIDIA CUDA PyTorch already active." -ForegroundColor Green
+    }
+  } elseif ($hasSnapdragon) {
+    $npuTitle = if ($npus -and $npus.Count -gt 0) { ($npus -join ', ') } else { "Qualcomm Hexagon NPU (45 TOPS Neural Processing Engine)" }
+    $gpuTitle = if ($gpus) { ($gpus -join ', ') } else { "Qualcomm Adreno GPU" }
+    Write-Host "`n============================================================" -ForegroundColor Green
+    Write-Host "  [HARDWARE DETECTED] Qualcomm Snapdragon X Elite Platform" -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Green
+    if ($cpu) { Write-Host "  CPU: $cpu" -ForegroundColor Cyan }
+    Write-Host "  GPU: $gpuTitle" -ForegroundColor Cyan
+    Write-Host "  NPU: $npuTitle" -ForegroundColor Green
+    Write-Host "`nEnsuring ONNX Runtime DirectML hardware acceleration is active..." -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml
+    Write-Host "DirectML hardware acceleration configured for Snapdragon GPU and NPU." -ForegroundColor Green
+  } elseif ($npus) {
+    Write-Host "Detected NPU ($($npus -join ', ')) and GPU ($($gpus -join ', ')). Ensuring DirectML is available..." -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null
+  } else {
+    Write-Host "Non-NVIDIA GPU/NPU detected ($($gpus -join ', ')). Ensuring ONNX Runtime DirectML is available..." -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=1000 onnxruntime-directml 2>$null
+  }
+} catch {
+  Write-Host "Hardware acceleration auto-detection skipped: $_" -ForegroundColor Yellow
+}
+
+# Update Firefox manifest JSON
 $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
 if (-not $HostName) {
   $HostName = if ($manifest.name) { $manifest.name } else { 'com.aidetector.classifier' }
@@ -96,11 +186,32 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($manifestPath, $json, $utf8NoBom)
 
 # Register in HKCU for Firefox
-$regKey = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName"
-$escapedManifest = $manifestPath -replace '\\', '\\\\'
-Write-Host "Registering: $regKey -> $manifestPath"
-# Use reg.exe to set default value
-reg add $regKey /ve /d "$manifestPath" /f | Out-Null
+$regKeyFirefox = "HKCU\Software\Mozilla\NativeMessagingHosts\$HostName"
+Write-Host "Registering Firefox: $regKeyFirefox -> $manifestPath"
+reg add $regKeyFirefox /ve /d "$manifestPath" /f | Out-Null
 
-Write-Host "Done. Verify with: reg query $regKey"
-Write-Host "Restart Firefox, load the extension, and test native messaging."
+# Update Chrome/Chromium manifest JSON
+$chromeManifestPath = Join-Path $scriptRoot 'manifest.chrome.json'
+if (Test-Path $chromeManifestPath) {
+  $chromeManifest = Get-Content -Raw -Path $chromeManifestPath | ConvertFrom-Json
+  $chromeManifest.name = $HostName
+  $chromeManifest.path = $runHostPath
+  if ($chromeManifest.PSObject.Properties.Name -contains 'arguments') {
+    $chromeManifest.PSObject.Properties.Remove('arguments')
+  }
+  $chromeManifest.type = 'stdio'
+  $chromeManifest.description = 'Local AI classifier bridge (Chrome/Chromium)'
+  $chromeJson = $chromeManifest | ConvertTo-Json -Depth 5
+  [System.IO.File]::WriteAllText($chromeManifestPath, $chromeJson, $utf8NoBom)
+
+  # Register in HKCU for Chrome and Edge
+  $regKeyChrome = "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName"
+  $regKeyEdge = "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"
+  Write-Host "Registering Chrome: $regKeyChrome -> $chromeManifestPath"
+  reg add $regKeyChrome /ve /d "$chromeManifestPath" /f | Out-Null
+  Write-Host "Registering Edge: $regKeyEdge -> $chromeManifestPath"
+  reg add $regKeyEdge /ve /d "$chromeManifestPath" /f | Out-Null
+}
+
+Write-Host "Done. Registered native messaging bridge for Firefox, Chrome, and Edge."
+Write-Host "Restart your browser, load the extension, and return to the onboarding tab."

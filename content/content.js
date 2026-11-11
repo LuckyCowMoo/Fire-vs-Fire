@@ -1,11 +1,16 @@
-// Cross-browser extension API abstraction (Chrome/Firefox compatibility)content
+// Cross-browser extension API abstraction (Chrome/Firefox compatibility)
 if (window.__AI_DETECTOR_BOOTSTRAPPED__) {
   console.warn('[AI Detector] Content script already initialized; skipping duplicate init');
 } else {
   window.__AI_DETECTOR_BOOTSTRAPPED__ = true;
 
 const ext = typeof browser !== 'undefined' ? browser : chrome;
+const VE = globalThis.FVFVisualEffects;
+const ENS = globalThis.FVFEnsembles;
+const TU = globalThis.FVFTextUtils;
 
+// Unique page context identifier for this page instance (used by Native Host to drop stale items on navigation)
+let currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Date.now();
 
 /**
  * USER SETTINGS - Loaded from extension storage
@@ -13,12 +18,12 @@ const ext = typeof browser !== 'undefined' ? browser : chrome;
  */
 let settings = {
   enabled: true,                  // Master toggle for the extension
-  altTextOnly: true,              // If true, only process images with alt text
+  altTextOnly: false,             // If true, only process images with alt text
   blurAmount: 4,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
-  miniBatchSize: 10,              // Batch size for sending classifications (unused currently)
-  classificationDelay: 100,       // Debounce delay (ms) before batching and sending for classification
+  miniBatchSize: 16,              // Legacy setting
+  classificationDelay: 10,        // Minimal micro-task yield (ms)
   imageCaptureQuality: 1,         // JPEG quality (0.2-1) for image capture
   textBlurAmount: 2,              // Blur radius (px) for flagged text
   textStrikethroughEnabled: true, // Whether to apply strikethrough on AI text
@@ -34,133 +39,67 @@ let settings = {
 /**
  * PAGE TRACKING - Accumulating data and tracking
  */
-let cachedImages = [];           // Array of {src, alt, width, height, element, lazy}
-let cachedTextSections = [];     // Array of {index, selector, tag, length, text, element}
+let cachedImages = [];           // Legacy compatibility array
+let cachedTextSections = [];     // Legacy compatibility array
 let elementMap = new Map();      // Maps itemId to DOM elements
-let hoverHandlerAttached = false; // Tracks weather a global hover handler is actuive already
-let currentHoverEl = null;       // tracks the current hovered AI-detected element
-let processedImages = new Set(); // Set of img elements already added to cachedImages
-let activeJobIds = new Set(); // Track in-flight job IDs for chunked results
-let itemResults = new Map();  // itemId -> { modality, ensembles: { ensembleId: { score, label, displayLabel } } }
+let elementToItemId = new WeakMap(); // Reverse lookup: DOM element -> itemId
+let hoverHandlerAttached = false; // Tracks whether a global hover handler is active already
+let currentHoverEl = null;       // Tracks the current hovered AI-detected element
+let hoverRafPending = false;     // Throttle pointermove hover updates to one per frame
+let lastPointerEvent = null;
+let scanPaused = false;            // Pause periodic scans while tab is hidden
+let processedImages = new Set(); // Set of img elements already processed
+let activeJobIds = new Set();    // Legacy job ID tracking
+let itemResults = new Map();     // itemId -> { modality, ensembles: { ensembleId: { score, label, displayLabel } } }
 let lastEnsembleSignature = null;
 let lastEnsembleStyleSignature = null;
+let ensembleByIdCache = null;
+let seenTextContent = new Set();
+let activeJobTimeouts = new Map();
+let hoverPointerHandler = null;
+let aiDetectedImageCount = 0;
+let lastContextMenuState = null;
+const JOB_TRACKING_MS = 5 * 60 * 1000;
 
 /**
- * OBSERVERS - Monitor page for dynamic content
+ * OBSERVERS - Monitor page for dynamic content & viewport visibility
  */
 let mutationObserver = null;     // Watches for new page updates
-let resizeObserver = null;       // Watches for lazy-loaded images
-let intersectionObserver = null; // Watches for images entering viewport
-let pendingClassification = [];   // Queue of images waiting to be classified
-let pendingTextSections = [];    // Queue of text sections waiting to be classified
-let classificationTimeout = null; // Debounce timer for batching classifications
+let intersectionObserver = null; // Watches for images entering viewport (lazy load + P0 priority boost)
+let pendingClassification = [];   // Legacy queue
+let pendingTextSections = [];    // Legacy queue
+let classificationTimeout = null;
 let scanIntervalId = null;       // Periodic scan interval
-let classificationInFlight = false; // Prevent overlapping classification requests
+let seenImageUrls = new Set();   // Image URLs already queued or classified
+let pendingMutations = [];       // Batched MutationObserver records
+let mutationFlushTimer = null;   // Debounce timer for mutation processing
+const MUTATION_FLUSH_MS = 120;
+const MAX_ITEM_RESULTS = 3000;
+const PERIODIC_SCAN_MS = 30000;
 
-/**
- * STABLE ID COUNTERS - Ensure each image/text gets a unique, persistent ID
- * These increment globally and never reset, preventing ID collisions on scroll
- * Used by: buildClassificationBatches()
- */
-let nextImageId = 0;  // Counter for image IDs (img-0, img-1, img-2...)
-let nextTextId = 0;   // Counter for text IDs (text-0, text-1, text-2...)
-let processedTextElements = new Set(); // Set of text elements already added to cachedTextSections
+let processedTextElements = new Set();
 
-function computeBorderWidth(el, multiplier = 1) {
-  /**
-   * Calculate border width for flagged images based on image size as 2% of smaller side (width/height), clamped 2-10px, then multiplied by setting
-   */
-  if (!el) return 0;
-  if (multiplier === 0) return 0;
-  const w = el.naturalWidth || el.clientWidth || 0;
-  const h = el.naturalHeight || el.clientHeight || 0;
-  const minSide = Math.max(1, Math.min(w, h));
-  const base = Math.max(2, Math.min(10, Math.round(minSide * 0.02)));
-  return Math.max(0, Math.round(base * multiplier));
-}
-
-function hexToRgb(hex) {
-  if (!hex || typeof hex !== 'string') return null;
-  const clean = hex.startsWith('#') ? hex.slice(1) : hex;
-  if (clean.length !== 6) return null;
-  const r = parseInt(clean.slice(0, 2), 16);
-  const g = parseInt(clean.slice(2, 4), 16);
-  const b = parseInt(clean.slice(4, 6), 16);
-  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
-  return { r, g, b };
-}
-
-function rgbToHex({ r, g, b }) {
-  const clamp = (n) => Math.max(0, Math.min(255, Math.round(n)));
-  return `#${clamp(r).toString(16).padStart(2, '0')}${clamp(g).toString(16).padStart(2, '0')}${clamp(b).toString(16).padStart(2, '0')}`.toUpperCase();
-}
-
-function averageColors(colors) {
-  if (!colors || !colors.length) return null;
-  let r = 0, g = 0, b = 0, count = 0;
-  colors.forEach((c) => {
-    const rgb = hexToRgb(c);
-    if (rgb) {
-      r += rgb.r;
-      g += rgb.g;
-      b += rgb.b;
-      count += 1;
-    }
-  });
-  if (!count) return null;
-  return rgbToHex({ r: r / count, g: g / count, b: b / count });
-}
-
-function buildDefaultEnsembles() {
-  return [
-    {
-      id: 'ai_images',
-      name: 'AI Images',
-      modality: 'image',
-      enabled: true,
-      threshold: settings.imageAiThreshold ?? 0.5,
-      classifiers: ['res_net50_fft'],
-      weights: null,
-      styles: {
-        image: {
-          applyBlur: true,
-          blurAmount: settings.blurAmount ?? 4,
-          applyBorder: true,
-          borderMultiplier: settings.borderMultiplier ?? 1,
-          borderColor: settings.borderColor ?? '#ff0064',
-          applyGlow: true,
-          glowColor: settings.borderColor ?? '#ff0064',
-          applyBadge: true
-        }
-      }
-    },
-    {
-      id: 'ai_text',
-      name: 'AI Text',
-      modality: 'text',
-      enabled: true,
-      threshold: settings.textAiThreshold ?? 0.5,
-      classifiers: ['text'],
-      weights: null,
-      styles: {
-        text: {
-          applyBlur: true,
-          blurAmount: settings.textBlurAmount ?? 2,
-          applyStrikethrough: settings.textStrikethroughEnabled ?? true,
-          strikethroughColor: settings.borderColor ?? '#ff0064',
-          applyUnderline: false,
-          underlineColor: settings.borderColor ?? '#ff0064',
-          applyHighlight: false,
-          highlightColor: '#fff3a1'
-        }
-      }
-    }
-  ];
+function isElementInViewport(el) {
+  if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+  try {
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1280;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+    const margin = 200; // Include items just about to scroll into view
+    return (
+      rect.bottom >= -margin &&
+      rect.right >= -margin &&
+      rect.top <= vh + margin &&
+      rect.left <= vw + margin
+    );
+  } catch (_) {
+    return true;
+  }
 }
 
 function getEnsembleConfigs() {
   if (!Array.isArray(settings.ensembles) || settings.ensembles.length === 0) {
-    return buildDefaultEnsembles();
+    return ENS.buildDefaultEnsembles(settings);
   }
   return settings.ensembles;
 }
@@ -176,6 +115,26 @@ function getEnsemblesByModality() {
   return byModality;
 }
 
+function buildModelConfig() {
+  const ensemblesByModality = getEnsemblesByModality();
+  return {
+    ensemblesByModality: {
+      image: (ensemblesByModality.image || []).map((ens) => ({
+        id: ens.id,
+        classifiers: ens.classifiers || [],
+        weights: ens.weights || null
+      })),
+      text: (ensemblesByModality.text || []).map((ens) => ({
+        id: ens.id,
+        classifiers: ens.classifiers || [],
+        weights: ens.weights || null
+      }))
+    },
+    lazyLoad: settings.lazyLoad,
+    streamResults: true
+  };
+}
+
 function computeEnsembleSignature(ensembles, includeStyles) {
   if (!Array.isArray(ensembles)) return '';
   const normalized = ensembles.map((ens) => {
@@ -184,8 +143,6 @@ function computeEnsembleSignature(ensembles, includeStyles) {
       modality: ens.modality || '',
       enabled: ens.enabled !== false,
       classifiers: Array.isArray(ens.classifiers) ? [...ens.classifiers].sort() : [],
-      // weights are considered a visual-level setting and are included
-      // only when `includeStyles` is true below
     };
     if (includeStyles) {
       base.weights = Array.isArray(ens.weights) ? [...ens.weights] : null;
@@ -203,452 +160,532 @@ function updateEnsembleSignatures() {
   const ensembles = getEnsembleConfigs();
   lastEnsembleSignature = computeEnsembleSignature(ensembles, false);
   lastEnsembleStyleSignature = computeEnsembleSignature(ensembles, true);
+  ensembleByIdCache = null;
 }
 
-function getOverlayContainer(imgEl) {
-  /**
-   * Find the best parent container for placing the AI badge overlay
-   * Avoids <picture> elements which don't support absolute positioning well
-   * 
-   * Priority: figure/link/div/article/section > parent > null
-   * Used by: applyVisualEffects() to place confidence badges near images
-   */
-  if (!imgEl || !(imgEl instanceof Element)) return null;
-  const preferred = imgEl.closest('figure, a, div, article, section');
-  if (preferred && preferred.tagName.toLowerCase() !== 'picture') {
-    return preferred;
+function rebuildEnsembleCache() {
+  ensembleByIdCache = new Map();
+  getEnsembleConfigs().forEach((ens) => {
+    if (ens && ens.id) ensembleByIdCache.set(ens.id, ens);
+  });
+}
+
+function getEnsembleById(ensembleId) {
+  if (!ensembleByIdCache) rebuildEnsembleCache();
+  return ensembleByIdCache.get(ensembleId);
+}
+
+function trackElement(itemId, element) {
+  if (!itemId || !element) return;
+  const existing = elementMap.get(itemId);
+  if (!existing) {
+    elementMap.set(itemId, new Set([element]));
+  } else if (existing instanceof Set) {
+    existing.add(element);
+  } else {
+    elementMap.set(itemId, new Set([existing, element]));
   }
-  const parent = imgEl.parentElement;
-  if (parent && parent.tagName.toLowerCase() !== 'picture') return parent;
-  return null;
+  elementToItemId.set(element, itemId);
 }
 
-function showAi(el) {
-  /**
-   * reveal a flagged image and hide the badge
-   */
-  if (!el) return;
-  el.style.setProperty('filter', 'blur(0px) saturate(1) brightness(1)', 'important');
-  el.style.setProperty('animation', 'none', 'important');
-
-  // hide the badge
-  setImageBadgeOpacity(el, '0');
+function getElementsForItem(itemId) {
+  const entry = elementMap.get(itemId);
+  if (!entry) return [];
+  if (entry instanceof Set) return Array.from(entry);
+  return [entry];
 }
 
-function hideAi(el, blurAmount = null) {
-  /**
-   * blur a flagged image and show the badge
-   */
-  if (!el) return;
-  const blurPx = blurAmount != null ? blurAmount : settings.blurAmount;
-  el.style.setProperty('filter', `blur(${blurPx}px) saturate(1) brightness(0.85)`, 'important');
-  el.style.setProperty('animation', 'ai-pulse 2s ease-in-out infinite', 'important');
+function hasResultsForElement(el) {
+  if (!el) return false;
+  const itemId = elementToItemId.get(el);
+  return itemId != null && itemResults.has(itemId);
+}
 
-  // show the badge
-  setImageBadgeOpacity(el, '1');
+function unobserveImage(el) {
+  if (!el || el.tagName?.toLowerCase() !== 'img') return;
+  if (intersectionObserver) {
+    try { intersectionObserver.unobserve(el); } catch (_) { /* already unobserved */ }
+  }
+}
+
+function observeImage(el) {
+  if (!el || el.tagName?.toLowerCase() !== 'img') return;
+  if (intersectionObserver) intersectionObserver.observe(el);
+}
+
+function releaseElementTracking(el) {
+  if (!el || !(el instanceof Element)) return;
+
+  const itemId = elementToItemId.get(el);
+  if (itemId) {
+    const tracked = elementMap.get(itemId);
+    if (tracked instanceof Set) {
+      tracked.delete(el);
+      if (tracked.size === 0) elementMap.delete(itemId);
+    } else if (tracked === el) {
+      elementMap.delete(itemId);
+    }
+  }
+
+  if (el.tagName?.toLowerCase() === 'img') {
+    if (el.classList.contains('ai-detected')) {
+      aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
+      VE.clearImageStyles(el);
+      updateHoverHandlerAttachment();
+    }
+    unobserveImage(el);
+    processedImages.delete(el);
+    if (currentHoverEl === el) currentHoverEl = null;
+  } else {
+    processedTextElements.delete(el);
+  }
+}
+
+function cleanupRemovedSubtree(node) {
+  if (!node || node.nodeType !== 1) return;
+
+  releaseElementTracking(node);
+
+  if (typeof node.querySelector !== 'function') return;
+  if (!node.querySelector('img') && !node.querySelector(TU.TEXT_SELECTORS)) return;
+
+  try {
+    node.querySelectorAll('img').forEach((img) => releaseElementTracking(img));
+    node.querySelectorAll(TU.TEXT_SELECTORS).forEach((el) => releaseElementTracking(el));
+  } catch (_) {}
+}
+
+function pruneItemResults() {
+  if (itemResults.size <= MAX_ITEM_RESULTS) return;
+
+  for (const itemId of itemResults.keys()) {
+    if (!elementMap.has(itemId)) {
+      itemResults.delete(itemId);
+      if (itemId.startsWith('http')) seenImageUrls.delete(itemId);
+      if (itemResults.size <= MAX_ITEM_RESULTS) return;
+    }
+  }
+
+  while (itemResults.size > MAX_ITEM_RESULTS) {
+    const oldest = itemResults.keys().next().value;
+    itemResults.delete(oldest);
+    if (typeof oldest === 'string' && oldest.startsWith('http')) {
+      seenImageUrls.delete(oldest);
+    }
+  }
+}
+
+function cleanupStaleEntries() {
+  for (const [itemId, entry] of elementMap) {
+    if (entry instanceof Set) {
+      for (const el of entry) {
+        if (!el?.isConnected) entry.delete(el);
+      }
+      if (entry.size === 0) elementMap.delete(itemId);
+    } else if (!entry?.isConnected) {
+      elementMap.delete(itemId);
+    }
+  }
+
+  for (const img of processedImages) {
+    if (!img?.isConnected) {
+      processedImages.delete(img);
+      unobserveImage(img);
+    }
+  }
+
+  for (const text of processedTextElements) {
+    if (!text?.isConnected) {
+      processedTextElements.delete(text);
+    }
+  }
+
+  if (currentHoverEl && !currentHoverEl.isConnected) {
+    currentHoverEl = null;
+  }
+
+  pruneItemResults();
+}
+
+function handlePointerMoveHover(evt) {
+  const candidate = evt.target instanceof Element
+    ? evt.target.closest('.ai-detected')
+    : null;
+
+  if (candidate === currentHoverEl) return;
+  if (currentHoverEl && currentHoverEl !== candidate) {
+    if (hasResultsForElement(currentHoverEl)) {
+      if (currentHoverEl.dataset.aiImageStyle) {
+        VE.applyImageInteractionState(currentHoverEl, 'rest', settings);
+      } else {
+        const blurAmount = parseFloat(currentHoverEl.dataset.aiBlur || settings.blurAmount || 0);
+        VE.hideImageAi(currentHoverEl, blurAmount);
+      }
+    }
+  }
+  currentHoverEl = candidate;
+  if (currentHoverEl && hasResultsForElement(currentHoverEl)) {
+    if (currentHoverEl.dataset.aiImageStyle) {
+      VE.applyImageInteractionState(currentHoverEl, 'hover', settings);
+    } else {
+      VE.showImageAi(currentHoverEl);
+    }
+  }
+}
+
+function detachGlobalHoverHandler() {
+  if (!hoverHandlerAttached || !hoverPointerHandler) return;
+  document.removeEventListener('pointermove', hoverPointerHandler, true);
+  hoverHandlerAttached = false;
+  hoverPointerHandler = null;
+  currentHoverEl = null;
+}
+
+function updateHoverHandlerAttachment() {
+  if (aiDetectedImageCount > 0 && !hoverHandlerAttached) {
+    attachGlobalHoverHandler();
+  } else if (aiDetectedImageCount <= 0 && hoverHandlerAttached) {
+    detachGlobalHoverHandler();
+  }
 }
 
 function attachGlobalHoverHandler() {
-  /**
-   * Use a global pointermove listener to show/hide AI images on hover through overlapping elements on the page
-   * 
-   * LOGIC:
-   * - Tracks currentHoverEl (last element the user hovered over)
-   * - When user moves to a new .ai-detected element, calls showAi() to reveal it
-   * - When user moves away, calls hideAi() to blur it again
-   * 
-   * Called by: applyVisualEffects() after adding AI-detected images
-   */
   if (hoverHandlerAttached) return;
   hoverHandlerAttached = true;
-  document.addEventListener('pointermove', (evt) => {
-    const hits = document.elementsFromPoint(evt.clientX, evt.clientY);
-    const candidate = hits.find((el) => el.classList && el.classList.contains('ai-detected')) // stops at first element found
-      || (evt.target instanceof Element ? evt.target.closest('.ai-detected') : null);
+  hoverPointerHandler = (evt) => {
+    lastPointerEvent = evt;
+    if (hoverRafPending) return;
+    hoverRafPending = true;
+    requestAnimationFrame(() => {
+      hoverRafPending = false;
+      if (lastPointerEvent) handlePointerMoveHover(lastPointerEvent);
+    });
+  };
+  document.addEventListener('pointermove', hoverPointerHandler, true);
+}
 
-    if (candidate === currentHoverEl) return;
-    if (currentHoverEl && currentHoverEl !== candidate) {
-      // Check if element still has results before applying hover-off styles
-      let hasResults = false;
-      for (let [itemId, element] of elementMap) {
-        if (element === currentHoverEl && itemResults.has(itemId)) {
-          hasResults = true;
-          break;
-        }
-      }
-      
-      if (hasResults) {
-        const raw = currentHoverEl.dataset.aiImageStyle;
-        if (raw) {
-          let state;
-          try {
-            state = JSON.parse(raw);
-          } catch {
-            state = null;
-          }
-          if (state) {
-            const showBlur = state.blurMode !== 'off';
-            if (showBlur && state.blurAmount > 0) {
-              hideAi(currentHoverEl, state.blurAmount);
-            } else {
-              showAi(currentHoverEl);
-            }
-            const showBorder = state.borderMode !== 'off';
-            const bw = showBorder && state.borderMultiplier > 0 ? computeBorderWidth(currentHoverEl, state.borderMultiplier) : 0;
-            if (bw > 0) {
-              currentHoverEl.style.setProperty('outline', `${bw}px solid ${state.borderColor}`, 'important');
-              currentHoverEl.style.setProperty('outline-offset', `-${bw}px`, 'important');
-            } else {
-              currentHoverEl.style.setProperty('outline', 'none', 'important');
-            }
-            currentHoverEl.style.setProperty('box-shadow', 'none', 'important');
-            const showBadge = state.badgeMode !== 'off';
-            setImageBadgeOpacity(currentHoverEl, showBadge ? '1' : '0');
-          }
-        } else {
-          const blurAmount = parseFloat(currentHoverEl.dataset.aiBlur || settings.blurAmount || 0);
-          hideAi(currentHoverEl, blurAmount);
-        }
+// ============================================================================
+// Single-Item Real-Time Streaming Dispatch
+// ============================================================================
+
+// Extract image as compact base64 from DOM; returns null if tainted by cross-origin CORS
+function imageToBase64(imgElement) {
+  try {
+    let w = imgElement.naturalWidth || imgElement.width || 0;
+    let h = imgElement.naturalHeight || imgElement.height || 0;
+    if (w < 48 || h < 48) return null;
+
+    const MAX_DIM = 768;
+    if (w > MAX_DIM || h > MAX_DIM) {
+      if (w >= h) {
+        h = Math.round((h * MAX_DIM) / w);
+        w = MAX_DIM;
+      } else {
+        w = Math.round((w * MAX_DIM) / h);
+        h = MAX_DIM;
       }
     }
-    currentHoverEl = candidate;
-    if (currentHoverEl) {
-      // Check if element still has results before applying hover-on styles
-      let hasResults = false;
-      for (let [itemId, element] of elementMap) {
-        if (element === currentHoverEl && itemResults.has(itemId)) {
-          hasResults = true;
-          break;
-        }
-      }
-      
-      if (hasResults) {
-        const raw = currentHoverEl.dataset.aiImageStyle;
-        if (raw) {
-          let state;
-          try {
-            state = JSON.parse(raw);
-          } catch {
-            state = null;
-          }
-          if (state) {
-            const showBlur = state.blurMode === 'always';
-            if (showBlur && state.blurAmount > 0) {
-              hideAi(currentHoverEl, state.blurAmount);
-            } else {
-              showAi(currentHoverEl);
-            }
-            const showBorder = state.borderMode === 'always';
-            const bw = showBorder && state.borderMultiplier > 0 ? computeBorderWidth(currentHoverEl, state.borderMultiplier) : 0;
-            if (bw > 0) {
-              currentHoverEl.style.setProperty('outline', `${bw}px solid ${state.borderColor}`, 'important');
-              currentHoverEl.style.setProperty('outline-offset', `-${bw}px`, 'important');
-            } else {
-              currentHoverEl.style.setProperty('outline', 'none', 'important');
-            }
-            currentHoverEl.style.setProperty('box-shadow', 'none', 'important');
-            const showBadge = state.badgeMode === 'always';
-            setImageBadgeOpacity(currentHoverEl, showBadge ? '1' : '0');
-          }
-        } else {
-          showAi(currentHoverEl);
-        }
-      }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, w);
+    canvas.height = Math.max(1, h);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgElement, 0, 0, w, h);
+
+    const quality = typeof settings.imageCaptureQuality === 'number'
+      ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality))
+      : 0.90;
+    return canvas.toDataURL('image/jpeg', quality);
+  } catch (_) {
+    // Tainted cross-origin canvas: background.js will capture & downscale via extension `<all_urls>` privileges
+    return null;
+  }
+}
+
+function dispatchSingleImageItem(imgObj, modelConfig) {
+  if (!imgObj || !imgObj.element) return;
+  const itemId = imgObj.src || ('img-unknown-' + Math.random());
+  trackElement(itemId, imgObj.element);
+
+  const inViewport = Boolean(imgObj.inViewport ?? isElementInViewport(imgObj.element));
+
+  // If offscreen, keep observing so IntersectionObserver can boost its priority to P0 if user scrolls to it!
+  if (!inViewport) {
+    observeImage(imgObj.element);
+  }
+
+  const base64Data = imageToBase64(imgObj.element);
+  const quality = typeof settings.imageCaptureQuality === 'number'
+    ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality))
+    : 0.90;
+
+  if (settings.verboseLogs) {
+    console.log(
+      `[AI Detector] Streaming image (${inViewport ? 'P0 viewport' : 'P1 offscreen'}, ${base64Data ? 'canvas-b64' : 'bg-cors-fetch'}):`,
+      itemId.substring(0, 80)
+    );
+  }
+
+  ext.runtime.sendMessage({
+    type: 'CLASSIFY_SINGLE_ITEM',
+    pageId: currentPageId,
+    itemId,
+    modality: 'image',
+    inViewport,
+    data: base64Data,
+    src: imgObj.src,
+    captureQuality: quality,
+    width: imgObj.width || null,
+    height: imgObj.height || null,
+    model: modelConfig
+  }).catch((err) => {
+    if (settings.verboseLogs) {
+      console.warn('[AI Detector] Failed to send single image item:', err);
     }
-  }, true);
+  });
+}
+
+function dispatchSingleTextItem(section, modelConfig) {
+  if (!section || !section.text) return;
+  const itemId = section.text.substring(0, 500);
+  trackElement(itemId, section.element);
+
+  const inViewport = isElementInViewport(section.element);
+
+  ext.runtime.sendMessage({
+    type: 'CLASSIFY_SINGLE_ITEM',
+    pageId: currentPageId,
+    itemId,
+    modality: 'text',
+    inViewport,
+    data: section.text,
+    text: section.text,
+    length: section.text.length,
+    context: section.selector || section.tag,
+    model: modelConfig
+  }).catch((err) => {
+    if (settings.verboseLogs) {
+      console.warn('[AI Detector] Failed to send single text item:', err);
+    }
+  });
 }
 
 function scheduleClassification(images) {
   /**
-   * Queue new images for debounced classification
+   * Immediately streams discovered images individually to the Native Host,
+   * sending in-viewport (P0) images first followed by offscreen (P1) images.
    */
-  if (!settings.enabled) return;
-  if (!images || !images.length) return;
-  images.forEach(img => pendingClassification.push(img));
-  triggerDebouncedClassification();
+  if (!settings.enabled || !images || !images.length) return;
+  const modelConfig = buildModelConfig();
+
+  // Annotate viewport status and sort so in-viewport items are dispatched first
+  images.forEach((img) => {
+    img.inViewport = isElementInViewport(img.element);
+  });
+  const sorted = images.slice().sort((a, b) => (b.inViewport ? 1 : 0) - (a.inViewport ? 1 : 0));
+
+  sorted.forEach((img) => {
+    dispatchSingleImageItem(img, modelConfig);
+  });
 }
 
 function scheduleTextClassification(textSections) {
   /**
-   * Queue new text sections for debounced classification
+   * Immediately streams discovered text sections individually to the Native Host.
    */
-  if (!settings.enabled) return;
-  if (!textSections || !textSections.length) return;
-  textSections.forEach(text => pendingTextSections.push(text));
-  triggerDebouncedClassification();
+  if (!settings.enabled || !textSections || !textSections.length) return;
+  const modelConfig = buildModelConfig();
+
+  textSections.forEach((section) => {
+    dispatchSingleTextItem(section, modelConfig);
+  });
 }
 
-function triggerDebouncedClassification() {
-  /**
-   * Batches and detected content and sends them for classification
-   */
-  if (!settings.enabled) return;
-  
-  // Clear existing timeout
-  if (classificationTimeout) clearTimeout(classificationTimeout);
-  
-  // Debounce: wait for configured delay to batch mutations/loads
-  classificationTimeout = setTimeout(() => {
-    if (pendingClassification.length === 0 && pendingTextSections.length === 0) return;
-    
-    if (pendingClassification.length > 0) {
-      console.log(`[AI Detector] Scanning ${pendingClassification.length} new image(s)`);
+function processMutationBatch(mutations) {
+  if (!settings.enabled || scanPaused) return;
+
+  const newImages = [];
+  const newText = [];
+
+  mutations.forEach((mutation) => {
+    mutation.removedNodes.forEach((node) => cleanupRemovedSubtree(node));
+
+    if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+      const el = mutation.target;
+      if (el.tagName && el.tagName.toLowerCase() === 'img') {
+        const oldItemId = elementToItemId.get(el);
+        if (oldItemId) {
+          elementMap.delete(oldItemId);
+          itemResults.delete(oldItemId);
+          seenImageUrls.delete(oldItemId);
+        }
+        processedImages.delete(el);
+        const img = processImageElement(el);
+        if (img) {
+          newImages.push(img);
+          if (settings.verboseLogs) {
+            console.log(`[AI Detector] Image src changed, re-processing:`, el.src.substring(0, 80));
+          }
+        }
+      }
     }
-    if (pendingTextSections.length > 0) {
-      console.log(`[AI Detector] Scanning ${pendingTextSections.length} new text section(s)`);
+
+    mutation.addedNodes.forEach((node) => {
+      if (node.nodeType !== 1) return;
+
+      if (node.tagName && node.tagName.toLowerCase() === 'img') {
+        const img = processImageElement(node);
+        if (img) newImages.push(img);
+        return;
+      }
+
+      if (!node.querySelectorAll) return;
+
+      try {
+        if (node.tagName && TU.isTextTagName(node.tagName.toLowerCase())) {
+          const text = processTextElement(node);
+          if (text) newText.push(text);
+        }
+
+        if (node.querySelector('img')) {
+          node.querySelectorAll('img').forEach((el) => {
+            const img = processImageElement(el);
+            if (img) newImages.push(img);
+          });
+        }
+
+        if (node.querySelector(TU.TEXT_SELECTORS)) {
+          node.querySelectorAll(TU.TEXT_SELECTORS).forEach((el) => {
+            const text = processTextElement(el);
+            if (text) newText.push(text);
+          });
+        }
+      } catch (_) {}
+    });
+  });
+
+  if (newImages.length > 0) {
+    if (settings.verboseLogs) {
+      console.log(`[AI Detector] MutationObserver detected ${newImages.length} new images`);
     }
-    
-    // Add pending images to cache
-    pendingClassification.forEach(img => {
-      cachedImages.push(img);
-    });
-    
-    // Add pending text sections to cache
-    pendingTextSections.forEach(text => {
-      cachedTextSections.push(text);
-    });
-    
-    pendingClassification = [];
-    pendingTextSections = [];
-    requestClassification();
-  }, settings.classificationDelay);
+    scheduleClassification(newImages);
+  }
+  if (newText.length > 0) {
+    scheduleTextClassification(newText);
+  }
+}
+
+function scheduleMutationFlush() {
+  if (mutationFlushTimer) return;
+  mutationFlushTimer = setTimeout(() => {
+    mutationFlushTimer = null;
+    if (!pendingMutations.length) return;
+    const batch = pendingMutations;
+    pendingMutations = [];
+    processMutationBatch(batch);
+  }, MUTATION_FLUSH_MS);
 }
 
 function initMutationObserver() {
-    /**
-   * watches for new page updates, triggers classification on new content
-   */
   if (mutationObserver) return;
-  
+
   mutationObserver = new MutationObserver((mutations) => {
-    const newImages = [];
-    const newText = [];
-    
-    mutations.forEach((mutation) => {
-      // Check for src attribute changes (Google Images swapping thumbnail for full image)
-      if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
-        const el = mutation.target;
-        if (el.tagName && el.tagName.toLowerCase() === 'img') {
-          // Image src changed, remove from processed set and re-process
-          processedImages.delete(el);
-          const img = processImageElement(el);
-          if (img) {
-            newImages.push(img);
-            if (settings.verboseLogs) {
-              console.log(`[AI Detector] Image src changed, re-processing:`, el.src.substring(0, 80));
-            }
-          }
-        }
-      }
-      
-      // Check added nodes
-      mutation.addedNodes.forEach((node) => {
-        if (node.nodeType !== 1) return; // Only elements
-        
-        // Direct img tags
-        if (node.tagName && node.tagName.toLowerCase() === 'img') {
-          const img = processImageElement(node);
-          if (img) newImages.push(img);
-          // Also observe new images with IntersectionObserver
-          if (intersectionObserver) intersectionObserver.observe(node);
-          if (resizeObserver) resizeObserver.observe(node);
-        }
-        
-        // Search for img tags within added subtrees
-        if (node.querySelectorAll) {
-          try {
-            const images = Array.from(node.querySelectorAll('img'));
-            images.forEach(el => {
-              const img = processImageElement(el);
-              if (img) newImages.push(img);
-              // Also observe new images
-              if (intersectionObserver) intersectionObserver.observe(el);
-              if (resizeObserver) resizeObserver.observe(el);
-            });
-          } catch (e) {
-            // querySelectorAll may fail on some elements
-          }
-        }
-        
-        // Extract text from this node and its children
-        const textSelectors = ['p', 'li', 'pre', 'blockquote', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].join(',');
-        if (node.querySelectorAll) {
-          try {
-            // Check if node itself is a text element
-            if (node.tagName && node.querySelectorAll === 'function') {
-              const nodeTagLower = node.tagName.toLowerCase();
-              if (['p', 'li', 'pre', 'blockquote', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(nodeTagLower)) {
-                const text = processTextElement(node);
-                if (text) newText.push(text);
-              }
-            }
-            // Search for text elements within subtree
-            const textElements = Array.from(node.querySelectorAll(textSelectors));
-            textElements.forEach(el => {
-              const text = processTextElement(el);
-              if (text) newText.push(text);
-            });
-          } catch (e) {
-            // querySelectorAll may fail on some elements
-          }
-        }
-      });
-    });
-    if (newImages.length > 0) {
-      if (settings.verboseLogs) {
-        console.log(`[AI Detector] MutationObserver detected ${newImages.length} new images`);
-      }
-      scheduleClassification(newImages);
-    }
-    if (newText.length > 0) {
-      scheduleTextClassification(newText);
-    }
+    pendingMutations.push(...mutations);
+    scheduleMutationFlush();
   });
-  
-  // Observe entire document for changes
+
   mutationObserver.observe(document.documentElement, {
     childList: true,
     subtree: true,
-    attributes: true,  // Watch for attribute changes
-    attributeFilter: ['src'],  // Only watch src attribute
+    attributes: true,
+    attributeFilter: ['src'],
     characterData: false
   });
 }
 
-// Detect lazy-loaded images entering viewport using IntersectionObserver
+// Detect lazy-loaded images entering viewport AND boost already-queued offscreen images to P0
 function initIntersectionObserver() {
   if (intersectionObserver) return;
-  
+
   intersectionObserver = new IntersectionObserver((entries) => {
     const newImages = [];
-    
+    const boostItemIds = [];
+
     entries.forEach((entry) => {
-      if (entry.isIntersecting) {
-        const el = entry.target;
-        if (el.tagName && el.tagName.toLowerCase() === 'img') {
-          // Image entered viewport, check if it's loaded now
-          if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-            const img = processImageElement(el);
-            if (img) {
-              newImages.push(img);
-              if (settings.verboseLogs) {
-                console.log(`[AI Detector] IntersectionObserver: Image entered viewport and is loaded:`, el.src.substring(0, 80));
-              }
+      if (!entry.isIntersecting) return;
+      const el = entry.target;
+      if (el.tagName && el.tagName.toLowerCase() === 'img') {
+        // Case 1: Image was already queued offscreen (P1) and just scrolled into view -> boost to P0!
+        if (processedImages.has(el)) {
+          const trackedId = elementToItemId.get(el) || el.src;
+          if (trackedId && !itemResults.has(trackedId)) {
+            boostItemIds.push(trackedId);
+          }
+          unobserveImage(el);
+          return;
+        }
+
+        // Case 2: Lazy-loaded image now has dimensions in viewport -> process & dispatch as P0
+        if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+          const img = processImageElement(el);
+          if (img) {
+            img.inViewport = true;
+            newImages.push(img);
+            if (settings.verboseLogs) {
+              console.log(`[AI Detector] IntersectionObserver: Lazy image entered viewport:`, el.src.substring(0, 80));
             }
           }
         }
       }
     });
-    
+
+    if (boostItemIds.length > 0) {
+      ext.runtime.sendMessage({
+        type: 'BOOST_ITEMS',
+        pageId: currentPageId,
+        itemIds: boostItemIds
+      }).catch(() => {});
+    }
+
     if (newImages.length > 0) {
       scheduleClassification(newImages);
     }
   }, {
-    rootMargin: '200px' // Start loading 200px before entering viewport
+    rootMargin: '200px'
   });
-  
-  // Observe all current images
-  const allImages = Array.from(document.querySelectorAll('img'));
-  allImages.forEach(img => intersectionObserver.observe(img));
-  
-  if (settings.verboseLogs) {
-    console.log(`[AI Detector] IntersectionObserver initialized, observing ${allImages.length} images`);
-  }
 }
 
-// Detect lazy-loaded images entering viewport
-function initResizeObserver() {
-  if (resizeObserver) return;
-  
-  resizeObserver = new ResizeObserver((entries) => {
-    const newImages = [];
-    
-    entries.forEach((entry) => {
-      const el = entry.target;
-      if (el.tagName && el.tagName.toLowerCase() === 'img') {
-        // Image may have just loaded (width/height changed)
-        if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-          const img = processImageElement(el);
-          if (img) {
-            newImages.push(img);
-            if (settings.verboseLogs) {
-              console.log(`[AI Detector] ResizeObserver: Image loaded:`, el.src.substring(0, 80));
-            }
-          }
-        }
-      }
-    });
-    if (newImages.length > 0) {
-      scheduleClassification(newImages);
-    }
-  });
-  
-  // Start observing all current images
-  const allImages = Array.from(document.querySelectorAll('img'));
-  allImages.forEach(img => resizeObserver.observe(img));
-  
-  if (settings.verboseLogs) {
-    console.log(`[AI Detector] ResizeObserver initialized, observing ${allImages.length} images`);
-  }
-}
-
-// Process and extract text from a text element if not already seen
 function processTextElement(el) {
   if (!el || !(el instanceof Element)) return null;
-  
-  // Skip if already processed
   if (processedTextElements.has(el)) return null;
-  
-  // Extract and clean text
-  const text = (el.innerText || el.textContent || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  
-  // Skip if too short
+
+  const text = TU.normalizeElementText(el);
   if (!text || text.length < settings.minTextLength) return null;
-  
-  // Skip if we've already seen this exact text
-  for (let section of cachedTextSections) {
-    if (section.text === text) return null;
-  }
-  for (let section of pendingTextSections) {
-    if (section.text === text) return null;
-  }
-  
-  // Mark as processed
+
+  if (seenTextContent.has(text)) return null;
+  seenTextContent.add(text);
   processedTextElements.add(el);
-  
-  const tag = el.tagName.toLowerCase();
-  const id = el.id ? '#' + el.id : '';
-  const classes = el.classList && el.classList.length ? '.' + Array.from(el.classList).join('.') : '';
-  const selector = tag + id + classes;
-  
-  return {
-    index: cachedTextSections.length + pendingTextSections.length,
-    selector,
-    tag,
-    length: text.length,
-    text,
-    element: el
-  };
+
+  const textPreview = text.substring(0, 500);
+  if (itemResults.has(textPreview)) {
+    trackElement(textPreview, el);
+    applyStylesForItem(textPreview);
+    return null;
+  }
+
+  return TU.buildTextSection(el, seenTextContent.size, text);
 }
 
-// Return the desired properties of an image element if it hasn't been seen before
 function processImageElement(el, isLazy = false) {
   if (!el || el.tagName.toLowerCase() !== 'img') return null;
-  
-  // Skip if already processed
   if (processedImages.has(el)) return null;
-  
-  // Skip if no src or src is invalid
+
   const src = el.src || el.getAttribute('src');
   if (!src) return null;
 
-  // Check if image has loaded
   const nw = el.naturalWidth || 0;
   const nh = el.naturalHeight || 0;
   if (nw === 0 || nh === 0) {
-    // Image hasn't loaded yet, attach load listener
     if (!el.dataset.aiLoadListenerAttached) {
       el.dataset.aiLoadListenerAttached = 'true';
       el.addEventListener('load', () => {
@@ -656,375 +693,82 @@ function processImageElement(el, isLazy = false) {
           console.log(`[AI Detector] Image load event:`, el.src.substring(0, 80));
         }
         processedImages.delete(el);
+        unobserveImage(el);
         const img = processImageElement(el);
         if (img) scheduleClassification([img]);
       }, { once: true });
     }
-    if (resizeObserver) resizeObserver.observe(el);
-    if (intersectionObserver) intersectionObserver.observe(el);
-    if (settings.verboseLogs) {
-      console.log(`[AI Detector] Image not loaded yet (${nw}x${nh}):`, src.substring(0, 80));
-    }
+    observeImage(el);
     return null;
   }
 
-  // Skip tiny/placeholder images and UI icons.
   const displayW = el.clientWidth || el.width || 0;
   const displayH = el.clientHeight || el.height || 0;
   const effectiveW = Math.max(nw, displayW);
   const effectiveH = Math.max(nh, displayH);
   const minDim = Number(settings.minImageDimension || 64);
-  // Skip if either dimension is below minimum (catches 1x1 tracking pixels)
   if (effectiveW < minDim || effectiveH < minDim) {
     return null;
   }
-  
-  // Check alt-text filter with exceptions
+
   if (settings.altTextOnly) {
     const alt = el.alt || el.getAttribute('alt') || '';
-    
-    // Bypass alt-text requirement for:
-    // - YouTube thumbnails: i.ytimg.com/vi/VIDEO_ID/...
-    // - Google Images: encrypted-tbn*.gstatic.com (Google's thumbnail CDN)
-    const isExemptAltTextRule = 
-      src.includes('i.ytimg.com/vi/') || 
+    const isExemptAltTextRule =
+      src.includes('i.ytimg.com/vi/') ||
       src.includes('i.ytimg.com/vi_webp/') ||
       src.includes('encrypted-tbn') ||
       src.includes('gstatic.com');
-    
+
     if (!isExemptAltTextRule && (!alt || !alt.trim().length)) {
       return null;
     }
   }
-  
-  // Mark as processed
+
   processedImages.add(el);
-  
-  if (settings.verboseLogs) {
-    console.log(`[AI Detector] Processing image (${nw}x${nh}):`, src.substring(0, 80));
+  unobserveImage(el);
+
+  if (seenImageUrls.has(src)) {
+    trackElement(src, el);
+    if (itemResults.has(src)) {
+      applyStylesForItem(src);
+    }
+    return null;
   }
-  
-  const img = {
-    src: src,
+
+  if (itemResults.has(src)) {
+    seenImageUrls.add(src);
+    trackElement(src, el);
+    applyStylesForItem(src);
+    return null;
+  }
+
+  seenImageUrls.add(src);
+
+  return {
+    src,
     alt: el.alt || '',
     width: el.naturalWidth || el.width || null,
     height: el.naturalHeight || el.height || null,
     element: el,
-    lazy: isLazy
+    lazy: isLazy,
+    inViewport: isElementInViewport(el)
   };
-  
-  // Register observers on this specific image
-  if (resizeObserver) {
-    resizeObserver.observe(el);
-  }
-  if (intersectionObserver) {
-    intersectionObserver.observe(el);
-  }
-  
-  return img;
 }
 
-// Scan all current images for new ones (periodic scan + initial)
 function scanAllImages() {
   const images = Array.from(document.querySelectorAll('img'));
   const newImages = [];
-  
+
   images.forEach((el) => {
     const img = processImageElement(el);
     if (img) newImages.push(img);
   });
-  
+
   if (settings.verboseLogs && newImages.length > 0) {
-    console.log(`[AI Detector] scanAllImages found ${newImages.length} new images (total on page: ${images.length}, already processed: ${processedImages.size})`);
+    console.log(`[AI Detector] scanAllImages found ${newImages.length} new images (total on page: ${images.length})`);
   }
-  
+
   return newImages;
-}
-
-// Try to extract image as base64 from DOM to avoid re-downloading
-function imageToBase64(imgElement) {
-  try {
-    // Use natural dimensions so the classifier receives the full-resolution image.
-    // Pre-resizing on canvas before JPEG encoding introduces block artifacts that
-    // the artifact branch misidentifies as AI-generation artifacts.
-    const w = imgElement.naturalWidth || imgElement.width || 0;
-    const h = imgElement.naturalHeight || imgElement.height || 0;
-    if (!w || !h) return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(imgElement, 0, 0, w, h);
-    const base64 = canvas.toDataURL('image/png');  // Lossless: no JPEG block artifacts
-    
-    // Skip if base64 is suspiciously small (likely a low-quality thumbnail)
-    // Typical full images are 80KB+, thumbnails are 20-40KB
-    // Return null to skip this image for now - it will be re-processed when full version loads
-    if (base64 && base64.length < 60000) {  // ~45KB threshold
-      if (settings.verboseLogs) {
-        console.log(`[AI Detector] Image too small (${Math.round(base64.length/1024)}KB), waiting for full resolution:`, imgElement.src.substring(0, 80));
-      }
-      return 'TOO_SMALL';  // Special marker to indicate we should skip this image
-    }
-    
-    return base64;
-  } catch (e) {
-    // CORS or other canvas errors - will fall back to URL fetch
-    return null;
-  }
-}
-
-// Build classification batches - splits into multiple requests if needed to stay under message size limit
-function buildClassificationBatches(images = cachedImages, textSections = cachedTextSections) {
-  const batches = [];
-  const MAX_MESSAGE_SIZE = 50000000;  // 50MB (well under 4GB limit, but reasonable for performance)
-  let currentBatch = [];
-  let currentSize = 1000;  // Start with overhead estimate
-  
-  // DO NOT clear elementMap - preserve mappings from previous batches
-  // Only add new entries for images we haven't seen yet
-  
-  // Track which images we've already assigned IDs to
-  const assignedIds = new Map();  // img element -> itemId
-  for (let [itemId, element] of elementMap) {
-    if (itemId.startsWith('img-')) {
-      assignedIds.set(element, itemId);
-    }
-  }
-
-  images.forEach((img) => {
-    let itemId = assignedIds.get(img.element);
-    if (!itemId) {
-      // New image, assign a fresh stable ID
-      itemId = 'img-' + (nextImageId++);
-      elementMap.set(itemId, img.element);
-      assignedIds.set(img.element, itemId);
-    }
-    
-    // Try to get base64 from DOM first (avoids network fetch)
-    let imageData = null;
-    let itemSize = 500;  // Rough estimate for JSON overhead per item
-    
-    try {
-      imageData = imageToBase64(img.element);
-      if (imageData === 'TOO_SMALL') {
-        // Image is a low-quality thumbnail, skip it for now
-        // Remove from processedImages so it can be re-processed when full version loads
-        processedImages.delete(img.element);
-        if (settings.verboseLogs) {
-          console.log(`[AI Detector] Skipping thumbnail ${itemId}, will retry when full image loads`);
-        }
-        return;  // Skip this image
-      }
-      if (imageData) {
-        itemSize += imageData.length;
-      }
-    } catch (e) {
-      imageData = null;
-    }
-    
-    // If adding this item would exceed limit, save current batch and start new one
-    if (currentSize + itemSize > MAX_MESSAGE_SIZE && currentBatch.length > 0) {
-      batches.push(currentBatch);
-      currentBatch = [];
-      currentSize = 1000;
-    }
-    
-    const item = {
-      id: itemId,
-      modality: 'image',
-      source: 'img',
-      url: imageData || img.src || null,  // Base64 if available, else URL
-      data: null,
-      mime: imageData ? 'image/png' : null,
-      width: img.width || null,
-      height: img.height || null
-    };
-    
-    if (settings.verboseLogs) {
-      const isBase64 = imageData != null;
-      const urlPreview = isBase64 ? 'base64' : (img.src || 'null').substring(0, 80);
-      console.log(`[AI Detector] Batching ${itemId}: ${img.width}x${img.height}, ${isBase64 ? 'base64 (' + Math.round(imageData.length/1024) + 'KB)' : 'URL: ' + urlPreview}`);
-    }
-    
-    currentBatch.push(item);
-    
-    currentSize += itemSize;
-  });
-
-  // Add text sections to FIRST batch only (they're small)
-  textSections.forEach((section) => {
-    let itemId = null;
-    // Check if this text element already has an ID
-    for (let [id, element] of elementMap) {
-      if (id.startsWith('text-') && element === section.element) {
-        itemId = id;
-        break;
-      }
-    }
-    
-    if (!itemId) {
-      // New text section, assign a fresh stable ID
-      itemId = 'text-' + (nextTextId++);
-      elementMap.set(itemId, section.element);
-    }
-    
-    currentBatch.push({
-      id: itemId,
-      modality: 'text',
-      text: section.text,
-      length: section.text.length,
-      context: section.selector || section.tag
-    });
-  });
-
-  if (currentBatch.length > 0) {
-    batches.push(currentBatch);
-  }
-  
-  if (settings.verboseLogs) {
-    if (batches.length > 1) {
-      console.log(`[AI Detector] Split into ${batches.length} batches (${batches.map(b => Math.round(JSON.stringify(b).length / 1024) + 'KB').join(', ')})`);
-    } else {
-      console.log(`[AI Detector] Message size: ~${Math.round(currentSize / 1024)}KB of 900KB`);
-    }
-  }
-  
-  return batches;
-}
-
-// Send items to the background script for native classification (handles multiple batches in parallel)
-async function requestClassification() {
-  if (classificationInFlight) return;
-
-  const imagesToSend = cachedImages.slice();
-  const textToSend = cachedTextSections.slice();
-
-  // Build batches that respect message size limits from cached images/text
-  const batches = buildClassificationBatches(imagesToSend, textToSend);
-  if (!batches || !batches.length) return;
-
-  // Clear caches now; new items will accumulate separately while request is in-flight
-  cachedImages = [];
-  cachedTextSections = [];
-  classificationInFlight = true;
-
-  try {
-    const jobId = `job-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    activeJobIds.add(jobId);
-    setTimeout(() => activeJobIds.delete(jobId), 5 * 60 * 1000);
-
-    const t0 = performance.now();
-    if (settings.verboseLogs) console.log(`[AI Detector] Sending classification job ${jobId} with lazyLoad=${settings.lazyLoad}`);
-
-    const ensemblesByModality = getEnsemblesByModality();
-    const modelConfig = {
-      ensemblesByModality: {
-        image: (ensemblesByModality.image || []).map((ens) => ({
-          id: ens.id,
-          classifiers: ens.classifiers || [],
-          weights: ens.weights || null
-        })),
-        text: (ensemblesByModality.text || []).map((ens) => ({
-          id: ens.id,
-          classifiers: ens.classifiers || [],
-          weights: ens.weights || null
-        }))
-      },
-      lazyLoad: settings.lazyLoad,
-      miniBatchSize: settings.miniBatchSize || 1000,
-      streamResults: true
-    };
-
-    await Promise.all(
-      batches.map((batch, idx) =>
-        ext.runtime.sendMessage({
-          type: 'CLASSIFY_JOB_CHUNK',
-          jobId,
-          chunkIndex: idx,
-          totalChunks: batches.length,
-          items: batch,
-          model: modelConfig
-        })
-      )
-    );
-
-    const totalMs = Math.round(performance.now() - t0);
-    const totalSecs = (totalMs / 1000).toFixed(2);
-    console.log(`[AI Detector] Sent ${batches.length} chunk(s) for job ${jobId} in %c${totalSecs}s%c`, 'font-weight: bold', '');
-  } catch (err) {
-    console.warn('[AI Detector] Classification request error:', err);
-    // Re-queue items on failure so they aren't lost
-    cachedImages = imagesToSend.concat(cachedImages);
-    cachedTextSections = textToSend.concat(cachedTextSections);
-  } finally {
-    classificationInFlight = false;
-    // If new items arrived while we were in-flight, send them now
-    if (cachedImages.length > 0 || cachedTextSections.length > 0) {
-      requestClassification();
-    }
-  }
-}
-
-function clearImageStyles(element) {
-  if (!element) return;
-  element.classList.remove('ai-detected');
-  element.style.setProperty('filter', 'blur(0px) saturate(1) brightness(1)', 'important');
-  element.style.setProperty('animation', 'none', 'important');
-  element.style.setProperty('outline', 'none', 'important');
-  element.style.setProperty('box-shadow', 'none', 'important');
-  if (element.dataset && element.dataset.aiBlur) {
-    delete element.dataset.aiBlur;
-  }
-  getImageBadgeIds(element).forEach((badgeId) => {
-    const badge = badgeId ? document.getElementById(badgeId) : null;
-    if (badge) badge.remove();
-  });
-  if (element.dataset) {
-    delete element.dataset.badgeIds;
-    delete element.dataset.badgeId;
-    delete element.dataset.aiImageStyle;
-    delete element.dataset.aiToggleAttached;
-  }
-}
-
-function getImageBadgeIds(element) {
-  if (!element || !element.dataset) return [];
-  if (element.dataset.badgeIds) {
-    try {
-      const ids = JSON.parse(element.dataset.badgeIds);
-      return Array.isArray(ids) ? ids : [];
-    } catch {
-      return [];
-    }
-  }
-  return element.dataset.badgeId ? [element.dataset.badgeId] : [];
-}
-
-function setImageBadgeOpacity(element, opacity) {
-  getImageBadgeIds(element).forEach((badgeId) => {
-    const badge = badgeId ? document.getElementById(badgeId) : null;
-    if (badge) {
-      badge.style.opacity = opacity;
-    }
-  });
-}
-
-function clearTextStyles(element) {
-  if (!element) return;
-  element.classList.remove('ai-detected-text');
-  element.style.removeProperty('filter');
-  element.style.removeProperty('text-decoration');
-  element.style.removeProperty('text-decoration-color');
-  element.style.removeProperty('text-decoration-thickness');
-  element.style.removeProperty('background-color');
-  element.style.removeProperty('padding');
-  element.style.removeProperty('cursor');
-  element.style.removeProperty('transition');
-}
-
-function getEnsembleById(ensembleId) {
-  return getEnsembleConfigs().find((ens) => ens.id === ensembleId);
 }
 
 function getEnsembleDisplayLabel(ensembleCfg) {
@@ -1040,14 +784,6 @@ function getEnsembleDisplayLabel(ensembleCfg) {
   }
 
   return 'AI generated';
-}
-
-function normalizeEnsembleWeight(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) {
-    return 1;
-  }
-  return numeric;
 }
 
 function recomputeWeightedEnsembleResult(ensembleCfg, result) {
@@ -1070,7 +806,7 @@ function recomputeWeightedEnsembleResult(ensembleCfg, result) {
     if (!Number.isFinite(score) || score < 0) return;
     scoredClassifiers.push({
       score,
-      weight: normalizeEnsembleWeight(weights[index]),
+      weight: ENS.normalizeEnsembleWeight(weights[index]),
       label: details && details.label ? details.label : null
     });
   });
@@ -1100,12 +836,6 @@ function recomputeWeightedEnsembleResult(ensembleCfg, result) {
   };
 }
 
-// Update per-classifier timing statistics stored in extension storage.
-// Expects an array of result objects (from native host) where each result may
-// include `durationMs` and a `classifiers` map. Heuristics:
-// - For single-classifier ensembles, attribute duration to that classifier.
-// - For multi-classifier results, split duration evenly across participating classifiers.
-// - Ignore apparent model-load outliers: if a sample is >5x existing avg (and avg exists), skip it.
 async function updateClassifierTimings(results) {
   if (!Array.isArray(results) || results.length === 0) return;
   try {
@@ -1115,28 +845,24 @@ async function updateClassifierTimings(results) {
     const res = await storageArea.get(['classifierTimings']);
     const timings = (res && res.classifierTimings) ? res.classifierTimings : {};
 
-    // Collect samples per classifier
     const samples = new Map();
     results.forEach((result) => {
       if (!result) return;
       const duration = typeof result.durationMs === 'number' ? result.durationMs : (result.duration || null);
       if (!Number.isFinite(duration) || duration <= 0) return;
 
-      // If classifiers map exists, use its keys; else, attempt to attribute from ensembleId
       const clsMap = result.classifiers && typeof result.classifiers === 'object' ? Object.keys(result.classifiers) : [];
       if (clsMap.length === 1) {
         const id = clsMap[0];
         if (!samples.has(id)) samples.set(id, []);
         samples.get(id).push(duration);
       } else if (clsMap.length > 1) {
-        // split evenly across participating classifiers
         const per = duration / clsMap.length;
         clsMap.forEach((id) => {
           if (!samples.has(id)) samples.set(id, []);
           samples.get(id).push(per);
         });
       } else {
-        // No classifiers map (legacy/ensemble-level only). Try to use ensembleId when single-classifier in config
         const ensembleId = result.ensembleId || (result.ensemble || null);
         if (ensembleId) {
           const cfg = getEnsembleById(ensembleId);
@@ -1149,23 +875,16 @@ async function updateClassifierTimings(results) {
       }
     });
 
-    // Merge samples into timings with simple running average and outlier filtering
     samples.forEach((vals, classifierId) => {
       if (!vals || !vals.length) return;
       for (const sample of vals) {
         const prev = timings[classifierId] || { avgMs: 0, count: 0, lastMs: 0, updatedAt: 0 };
-
-        // If we have history, treat very large samples as load-time outliers and skip them
         if (prev.count > 0 && sample > (prev.avgMs * 5 + 1e-6)) {
-          // skip this sample assuming it includes model load
           continue;
         }
-
-        // If no history and sample is extremely large (>10s), assume it's a load and skip
         if (prev.count === 0 && sample > 10000) {
           continue;
         }
-
         const newCount = prev.count + 1;
         const newAvg = prev.count === 0 ? sample : ((prev.avgMs * prev.count + sample) / newCount);
         timings[classifierId] = {
@@ -1182,18 +901,41 @@ async function updateClassifierTimings(results) {
     if (settings.verboseLogs) console.warn('[AI Detector] Failed to update classifier timings:', e);
   }
 }
+
+let pendingTimingResults = [];
+let timingFlushTimer = null;
+
+function queueClassifierTimings(results) {
+  if (!Array.isArray(results) || results.length === 0) return;
+  pendingTimingResults.push(...results);
+  if (timingFlushTimer) return;
+  timingFlushTimer = setTimeout(async () => {
+    timingFlushTimer = null;
+    const batch = pendingTimingResults;
+    pendingTimingResults = [];
+    try {
+      await updateClassifierTimings(batch);
+    } catch (e) {
+      if (settings.verboseLogs) console.warn('[AI Detector] updateClassifierTimings failed', e);
+    }
+  }, 3000);
+}
+
 function applyStylesForItem(itemId) {
   const entry = itemResults.get(itemId);
   if (!entry) return;
-  const element = elementMap.get(itemId);
-  if (!element) return;
-  
-  // Check if element is still in the document
-  if (!element.isConnected) {
-    if (settings.verboseLogs) {
-      console.log(`[AI Detector] Element ${itemId} no longer in DOM, skipping style application`);
+  const elements = getElementsForItem(itemId).filter((el) => el && el.isConnected);
+  if (!elements.length) {
+    if (entry.modality === 'image') {
+      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => img.src === itemId);
+      if (liveImgs.length) {
+        liveImgs.forEach((img) => trackElement(itemId, img));
+        elements.push(...liveImgs);
+      }
     }
-    return;
+    if (!elements.length) {
+      return;
+    }
   }
 
   const modality = entry.modality;
@@ -1204,12 +946,10 @@ function applyStylesForItem(itemId) {
     if (!cfg || cfg.enabled === false) return;
     if (cfg.modality !== modality) return;
     const threshold = typeof cfg.threshold === 'number' ? cfg.threshold : 0.5;
-    if (data.score >= threshold) {
-      // For single-classifier ensembles, prefer the classifier's label; otherwise use ensemble name
+    if (data.label !== 'uncertain' && data.score >= 0 && data.score >= threshold) {
       let displayLabel = 'AI generated';
       const isSingleClassifier = Array.isArray(cfg.classifiers) && cfg.classifiers.length === 1;
       if (isSingleClassifier) {
-        // Get label from the classifier's detail object
         const classifierId = cfg.classifiers[0];
         const classifierDetail = data.classifiers && data.classifiers[classifierId];
         displayLabel = (classifierDetail && classifierDetail.label) || getEnsembleDisplayLabel(cfg) || 'AI generated';
@@ -1219,344 +959,40 @@ function applyStylesForItem(itemId) {
       matched.push({
         cfg,
         score: data.score,
-        displayLabel
+        displayLabel,
+        classifiers: data.classifiers || {}
       });
     }
   });
 
   if (modality === 'image') {
-    if (!matched.length) {
-      clearImageStyles(element);
-      return;
-    }
-
-    const blurCandidates = matched.map(({ cfg }) => {
-      const styles = cfg.styles?.image || {};
-      const mode = styles.blurMode || (styles.applyBlur === false ? 'off' : 'hover');
-      const amount = styles.blurAmount ?? settings.blurAmount ?? 4;
-      return { mode, amount };
-    });
-
-    const borderCandidates = matched.map(({ cfg }) => {
-      const styles = cfg.styles?.image || {};
-      const mode = styles.borderMode || (styles.applyBorder === false ? 'off' : 'hover');
-      const multiplier = styles.borderMultiplier ?? settings.borderMultiplier ?? 1;
-      const color = styles.borderColor ?? settings.borderColor;
-      return { mode, multiplier, color };
-    });
-
-    const badgeCandidates = matched.map(({ cfg }) => {
-      const styles = cfg.styles?.image || {};
-      const mode = styles.badgeMode || (styles.applyBadge === false ? 'off' : 'hover');
-      return { mode };
-    });
-
-    const resolveCombinedMode = (candidates) => {
-      if (candidates.some((c) => c.mode === 'always')) return 'always';
-      if (candidates.some((c) => c.mode === 'hover')) return 'hover';
-      return 'off';
-    };
-
-    const blurMode = resolveCombinedMode(blurCandidates);
-    const borderMode = resolveCombinedMode(borderCandidates);
-    const badgeMode = resolveCombinedMode(badgeCandidates);
-
-    const blurAmounts = blurCandidates.filter((c) => c.mode !== 'off').map((c) => c.amount);
-    const blurAmount = blurAmounts.length ? (blurAmounts.reduce((a, b) => a + b, 0) / blurAmounts.length) : 0;
-    const borderMultipliers = borderCandidates.filter((c) => c.mode !== 'off').map((c) => c.multiplier);
-    const borderMultiplier = borderMultipliers.length ? (borderMultipliers.reduce((a, b) => a + b, 0) / borderMultipliers.length) : 0;
-    const borderColor = averageColors(borderCandidates.filter((c) => c.mode !== 'off').map((c) => c.color)) || settings.borderColor || '#ff0064';
-
-    element.classList.add('ai-detected');
-    const maxScore = Math.max(...matched.map((m) => m.score));
-    const badgeLabel = matched.find((m) => m.displayLabel && m.displayLabel !== 'AI generated')?.displayLabel
-      || matched[0]?.displayLabel
-      || 'AI generated';
-    element.setAttribute('data-ai-score', maxScore);
-    element.title = `${badgeLabel} (${(maxScore * 100).toFixed(1)}% confidence)`;
-    element.style.setProperty('pointer-events', 'auto', 'important');
-    const showBlur = blurMode !== 'off';
-    if (showBlur && blurAmount > 0) {
-      hideAi(element, blurAmount);
-    } else {
-      showAi(element);
-    }
-    element.dataset.aiBlur = String(blurAmount);
-
-    const showBorder = borderMode !== 'off';
-    const bw = showBorder && borderMultiplier > 0 ? computeBorderWidth(element, borderMultiplier) : 0;
-    if (bw > 0) {
-      element.style.setProperty('outline', `${bw}px solid ${borderColor}`, 'important');
-      element.style.setProperty('outline-offset', `-${bw}px`, 'important');
-    } else {
-      element.style.setProperty('outline', 'none', 'important');
-    }
-
-    element.style.setProperty('box-shadow', 'none', 'important');
-
-    const showBadge = badgeMode !== 'off';
-    const existingBadgeIds = getImageBadgeIds(element);
-    existingBadgeIds.forEach((badgeId) => {
-      const existingBadge = badgeId ? document.getElementById(badgeId) : null;
-      if (existingBadge) existingBadge.remove();
-    });
-    if (element.dataset) {
-      delete element.dataset.badgeIds;
-      delete element.dataset.badgeId;
-    }
-
-    if (showBadge) {
-      const container = getOverlayContainer(element);
-      if (container) {
-        if (getComputedStyle(container).position === 'static') {
-          container.style.position = 'relative';
-        }
-
-        const badgeEntries = [];
-        matched.forEach(({ cfg, score, displayLabel, classifiers }) => {
-          const classifierEntries = classifiers && typeof classifiers === 'object'
-            ? Object.entries(classifiers)
-            : [];
-
-          if (classifierEntries.length) {
-            classifierEntries.forEach(([, classifierData]) => {
-              badgeEntries.push({
-                label: classifierData?.label || classifierData?.displayLabel || displayLabel || badgeLabel,
-                score: typeof classifierData?.score === 'number' ? classifierData.score : score,
-                color: cfg.styles?.image?.borderColor || borderColor
-              });
-            });
-          } else {
-            badgeEntries.push({
-              label: displayLabel || badgeLabel,
-              score,
-              color: cfg.styles?.image?.borderColor || borderColor
-            });
-          }
-        });
-
-        const badgeIds = [];
-        badgeEntries.forEach((entry, index) => {
-          const badge = document.createElement('span');
-          badge.style.position = 'absolute';
-          badge.style.top = `${6 + (index * 28)}px`;
-          badge.style.right = '6px';
-          badge.style.padding = '4px 6px';
-          badge.style.color = '#fff';
-          badge.style.fontSize = '12px';
-          badge.style.fontWeight = '700';
-          badge.style.borderRadius = '4px';
-          badge.style.zIndex = String(9999 - index);
-          badge.style.cursor = 'pointer';
-          badge.style.userSelect = 'none';
-          badge.style.opacity = '1';
-          badge.style.transition = 'opacity 0.2s ease';
-          badge.className = 'ai-badge';
-          badge.textContent = `${entry.label} ${Math.round(entry.score * 100)}%`;
-          const badgeRgb = hexToRgb(entry.color) || { r: 255, g: 0, b: 100 };
-          badge.style.background = `rgba(${badgeRgb.r}, ${badgeRgb.g}, ${badgeRgb.b}, 0.9)`;
-
-          const bid = `ai-badge-${Math.random().toString(36).slice(2, 8)}`;
-          badge.id = bid;
-          badgeIds.push(bid);
-          container.appendChild(badge);
-
-          if (!badge.dataset.aiToggleAttached) {
-            badge.dataset.aiToggleAttached = 'true';
-            // Toggle functionality now handled via context menu
-          }
-        });
-
-        if (badgeIds.length) {
-          element.dataset.badgeIds = JSON.stringify(badgeIds);
-          element.dataset.badgeId = badgeIds[0];
-        }
+    elements.forEach((element) => {
+      const wasDetected = element.classList.contains('ai-detected');
+      if (!matched.length) {
+        if (wasDetected) aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
+        VE.clearImageStyles(element);
+        updateHoverHandlerAttachment();
+        return;
       }
-    }
 
-    element.dataset.aiImageStyle = JSON.stringify({
-      blurMode,
-      blurAmount,
-      borderMode,
-      borderMultiplier,
-      borderColor,
-      badgeMode
+      VE.applyImageMatchedStyles(element, matched, settings);
+      if (!wasDetected) aiDetectedImageCount += 1;
+      updateHoverHandlerAttachment();
     });
-
-    if (!element.dataset.aiToggleAttached) {
-      element.dataset.aiToggleAttached = 'true';
-      // Toggle functionality now handled via context menu
-    }
-
-    attachGlobalHoverHandler();
     return;
   }
 
   if (modality === 'text') {
-    if (!matched.length) {
-      clearTextStyles(element);
-      return;
-    }
-
-    const resolveMode = (styles, key, legacyKey, legacyEnabledValue) => {
-      if (styles && styles[key]) return styles[key];
-      if (styles && Object.prototype.hasOwnProperty.call(styles, legacyKey)) {
-        return styles[legacyKey] === legacyEnabledValue ? 'hover' : 'off';
+    elements.forEach((element) => {
+      if (!matched.length) {
+        VE.clearTextStyles(element);
+        return;
       }
-      return 'hover';
-    };
 
-    const blurCandidates = matched.map(({ cfg }) => {
-      const styles = cfg.styles?.text || {};
-      const mode = styles.blurMode || (styles.applyBlur === false ? 'off' : 'hover');
-      const amount = styles.blurAmount ?? settings.textBlurAmount ?? 2;
-      return { mode, amount };
-    });
-
-    const strikeCandidates = matched.map(({ cfg }) => {
-      const styles = cfg.styles?.text || {};
-      const mode = styles.strikethroughMode || (styles.applyStrikethrough === false ? 'off' : 'hover');
-      const color = styles.strikethroughColor ?? settings.borderColor;
-      return { mode, color };
-    });
-
-    const underlineCandidates = matched.map(({ cfg }) => {
-      const styles = cfg.styles?.text || {};
-      const mode = styles.underlineMode || (styles.applyUnderline === true ? 'hover' : 'off');
-      const color = styles.underlineColor ?? settings.borderColor;
-      return { mode, color };
-    });
-
-    const highlightCandidates = matched.map(({ cfg }) => {
-      const styles = cfg.styles?.text || {};
-      const mode = styles.highlightMode || (styles.applyHighlight === true ? 'hover' : 'off');
-      const color = styles.highlightColor ?? '#fff3a1';
-      return { mode, color };
-    });
-
-    const resolveCombinedMode = (candidates) => {
-      if (candidates.some((c) => c.mode === 'always')) return 'always';
-      if (candidates.some((c) => c.mode === 'hover')) return 'hover';
-      return 'off';
-    };
-
-    const blurMode = resolveCombinedMode(blurCandidates);
-    const strikeMode = resolveCombinedMode(strikeCandidates);
-    const underlineMode = resolveCombinedMode(underlineCandidates);
-    const highlightMode = resolveCombinedMode(highlightCandidates);
-
-    const blurAmounts = blurCandidates.filter((c) => c.mode !== 'off').map((c) => c.amount);
-    const blurAmount = blurAmounts.length ? (blurAmounts.reduce((a, b) => a + b, 0) / blurAmounts.length) : 0;
-
-    const strikeColor = averageColors(strikeCandidates.filter((c) => c.mode !== 'off').map((c) => c.color))
-      || settings.borderColor || '#ff0064';
-    const underlineColor = averageColors(underlineCandidates.filter((c) => c.mode !== 'off').map((c) => c.color))
-      || settings.borderColor || '#ff0064';
-    const highlightColor = averageColors(highlightCandidates.filter((c) => c.mode !== 'off').map((c) => c.color))
-      || null;
-
-    element.classList.add('ai-detected-text');
-    const maxScore = Math.max(...matched.map((m) => m.score));
-    element.setAttribute('data-ai-score', maxScore);
-    const textLabel = matched.find((m) => m.displayLabel && m.displayLabel !== 'AI generated')?.displayLabel
-      || matched[0]?.displayLabel
-      || 'AI-generated text';
-    element.title = `${textLabel} (${(maxScore * 100).toFixed(1)}% confidence)`;
-
-    const showBlur = blurMode !== 'off';
-    const showStrike = strikeMode !== 'off';
-    const showUnderline = underlineMode !== 'off';
-    const showHighlight = highlightMode !== 'off';
-
-    if (showBlur && blurAmount > 0) {
-      element.style.setProperty('filter', `blur(${blurAmount}px)`, 'important');
-    } else {
-      element.style.removeProperty('filter');
-    }
-
-    const decorations = [];
-    if (showStrike) decorations.push('line-through');
-    if (showUnderline) decorations.push('underline');
-    if (decorations.length) {
-      element.style.setProperty('text-decoration', decorations.join(' '), 'important');
-      element.style.setProperty('text-decoration-color', showUnderline ? underlineColor : strikeColor, 'important');
-      element.style.setProperty('text-decoration-thickness', '2px', 'important');
-    } else {
-      element.style.removeProperty('text-decoration');
-      element.style.removeProperty('text-decoration-color');
-      element.style.removeProperty('text-decoration-thickness');
-    }
-
-    if (showHighlight && highlightColor) {
-      element.style.setProperty('background-color', highlightColor, 'important');
-      element.style.setProperty('padding', '0 2px', 'important');
-    } else {
-      element.style.removeProperty('background-color');
-      element.style.removeProperty('padding');
-    }
-
-    element.dataset.aiTextStyle = JSON.stringify({
-      blurMode,
-      blurAmount,
-      strikeMode,
-      strikeColor,
-      underlineMode,
-      underlineColor,
-      highlightMode,
-      highlightColor
-    });
-
-    element.style.setProperty('cursor', 'pointer', 'important');
-    element.style.setProperty('transition', 'all 0.2s ease', 'important');
-
-    if (!element.dataset.aiTextHoverAttached) {
-      element.dataset.aiTextHoverAttached = 'true';
-      element.addEventListener('mouseenter', () => {
-        const raw = element.dataset.aiTextStyle;
-        if (!raw) return;
-        let state;
-        try {
-          state = JSON.parse(raw);
-        } catch {
-          return;
-        }
-        const showBlur = state.blurMode === 'always';
-        const showStrike = state.strikeMode === 'always';
-        const showUnderline = state.underlineMode === 'always';
-        const showHighlight = state.highlightMode === 'always';
-
-        if (showBlur && state.blurAmount > 0) {
-          element.style.setProperty('filter', `blur(${state.blurAmount}px)`, 'important');
-        } else {
-          element.style.removeProperty('filter');
-        }
-
-        const decorations = [];
-        if (showStrike) decorations.push('line-through');
-        if (showUnderline) decorations.push('underline');
-        if (decorations.length) {
-          element.style.setProperty('text-decoration', decorations.join(' '), 'important');
-          element.style.setProperty('text-decoration-color', showUnderline ? state.underlineColor : state.strikeColor, 'important');
-          element.style.setProperty('text-decoration-thickness', '2px', 'important');
-        } else {
-          element.style.removeProperty('text-decoration');
-          element.style.removeProperty('text-decoration-color');
-          element.style.removeProperty('text-decoration-thickness');
-        }
-
-        if (showHighlight && state.highlightColor) {
-          element.style.setProperty('background-color', state.highlightColor, 'important');
-          element.style.setProperty('padding', '0 2px', 'important');
-        } else {
-          element.style.removeProperty('background-color');
-          element.style.removeProperty('padding');
-        }
+      VE.applyTextMatchedStyles(element, matched, settings, {
+        onMouseLeave: () => applyStylesForItem(itemId)
       });
-
-      element.addEventListener('mouseleave', () => {
-        applyStylesForItem(itemId);
-      });
-    }
+    });
   }
 }
 
@@ -1567,9 +1003,6 @@ function applyResultChunk(response) {
     response.errors.filter((e) => e.type === 'info').forEach((log) => console.log(log.message));
   }
 
-  let appliedCount = 0;
-  let skippedCount = 0;
-  
   response.results.forEach((result) => {
     if (!result || !result.id) return;
     const entry = itemResults.get(result.id) || { modality: result.modality, ensembles: {} };
@@ -1584,74 +1017,36 @@ function applyResultChunk(response) {
       classifiers: finalResult.classifiers || {}
     };
     itemResults.set(result.id, entry);
-    
-    // Check if element still exists before applying styles
-    const element = elementMap.get(result.id);
-    if (element && element.isConnected) {
+
+    // Unobserve once classified
+    getElementsForItem(result.id).forEach((el) => unobserveImage(el));
+
+    const elements = getElementsForItem(result.id);
+    if (elements.some((el) => el && el.isConnected) || result.modality === 'image') {
       applyStylesForItem(result.id);
-      appliedCount++;
-    } else {
-      skippedCount++;
     }
   });
-  // Update classifier timing stats (async - don't block rendering)
+
   try {
-    updateClassifierTimings(response.results);
+    queueClassifierTimings(response.results);
   } catch (e) {
-    if (settings.verboseLogs) console.warn('[AI Detector] updateClassifierTimings failed to start', e);
-  }
-  
-  if (settings.verboseLogs && skippedCount > 0) {
-    console.log(`[AI Detector] Applied ${appliedCount} results, skipped ${skippedCount} (elements no longer in DOM)`);
+    if (settings.verboseLogs) console.warn('[AI Detector] queueClassifierTimings failed to start', e);
   }
 }
 
-// Extract long text sections from the page (>=250 chars)
 function extractLongText() {
   try {
-    const selectors = [
-      'p', 'li', 'pre', 'blockquote', 'td', 'th',
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6'
-    ].join(',');
-
-    const nodes = Array.from(document.querySelectorAll(selectors));
-
-    // Extract cleaned text and metadata
-    const raw = nodes.map((el) => {
-      const text = (el.innerText || el.textContent || '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      return { el, text };
-    });
-
-    // Filter sections >= 250 chars and deduplicate by text
+    const nodes = Array.from(document.querySelectorAll(TU.TEXT_SELECTORS));
     const seen = new Set();
     const sections = [];
-    raw.forEach(({ el, text }) => {
-      // Skip container elements that contain other candidate text elements
-      try {
-        if (el.querySelector(`:scope ${selectors}`)) return;
-      } catch (e) {
-        if (el.querySelector(selectors)) return;
-      }
+
+    nodes.forEach((el) => {
+      if (TU.hasNestedTextCandidate(el)) return;
+      const text = TU.normalizeElementText(el);
       if (!text || text.length < settings.minTextLength) return;
       if (seen.has(text)) return;
       seen.add(text);
-
-      // Build a minimal selector for context (tag#id.class1.class2)
-      const tag = el.tagName.toLowerCase();
-      const id = el.id ? '#' + el.id : '';
-      const classes = el.classList && el.classList.length ? '.' + Array.from(el.classList).join('.') : '';
-      const selector = tag + id + classes;
-
-      sections.push({
-        index: sections.length,
-        selector,
-        tag,
-        length: text.length,
-        text,
-        element: el
-      });
+      sections.push(TU.buildTextSection(el, sections.length, text));
     });
 
     return sections;
@@ -1661,7 +1056,6 @@ function extractLongText() {
   }
 }
 
-// Load settings from browser storage
 async function loadSettings() {
   try {
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
@@ -1669,7 +1063,7 @@ async function loadSettings() {
       console.warn('[Extension] Storage API not available');
       return;
     }
-    
+
     const res = await storageArea.get([
       'enabled',
       'altTextOnly',
@@ -1686,9 +1080,10 @@ async function loadSettings() {
       'verboseLogs',
       'lazyLoad',
       'minTextLength',
+      'minImageDimension',
       'ensembleConfigsV2'
     ]);
-    
+
     if (res && typeof res.enabled === 'boolean') settings.enabled = res.enabled;
     if (res && typeof res.altTextOnly === 'boolean') settings.altTextOnly = res.altTextOnly;
     if (res && typeof res.blurAmount === 'number') settings.blurAmount = res.blurAmount;
@@ -1704,6 +1099,7 @@ async function loadSettings() {
     if (res && typeof res.verboseLogs === 'boolean') settings.verboseLogs = res.verboseLogs;
     if (res && typeof res.lazyLoad === 'boolean') settings.lazyLoad = res.lazyLoad;
     if (res && typeof res.minTextLength === 'number') settings.minTextLength = res.minTextLength;
+    if (res && typeof res.minImageDimension === 'number') settings.minImageDimension = res.minImageDimension;
     if (res && Array.isArray(res.ensembleConfigsV2)) settings.ensembles = res.ensembleConfigsV2;
     updateEnsembleSignatures();
   } catch (e) {
@@ -1711,73 +1107,82 @@ async function loadSettings() {
   }
 }
 
-// Auto-extract data when page loads
+// Drop pending items for this page context when the user navigates away or closes the tab
+function bindPageLifecycleCleanup() {
+  if (window.__aiDetectorPageHideBound) return;
+  window.__aiDetectorPageHideBound = true;
+  window.addEventListener('pagehide', () => {
+    try {
+      ext.runtime.sendMessage({
+        type: 'DROP_PAGE_CONTEXT',
+        pageId: currentPageId
+      }).catch(() => {});
+    } catch (_) {}
+  });
+}
+
 function initAutoExtract() {
-  // Wait for DOM to be fully loaded
+  bindPageLifecycleCleanup();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', async () => {
       await loadSettings();
-      performInitialExtraction();
       startDynamicDetection();
+      performInitialExtraction();
     });
   } else {
     loadSettings().then(() => {
-      performInitialExtraction();
       startDynamicDetection();
+      performInitialExtraction();
     });
   }
 }
 
 function startDynamicDetection() {
+  if (document.documentElement && document.documentElement.dataset.fvfOnboarding === 'true') {
+    return;
+  }
   if (!settings.enabled) return;
-  // Initialize observers to catch dynamically loaded images
   initMutationObserver();
-  initResizeObserver();
   initIntersectionObserver();
-  
-  // Periodic scan every 3 seconds for edge cases (catches lazy-loaded images that observers miss)
+
+  if (!document.__aiDetectorVisibilityBound) {
+    document.__aiDetectorVisibilityBound = true;
+    document.addEventListener('visibilitychange', () => {
+      scanPaused = document.hidden;
+      if (scanPaused && mutationFlushTimer) {
+        clearTimeout(mutationFlushTimer);
+        mutationFlushTimer = null;
+        pendingMutations = [];
+      }
+    });
+  }
+
   if (scanIntervalId) clearInterval(scanIntervalId);
   scanIntervalId = setInterval(() => {
-    // Clean up disconnected elements from tracking sets
-    for (const img of processedImages) {
-      if (!img.isConnected) {
-        processedImages.delete(img);
-      }
-    }
-    for (const text of processedTextElements) {
-      if (!text.isConnected) {
-        processedTextElements.delete(text);
-      }
-    }
-    
+    if (scanPaused) return;
+    cleanupStaleEntries();
     const newImages = scanAllImages();
-    const newText = extractLongText().filter(section => !processedTextElements.has(section.element));
-    
     if (newImages.length > 0) {
       scheduleClassification(newImages);
     }
-    if (newText.length > 0) {
-      newText.forEach(text => processedTextElements.add(text.element));
-      scheduleTextClassification(newText);
-    }
-  }, 3000);
+  }, PERIODIC_SCAN_MS);
 }
 
 function performInitialExtraction() {
+  if (document.documentElement && document.documentElement.dataset.fvfOnboarding === 'true') {
+    return;
+  }
   if (!settings.enabled) {
     console.log('[AI Detector] Disabled in options; skipping scan');
     return;
   }
-  // Scan all images on page load
   const initialImages = scanAllImages();
   const initialTextSections = extractLongText();
 
-  // Only log if content was found
   if (initialImages.length > 0 || initialTextSections.length > 0) {
-    console.log(`[AI Detector] Scanning ${initialImages.length} images, ${initialTextSections.length} text sections`);
+    console.log(`[AI Detector] Streaming ${initialImages.length} images, ${initialTextSections.length} text sections individually`);
   }
 
-  // Debounce initial classification to allow late-arriving items to join the first batch
   if (initialImages.length > 0) {
     scheduleClassification(initialImages);
   }
@@ -1786,68 +1191,139 @@ function performInitialExtraction() {
   }
 }
 
-// Initialize
 initAutoExtract();
 
-// Track last right-clicked element for context menu
+// Onboarding Web-to-Extension Bridge
+const ALLOWED_ONBOARDING_ACTIONS = new Set([
+  'PING',
+  'CHECK_NATIVE_HOST',
+  'CHECK_NATIVE_UPDATE',
+  'APPLY_NATIVE_UPDATE',
+  'OPEN_OPTIONS_FULLPAGE',
+  'OPEN_MODELS_HUB',
+  'OPEN_GUIDE_PAGE',
+  'GET_OFFICIAL_CATALOG',
+  'DOWNLOAD_OFFICIAL_MODEL',
+  'AUTO_SETUP_CATEGORIES',
+  'SAVE_ONBOARDING_ENSEMBLES'
+]);
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== 'fvf-onboarding-page') return;
+
+  const action = data.action;
+  const requestId = data.requestId;
+  if (!ALLOWED_ONBOARDING_ACTIONS.has(action)) {
+    window.postMessage({
+      source: 'fvf-extension-bridge',
+      requestId,
+      response: { ok: false, error: `Unsupported action: ${action}` }
+    }, '*');
+    return;
+  }
+
+  const payload = Object.assign({}, data.payload || {}, { type: action });
+  try {
+    ext.runtime.sendMessage(payload)
+      .then((response) => {
+        window.postMessage({
+          source: 'fvf-extension-bridge',
+          requestId,
+          response: response || { ok: true }
+        }, '*');
+      })
+      .catch((err) => {
+        window.postMessage({
+          source: 'fvf-extension-bridge',
+          requestId,
+          response: { ok: false, error: err?.message || String(err) }
+        }, '*');
+      });
+  } catch (err) {
+    window.postMessage({
+      source: 'fvf-extension-bridge',
+      requestId,
+      response: { ok: false, error: err?.message || String(err) }
+    }, '*');
+  }
+});
+
 let lastContextMenuTarget = null;
 
-// Update context menu title when user right-clicks on an image or text
+function getTextLabelFromElement(element, fallback = 'AI text') {
+  if (!element?.title) return fallback;
+  const match = element.title.match(/^(.+?)\s+\(/);
+  return match ? match[1] : fallback;
+}
+
+function applyManualBlurStyles(itemId, element, manualEnsemble) {
+  trackElement(itemId, element);
+  itemResults.set(itemId, {
+    modality: manualEnsemble.modality,
+    ensembles: {
+      [manualEnsemble.id]: {
+        score: 1.0,
+        label: 'manual',
+        displayLabel: 'Blur'
+      }
+    }
+  });
+
+  const currentEnsembles = getEnsembleConfigs();
+  const hasManualEnsemble = currentEnsembles.some((e) => e.id === manualEnsemble.id);
+  if (!hasManualEnsemble) {
+    settings.ensembles = [...currentEnsembles, manualEnsemble];
+  }
+
+  applyStylesForItem(itemId);
+
+  if (!hasManualEnsemble) {
+    settings.ensembles = currentEnsembles;
+  }
+}
+
+function sendContextMenuUpdate(payload) {
+  const key = JSON.stringify(payload);
+  if (key === lastContextMenuState) return;
+  lastContextMenuState = key;
+  ext.runtime.sendMessage({
+    type: 'UPDATE_CONTEXT_MENU',
+    ...payload
+  }).catch(() => {});
+}
+
 document.addEventListener('contextmenu', (evt) => {
   lastContextMenuTarget = evt.target;
-  
-  // Check if it's an image
+
   if (evt.target && evt.target.tagName && evt.target.tagName.toLowerCase() === 'img') {
     const hasVisibleAiStyling = evt.target.classList.contains('ai-detected');
     let label = 'tag';
-    
+
     if (hasVisibleAiStyling) {
-      // Get the badge label
-      const badgeIds = getImageBadgeIds(evt.target);
-      if (badgeIds.length > 0) {
-        const badge = document.getElementById(badgeIds[0]);
-        if (badge && badge.textContent) {
-          const match = badge.textContent.match(/^(.+?)\s+\d+%$/);
-          label = match ? match[1] : badge.textContent.split(' ')[0];
-        }
-      }
+      label = VE.getImageBadgeLabel(evt.target, 'tag');
     }
-    
-    ext.runtime.sendMessage({ 
-      type: 'UPDATE_CONTEXT_MENU', 
+
+    sendContextMenuUpdate({
       hasAiTags: hasVisibleAiStyling,
       label: label,
       modality: 'image'
-    }).catch(() => {});
-  }
-  // Check if it's text with ai-detected-text class
-  else if (evt.target && evt.target.classList && evt.target.classList.contains('ai-detected-text')) {
-    const hasVisibleAiStyling = true;
-    let label = 'AI text';
-    
-    // Try to extract label from title attribute if available
-    if (evt.target.title) {
-      const match = evt.target.title.match(/^(.+?)\s+\(/); 
-      label = match ? match[1] : 'AI text';
-    }
-    
-    ext.runtime.sendMessage({ 
-      type: 'UPDATE_CONTEXT_MENU', 
-      hasAiTags: hasVisibleAiStyling,
-      label: label,
+    });
+  } else if (evt.target && evt.target.classList && evt.target.classList.contains('ai-detected-text')) {
+    sendContextMenuUpdate({
+      hasAiTags: true,
+      label: getTextLabelFromElement(evt.target),
       modality: 'text'
-    }).catch(() => {});
-  }
-  // Check if right-clicking on normal text (for adding blur)
-  else if (evt.target && evt.target.tagName) {
+    });
+  } else if (evt.target && evt.target.tagName) {
     const tag = evt.target.tagName.toLowerCase();
-    if (['p', 'li', 'pre', 'blockquote', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
-      ext.runtime.sendMessage({ 
-        type: 'UPDATE_CONTEXT_MENU', 
+    if (TU.isTextTagName(tag)) {
+      sendContextMenuUpdate({
         hasAiTags: false,
         label: 'tag',
         modality: 'text'
-      }).catch(() => {});
+      });
     }
   }
 }, true);
@@ -1857,9 +1333,28 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
   ext.runtime.onMessage.addListener((message) => {
     if (!message || !message.type) return false;
 
+    if (message.type === 'ONBOARDING_DOWNLOAD_PROGRESS') {
+      window.postMessage({
+        source: 'fvf-extension-bridge',
+        type: 'ONBOARDING_DOWNLOAD_PROGRESS',
+        payload: message.payload
+      }, '*');
+      return false;
+    }
+
+    // Immediate single-item classification result from Native Host
+    if (message.type === 'CLASSIFY_ITEM_RESULT') {
+      const payload = message.payload;
+      if (payload && payload.pageId && payload.pageId !== currentPageId) {
+        return false;
+      }
+      applyResultChunk(payload);
+      return false;
+    }
+
     if (message.type === 'CLASSIFY_RESULT_CHUNK') {
       const payload = message.payload;
-      if (payload && payload.jobId && !activeJobIds.has(payload.jobId)) {
+      if (payload && payload.jobId && activeJobIds.size > 0 && !activeJobIds.has(payload.jobId)) {
         return false;
       }
       applyResultChunk(payload);
@@ -1868,7 +1363,13 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 
     if (message.type === 'CLASSIFY_JOB_COMPLETE') {
       const payload = message.payload;
-      if (payload && payload.jobId) activeJobIds.delete(payload.jobId);
+      if (payload && payload.jobId) {
+        activeJobIds.delete(payload.jobId);
+        if (activeJobTimeouts.has(payload.jobId)) {
+          clearTimeout(activeJobTimeouts.get(payload.jobId));
+          activeJobTimeouts.delete(payload.jobId);
+        }
+      }
       return false;
     }
 
@@ -1878,89 +1379,48 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
     }
 
     if (message.type === 'CANCEL_ALL_CLASSIFICATIONS') {
-      // Cancel all in-flight classifications (both browser-side and native host-side)
-      const jobCount = activeJobIds.size;
       activeJobIds.clear();
-      classificationInFlight = false;
       pendingClassification = [];
       pendingTextSections = [];
       if (classificationTimeout) {
         clearTimeout(classificationTimeout);
         classificationTimeout = null;
       }
-      
-      // Send cancel request to background script to cancel native host jobs
+
       ext.runtime.sendMessage({
         type: 'CANCEL_ALL'
       }).catch(() => {});
-      
-      console.log('[AI Detector] All classifications cancelled ('+jobCount+' jobs)');
+
+      console.log('[AI Detector] All classifications cancelled');
       return Promise.resolve({ success: true });
     }
 
     if (message.type === 'TOGGLE_BLUR') {
       const srcUrl = message.srcUrl;
-      const selectionText = message.selectionText;
-      
-      // Handle image toggle
+
       if (srcUrl) {
         const images = Array.from(document.querySelectorAll('img'));
-        const targetImage = images.find(img => img.src === srcUrl);
+        const targetImage = images.find((img) => img.src === srcUrl);
         if (targetImage) {
-          // Find the itemId for this image
-          let itemId = null;
-          for (let [id, element] of elementMap) {
-            if (element === targetImage && id.startsWith('img-')) {
-              itemId = id;
-              break;
-            }
-          }
-          
-          // Check if image has visible AI styling (ai-detected class)
+          const itemId = targetImage.src;
           const hasVisibleAiStyling = targetImage.classList.contains('ai-detected');
-          
+
           if (hasVisibleAiStyling) {
-            // Has visible tags - remove them
-            // Get the badge label to return
-            let badgeLabel = 'AI';
-            const badgeIds = getImageBadgeIds(targetImage);
-            if (badgeIds.length > 0) {
-              const badge = document.getElementById(badgeIds[0]);
-              if (badge && badge.textContent) {
-                // Extract label from badge text (e.g., "Blur 100%" -> "Blur")
-                const match = badge.textContent.match(/^(.+?)\s+\d+%$/);
-                badgeLabel = match ? match[1] : badge.textContent.split(' ')[0];
-              }
-            }
-            
+            const badgeLabel = VE.getImageBadgeLabel(targetImage, 'AI');
             if (itemId) {
               itemResults.delete(itemId);
             }
-            clearImageStyles(targetImage);
+            if (targetImage.classList.contains('ai-detected')) {
+              aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
+            }
+            VE.clearImageStyles(targetImage);
+            updateHoverHandlerAttachment();
             if (currentHoverEl === targetImage) {
               currentHoverEl = null;
             }
-            // Return new state: no AI tags, with the label that was removed
             return Promise.resolve({ hasAiTags: false, label: badgeLabel, modality: 'image' });
           } else {
-            // No tags - add manual blur
-            if (!itemId) {
-              itemId = 'img-' + (nextImageId++);
-              elementMap.set(itemId, targetImage);
-            }
-            
-            itemResults.set(itemId, {
-              modality: 'image',
-              ensembles: {
-                'manual_blur': {
-                  score: 1.0,
-                  label: 'manual',
-                  displayLabel: 'Blur'
-                }
-              }
-            });
-            
-            const manualEnsemble = {
+            applyManualBlurStyles(itemId, targetImage, {
               id: 'manual_blur',
               name: 'Manual Blur',
               modality: 'image',
@@ -1981,76 +1441,30 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
                   badgeMode: 'hover'
                 }
               }
-            };
-            
-            const currentEnsembles = getEnsembleConfigs();
-            const hasManualEnsemble = currentEnsembles.some(e => e.id === 'manual_blur');
-            if (!hasManualEnsemble) {
-              settings.ensembles = [...currentEnsembles, manualEnsemble];
-            }
-            
-            applyStylesForItem(itemId);
-            
-            if (!hasManualEnsemble) {
-              settings.ensembles = currentEnsembles;
-            }
-            // Return new state: has AI tags, with the label that was added
+            });
             return Promise.resolve({ hasAiTags: true, label: 'Blur', modality: 'image' });
           }
         }
       }
-      
-      // Handle text toggle
+
       if (!srcUrl && lastContextMenuTarget) {
         const targetText = lastContextMenuTarget;
         const tag = targetText.tagName ? targetText.tagName.toLowerCase() : '';
-        
-        // Check if it's a valid text element
-        if (['p', 'li', 'pre', 'blockquote', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag) || 
-            targetText.classList.contains('ai-detected-text')) {
-          // Find the itemId for this text
-          let itemId = null;
-          for (let [id, element] of elementMap) {
-            if (element === targetText && id.startsWith('text-')) {
-              itemId = id;
-              break;
-            }
-          }
-          
+
+        if (TU.isTextTagName(tag) || targetText.classList.contains('ai-detected-text')) {
+          const text = TU.normalizeElementText(targetText);
+          const itemId = text.substring(0, 500);
           const hasVisibleAiStyling = targetText.classList.contains('ai-detected-text');
-          
+
           if (hasVisibleAiStyling) {
-            // Has visible tags - remove them
-            let label = 'AI text';
-            if (targetText.title) {
-              const match = targetText.title.match(/^(.+?)\s+\(/);
-              label = match ? match[1] : 'AI text';
-            }
-            
+            const label = getTextLabelFromElement(targetText);
             if (itemId) {
               itemResults.delete(itemId);
             }
-            clearTextStyles(targetText);
+            VE.clearTextStyles(targetText);
             return Promise.resolve({ hasAiTags: false, label: label, modality: 'text' });
           } else {
-            // No tags - add manual blur
-            if (!itemId) {
-              itemId = 'text-' + (nextTextId++);
-              elementMap.set(itemId, targetText);
-            }
-            
-            itemResults.set(itemId, {
-              modality: 'text',
-              ensembles: {
-                'manual_blur_text': {
-                  score: 1.0,
-                  label: 'manual',
-                  displayLabel: 'Blur'
-                }
-              }
-            });
-            
-            const manualEnsemble = {
+            applyManualBlurStyles(itemId, targetText, {
               id: 'manual_blur_text',
               name: 'Manual Blur Text',
               modality: 'text',
@@ -2068,19 +1482,7 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
                   applyHighlight: false
                 }
               }
-            };
-            
-            const currentEnsembles = getEnsembleConfigs();
-            const hasManualEnsemble = currentEnsembles.some(e => e.id === 'manual_blur_text');
-            if (!hasManualEnsemble) {
-              settings.ensembles = [...currentEnsembles, manualEnsemble];
-            }
-            
-            applyStylesForItem(itemId);
-            
-            if (!hasManualEnsemble) {
-              settings.ensembles = currentEnsembles;
-            }
+            });
             return Promise.resolve({ hasAiTags: true, label: 'Blur', modality: 'text' });
           }
         }
@@ -2097,23 +1499,42 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 // ---------------------------------------------------------------------------
 
 function reapplyVisualEffects() {
-  /**
-   * Re-apply visual effects to already-classified elements without re-classifying.
-   * Called when visual settings change (blur, border, color, etc.)
-   */
   itemResults.forEach((_value, itemId) => {
     applyStylesForItem(itemId);
   });
+}
+
+let settingsUpdateGeneration = 0;
+let rescanGeneration = 0;
+
+function recalculateEnsembleScoresForAllItems() {
+  itemResults.forEach((entry) => {
+    Object.entries(entry.ensembles || {}).forEach(([ensembleId, storedResult]) => {
+      const cfg = getEnsembleById(ensembleId);
+      if (cfg && storedResult && storedResult.classifiers) {
+        entry.ensembles[ensembleId] = recomputeWeightedEnsembleResult(cfg, storedResult);
+      }
+    });
+  });
+}
+
+async function applyLatestVisualSettings({ recalculateScores = false } = {}) {
+  const generation = ++settingsUpdateGeneration;
+  await loadSettings();
+  if (generation !== settingsUpdateGeneration) return;
+
+  if (recalculateScores) {
+    recalculateEnsembleScoresForAllItems();
+    if (generation !== settingsUpdateGeneration) return;
+  }
+
+  reapplyVisualEffects();
 }
 
 function resetObservers() {
   if (mutationObserver) {
     mutationObserver.disconnect();
     mutationObserver = null;
-  }
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
   }
   if (intersectionObserver) {
     intersectionObserver.disconnect();
@@ -2123,18 +1544,48 @@ function resetObservers() {
     clearInterval(scanIntervalId);
     scanIntervalId = null;
   }
+  if (mutationFlushTimer) {
+    clearTimeout(mutationFlushTimer);
+    mutationFlushTimer = null;
+  }
+  pendingMutations = [];
+  if (timingFlushTimer) {
+    clearTimeout(timingFlushTimer);
+    timingFlushTimer = null;
+  }
+  pendingTimingResults = [];
+  detachGlobalHoverHandler();
 }
 
 function resetState() {
+  // Drop any queued items on the Native Host for the previous page state before rescanning
+  try {
+    ext.runtime.sendMessage({
+      type: 'DROP_PAGE_CONTEXT',
+      pageId: currentPageId
+    }).catch(() => {});
+  } catch (_) {}
+
+  currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Date.now();
   cachedImages = [];
   cachedTextSections = [];
   elementMap.clear();
+  elementToItemId = new WeakMap();
   processedImages.clear();
   processedTextElements.clear();
+  seenTextContent.clear();
+  seenImageUrls.clear();
   pendingClassification = [];
   pendingTextSections = [];
+  for (const timeoutId of activeJobTimeouts.values()) {
+    clearTimeout(timeoutId);
+  }
+  activeJobTimeouts.clear();
   activeJobIds.clear();
   itemResults.clear();
+  aiDetectedImageCount = 0;
+  currentHoverEl = null;
+  lastContextMenuState = null;
   if (classificationTimeout) {
     clearTimeout(classificationTimeout);
     classificationTimeout = null;
@@ -2142,35 +1593,35 @@ function resetState() {
 }
 
 async function reloadSettingsAndRescan() {
+  const generation = ++rescanGeneration;
+  ++settingsUpdateGeneration;
   await loadSettings();
+  if (generation !== rescanGeneration) return;
   resetObservers();
   resetState();
-  performInitialExtraction();
   startDynamicDetection();
+  performInitialExtraction();
 }
 
 if (ext && ext.storage && ext.storage.onChanged) {
-  ext.storage.onChanged.addListener(async (changes) => {
-    // Settings that require re-classification
-    const classificationKeys = ['enabled', 'altTextOnly', 'imageCaptureQuality', 'minTextLength'];
-    
-    // Settings that only affect visual appearance (no re-classification needed)
+  ext.storage.onChanged.addListener((changes) => {
+    const classificationKeys = ['enabled', 'altTextOnly', 'minTextLength'];
     const visualKeys = ['blurAmount', 'borderMultiplier', 'borderColor', 'textBlurAmount', 'textStrikethroughEnabled', 'imageAiThreshold', 'textAiThreshold'];
-    
-    // Settings that don't affect existing results (logging, debounce, VRAM management)
-    const performanceKeys = ['classificationDelay', 'verboseLogs', 'lazyLoad'];
-    
+    const performanceKeys = ['classificationDelay', 'verboseLogs', 'lazyLoad', 'imageCaptureQuality', 'miniBatchSize', 'minImageDimension'];
+
     const ensembleChanged = Object.prototype.hasOwnProperty.call(changes, 'ensembleConfigsV2');
     let handledByEnsemble = false;
 
     if (ensembleChanged) {
       const prevSig = lastEnsembleSignature;
       const prevStyleSig = lastEnsembleStyleSignature;
-      await loadSettings();
-      const newSig = lastEnsembleSignature;
-      const newStyleSig = lastEnsembleStyleSignature;
+      const newEnsembles = Array.isArray(changes.ensembleConfigsV2?.newValue)
+        ? changes.ensembleConfigsV2.newValue
+        : [];
+      const newSig = computeEnsembleSignature(newEnsembles, false);
+      const newStyleSig = computeEnsembleSignature(newEnsembles, true);
       const classifierChanged = prevSig && newSig && prevSig !== newSig;
-      const styleChanged = prevStyleSig && newStyleSig && prevStyleSig !== newStyleSig;
+      const styleChanged = !prevStyleSig || !newStyleSig || prevStyleSig !== newStyleSig;
 
       if (classifierChanged) {
         reloadSettingsAndRescan();
@@ -2178,17 +1629,7 @@ if (ext && ext.storage && ext.storage.onChanged) {
       }
 
       if (styleChanged) {
-        // Recalculate ensemble scores for all items using stored per-classifier results
-        itemResults.forEach((entry, itemId) => {
-          Object.entries(entry.ensembles || {}).forEach(([ensembleId, storedResult]) => {
-            const cfg = getEnsembleById(ensembleId);
-            if (cfg && storedResult && storedResult.classifiers) {
-              const recalculated = recomputeWeightedEnsembleResult(cfg, storedResult);
-              entry.ensembles[ensembleId] = recalculated;
-            }
-          });
-        });
-        reapplyVisualEffects();
+        applyLatestVisualSettings({ recalculateScores: true });
       }
 
       handledByEnsemble = true;
@@ -2201,10 +1642,10 @@ if (ext && ext.storage && ext.storage.onChanged) {
     if (needsReclassify) {
       reloadSettingsAndRescan();
     } else if (needsVisualUpdate) {
-      await loadSettings();
-      reapplyVisualEffects();
+      applyLatestVisualSettings();
     } else if (needsSimpleReload && !handledByEnsemble) {
-      await loadSettings();
+      ++settingsUpdateGeneration;
+      loadSettings();
     }
   });
 }

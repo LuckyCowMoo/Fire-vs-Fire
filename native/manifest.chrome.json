@@ -8,6 +8,6 @@
   ],
   "arguments": [
     "-u",
-    "native\\echo_host.py"
+    "native\\echo_host_V2.py"
   ]
 }

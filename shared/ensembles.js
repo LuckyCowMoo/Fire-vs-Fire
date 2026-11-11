@@ -18,20 +18,20 @@
         name: 'FvF Heimdall 04 B',
         modality: 'image',
         enabled: true,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall04_b'],
         weights: null,
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor: '#FF0055',
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },

@@ -393,6 +393,8 @@ class PacketAssembler:
                 meta = dict(msg)
                 meta.pop("dataChunk", None)
                 entry["meta"] = meta
+            elif entry["meta"] is not None and msg.get("model") and not entry["meta"].get("model"):
+                entry["meta"]["model"] = msg.get("model")
 
             if len(entry["chunks"]) >= entry["total_packets"]:
                 full_data = "".join(entry["chunks"].get(i, "") for i in range(entry["total_packets"]))
@@ -913,6 +915,8 @@ class PriorityClassificationEngine:
 
         model_config = item_msg.get("model") or {}
         ensembles = _normalize_ensembles(model_config, modality)
+        if not ensembles:
+            return
         lazy_load = bool(model_config.get("lazyLoad", False))
         inactivity_timeout = float(model_config.get("inactivityTimeout", 15))
         self.memory_manager.inactivity_timeout_minutes = max(1.0, inactivity_timeout)
@@ -1387,20 +1391,25 @@ class EnsembleClassifier:
 
 
 def _normalize_ensembles(model_config: Dict[str, Any], modality: str) -> List[Dict[str, Any]]:
-    ensembles_by_modality = model_config.get('ensemblesByModality') or {}
-    ensembles = ensembles_by_modality.get(modality) or []
-    if not isinstance(ensembles, list):
-        ensembles = []
-    if ensembles:
-        return ensembles
+    ensembles_by_modality = model_config.get('ensemblesByModality')
+    if isinstance(ensembles_by_modality, dict) and modality in ensembles_by_modality:
+        ensembles = ensembles_by_modality.get(modality)
+        return ensembles if isinstance(ensembles, list) else []
 
-    classifier_ids = model_config.get('classifiers', ['fvf_heimdall04', 'text'])
-    if isinstance(classifier_ids, str):
-        classifier_ids = [classifier_ids]
+    classifier_ids = model_config.get('classifiers')
+    if classifier_ids:
+        if isinstance(classifier_ids, str):
+            classifier_ids = [classifier_ids]
+        return [{
+            'id': f'default_{modality}',
+            'classifiers': classifier_ids,
+            'weights': model_config.get('weights', None),
+        }]
 
+    default_clfs = ['fvf_heimdall04'] if modality == 'image' else ['text']
     return [{
         'id': f'default_{modality}',
-        'classifiers': classifier_ids,
+        'classifiers': default_clfs,
         'weights': model_config.get('weights', None),
     }]
 

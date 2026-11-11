@@ -946,7 +946,7 @@ function applyStylesForItem(itemId) {
     if (!cfg || cfg.enabled === false) return;
     if (cfg.modality !== modality) return;
     const threshold = typeof cfg.threshold === 'number' ? cfg.threshold : 0.5;
-    if (data.score >= threshold) {
+    if (data.label !== 'uncertain' && data.score >= 0 && data.score >= threshold) {
       let displayLabel = 'AI generated';
       const isSingleClassifier = Array.isArray(cfg.classifiers) && cfg.classifiers.length === 1;
       if (isSingleClassifier) {

@@ -3,7 +3,7 @@
 // ============================================================================
 
 async function loadBaseClassifierCode() {
-  const codeEl = document.querySelector('.byo-classifier-card code');
+  const codeEl = document.getElementById('base-classifier-code') || document.querySelector('.byo-classifier-card pre code');
   if (!codeEl) return;
   const urls = [
     'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/dynamic-prioritisation/native/classifiers/base_classifier.py',
@@ -178,7 +178,7 @@ let extensionConnected = false;
 let nativeHostConnected = false;
 let officialCatalog = FALLBACK_CATALOG;
 let installedModels = new Set();
-let selectedModels = new Set(['fvf_heimdall04', 'fvf_mimir_02', 'fvf_huginn_01', 'fvf_bragi_01']); // 1 latest from each modality of main series
+let selectedModels = new Set(['fvf_heimdall04']); // Only select available models with download files
 
 // ============================================================================
 // EXTENSION BRIDGE (Supports Direct Extension Context + GitHub Pages postMessage)
@@ -377,12 +377,12 @@ async function loadOfficialModelsCatalog(force = false) {
 
         (res.installedModels || []).forEach((id) => {
           installedModels.add(id);
-          selectedModels.add(id);
+          selectedModels.delete(id); // Installed models must NOT be queued for download
         });
         officialCatalog.models.forEach((m) => {
           if (m.installed) {
             installedModels.add(m.id);
-            selectedModels.add(m.id);
+            selectedModels.delete(m.id);
           }
         });
         renderModalityQuadrants();
@@ -499,13 +499,22 @@ function renderModalityQuadrants() {
         stickersHtml += `<span class="sticker-upcoming">⏳ ${badgeText}</span>`;
       }
 
-      // Dedicated Selection / Status Line (ALWAYS on its own line)
-      const statusLineHtml = isAvailable
+      // Dedicated Selection / Status Line (Checkbox disappears for installed models)
+      if (isInstalled) {
+        selectedModels.delete(model.id); // Ensure removed from download selection
+      }
+      const statusLineHtml = isInstalled
+        ? `<div class="model-selection-row">
+             <span class="model-status-installed-badge">
+               ✓ Installed in native/classifiers/
+             </span>
+           </div>`
+        : isAvailable
         ? `<div class="model-selection-row">
              <label class="model-checkbox-label">
                <input type="checkbox" class="model-select-checkbox" data-model-id="${model.id}" ${isSelected ? 'checked' : ''} />
-               <span class="model-checkbox-text ${isInstalled ? 'status-installed' : (isSelected ? 'status-selected' : 'status-unselected')}">
-                 ${isInstalled ? '✓ Installed Locally' : (isSelected ? 'Selected for install' : 'Click to select')}
+               <span class="model-checkbox-text ${isSelected ? 'status-selected' : 'status-unselected'}">
+                 ${isSelected ? 'Selected for install' : 'Click to select'}
                </span>
              </label>
            </div>`
@@ -537,9 +546,9 @@ function renderModalityQuadrants() {
         </div>
       `;
 
-      if (isAvailable) {
+      if (isAvailable && !isInstalled) {
         tile.addEventListener('click', (e) => {
-          if (e.target.tagName === 'A') return;
+          if (e.target.tagName === 'A' || e.target.tagName === 'INPUT') return;
           toggleModelSelection(model.id);
         });
       }
@@ -598,14 +607,29 @@ function handleDownloadProgressEvent(progress) {
 async function downloadSelectedModelsAndAdvance() {
   const btn = document.getElementById('download-and-continue-btn');
   const statusEl = document.getElementById('download-overall-status');
-  const ids = Array.from(selectedModels);
 
   const urlParams = new URLSearchParams(window.location.search);
   const isInitialSetup = !urlParams.has('screen') && !urlParams.has('manage') && !urlParams.has('step');
 
-  // If user chose 0 models, proceed or stay
+  // Filter strictly to downloadable models (available, has files, not installed)
+  const ids = Array.from(selectedModels).filter((mid) => {
+    const modelInfo = (officialCatalog?.models || []).find((m) => m.id === mid);
+    return modelInfo &&
+           modelInfo.status === 'available' &&
+           !installedModels.has(mid) &&
+           Array.isArray(modelInfo.files) &&
+           modelInfo.files.length > 0;
+  });
+
+  // If 0 downloadable models selected:
   if (ids.length === 0) {
-    if (!isInitialSetup) return;
+    if (!isInitialSetup) {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>✓ Models Already Installed</span>';
+      }
+      return;
+    }
     goToScreen(4);
     return;
   }
@@ -976,25 +1000,12 @@ function init() {
     goToScreen(3);
   }
 
-  // Rescan Local Folder button on Screen 2
-  const rescanBtn = document.getElementById('rescan-folder-btn');
-  if (rescanBtn) {
-    rescanBtn.addEventListener('click', async () => {
-      rescanBtn.disabled = true;
-      rescanBtn.style.opacity = '0.6';
-      const label = rescanBtn.querySelector('span');
-      if (label) label.textContent = 'Scanning native/classifiers/…';
-      await loadOfficialModelsCatalog(true);
-      setTimeout(() => {
-        rescanBtn.disabled = false;
-        rescanBtn.style.opacity = '1';
-        if (label) label.textContent = '✓ Rescanned Folder';
-        setTimeout(() => {
-          if (label) label.textContent = '↻ Rescan Local Folder';
-        }, 2200);
-      }, 400);
-    });
-  }
+  // Auto-scan local classifiers every 6 seconds on Screen 2
+  setInterval(() => {
+    if (currentScreen === 2 && !document.hidden) {
+      loadOfficialModelsCatalog(true).catch(() => {});
+    }
+  }, 6000);
 
   // Auto-refresh when tab regains focus or visibility (so dropping files updates immediately)
   window.addEventListener('focus', () => {

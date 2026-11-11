@@ -1790,3 +1790,17 @@ input[type='range'].ember-slider::-webkit-slider-thumb {
   border-color: rgba(46, 204, 113, 0.35);
   background: linear-gradient(135deg, rgba(16, 28, 20, 0.7) 0%, rgba(10, 16, 12, 0.8) 100%);
 }
+
+.model-status-installed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #2ecc71;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: rgba(46, 204, 113, 0.12);
+  border: 1px solid rgba(46, 204, 113, 0.35);
+  user-select: none;
+}

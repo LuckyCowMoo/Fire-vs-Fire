@@ -307,13 +307,59 @@ function cleanupStaleEntries() {
   pruneItemResults();
 }
 
+function findAiDetectedUnderPointer(evt) {
+  const x = evt.clientX;
+  const y = evt.clientY;
+  if (typeof x !== 'number' || typeof y !== 'number') return null;
+
+  // 1. Check direct target or closest ancestor
+  if (evt.target instanceof Element) {
+    const direct = evt.target.closest('.ai-detected');
+    if (direct) return direct;
+  }
+
+  // 2. Penetrate transparent overlay divs/elements using document.elementsFromPoint(x, y)
+  // This penetrates ANY overlay elements, click traps, or buttons sitting in front of the image
+  if (typeof document.elementsFromPoint === 'function') {
+    try {
+      const elements = document.elementsFromPoint(x, y);
+      if (elements && elements.length) {
+        for (let i = 0; i < elements.length; i++) {
+          const el = elements[i];
+          if (el && el.classList && el.classList.contains('ai-detected')) {
+            return el;
+          }
+          const parent = el && el.closest && el.closest('.ai-detected');
+          if (parent) {
+            return parent;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Fallback: Check bounding client rects of tracked processed images
+  // (In case an overlay has pointer-events: none, opaque backdrop, or complex stacking context)
+  for (const img of processedImages) {
+    if (img && img.isConnected && img.classList && img.classList.contains('ai-detected')) {
+      try {
+        const rect = img.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          return img;
+        }
+      } catch (_) {}
+    }
+  }
+
+  return null;
+}
+
 function handlePointerMoveHover(evt) {
-  const candidate = evt.target instanceof Element
-    ? evt.target.closest('.ai-detected')
-    : null;
+  const candidate = findAiDetectedUnderPointer(evt);
 
   if (candidate === currentHoverEl) return;
   if (currentHoverEl && currentHoverEl !== candidate) {
+    currentHoverEl.classList.remove('fvf-hover-active');
     if (hasResultsForElement(currentHoverEl)) {
       if (currentHoverEl.dataset.aiImageStyle) {
         VE.applyImageInteractionState(currentHoverEl, 'rest', settings);
@@ -325,6 +371,7 @@ function handlePointerMoveHover(evt) {
   }
   currentHoverEl = candidate;
   if (currentHoverEl && hasResultsForElement(currentHoverEl)) {
+    currentHoverEl.classList.add('fvf-hover-active');
     if (currentHoverEl.dataset.aiImageStyle) {
       VE.applyImageInteractionState(currentHoverEl, 'hover', settings);
     } else {

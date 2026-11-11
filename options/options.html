@@ -69,51 +69,39 @@
           </label>
         </div>
 
-        <!-- In-Line Battery & Power Controls -->
+        <!-- In-Line Battery & Power Controls (Text above each button, no % readout) -->
         <div class="power-controls-row" id="power-controls-row">
-          <!-- Sub-button 1: Pause on battery -->
-          <label class="power-pill-item" for="pauseOnBattery" title="Only run classifiers when connected to AC power">
-            <span class="switch switch-sm">
+          <!-- Control 1: Only when plugged in -->
+          <div class="power-col">
+            <span class="power-col-title">Only when plugged in</span>
+            <label class="switch switch-sm" for="pauseOnBattery" title="Only run classifiers when connected to AC power">
               <input type="checkbox" id="pauseOnBattery" />
               <span class="capsule-track" aria-hidden="true">
                 <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
               </span>
-            </span>
-            <span class="power-item-text">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-              <span>Only when plugged in</span>
-            </span>
-          </label>
+            </label>
+          </div>
 
-          <!-- Sub-button 2: Pause below threshold -->
-          <div class="power-pill-item power-threshold-item">
-            <label class="power-toggle-sub" for="pauseBelowThreshold" title="Pause when battery drops below threshold">
-              <span class="switch switch-sm">
+          <!-- Control 2: Pause below threshold -->
+          <div class="power-col">
+            <span class="power-col-title">Pause below threshold</span>
+            <div class="power-threshold-group">
+              <label class="switch switch-sm" for="pauseBelowThreshold" title="Pause when battery drops below threshold">
                 <input type="checkbox" id="pauseBelowThreshold" />
                 <span class="capsule-track" aria-hidden="true">
                   <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
                 </span>
-              </span>
-              <span class="power-item-text">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="18" height="12" rx="2" ry="2"/><line x1="23" y1="13" x2="23" y2="11"/></svg>
-                <span>Pause below</span>
-              </span>
-            </label>
-            <select id="batteryThreshold" class="power-select-pill" title="Battery threshold percentage">
-              <option value="10">10%</option>
-              <option value="15">15%</option>
-              <option value="20" selected>20%</option>
-              <option value="25">25%</option>
-              <option value="30">30%</option>
-              <option value="40">40%</option>
-              <option value="50">50%</option>
-            </select>
-          </div>
-
-          <!-- Live Power Status Readout Pill -->
-          <div class="power-live-badge" id="power-live-badge" title="Live system power status">
-            <span class="power-live-dot" id="power-live-dot"></span>
-            <span id="power-live-text">Detecting power…</span>
+              </label>
+              <select id="batteryThreshold" class="power-select-pill" title="Battery threshold percentage">
+                <option value="10">10%</option>
+                <option value="15">15%</option>
+                <option value="20" selected>20%</option>
+                <option value="25">25%</option>
+                <option value="30">30%</option>
+                <option value="40">40%</option>
+                <option value="50">50%</option>
+              </select>
+            </div>
           </div>
         </div>
       </section>

@@ -29,9 +29,6 @@ const minTextLengthInput = document.getElementById('minTextLength');
 const pauseOnBatteryInput = document.getElementById('pauseOnBattery');
 const pauseBelowThresholdInput = document.getElementById('pauseBelowThreshold');
 const batteryThresholdSelect = document.getElementById('batteryThreshold');
-const powerLiveBadge = document.getElementById('power-live-badge');
-const powerLiveDot = document.getElementById('power-live-dot');
-const powerLiveText = document.getElementById('power-live-text');
 
 let isHostConnected = false;
 let isClassifying = false;
@@ -453,27 +450,9 @@ async function refreshPowerStatus() {
 }
 
 function updatePowerUI(power) {
-  if (!powerLiveBadge || !powerLiveText) return;
+  if (!power) return;
   const isPlugged = power.is_plugged_in !== false;
   const pct = typeof power.battery_percent === 'number' ? power.battery_percent : null;
-  const hasBattery = power.has_battery !== false;
-
-  powerLiveBadge.className = 'power-live-badge';
-  if (isPlugged) {
-    powerLiveBadge.classList.add('plugged');
-    powerLiveText.textContent = pct != null ? `Plugged In (${pct}%)` : 'Plugged In';
-  } else if (hasBattery) {
-    if (pct != null && pct <= 20) {
-      powerLiveBadge.classList.add('low');
-      powerLiveText.textContent = `Low Battery: ${pct}%`;
-    } else {
-      powerLiveBadge.classList.add('battery');
-      powerLiveText.textContent = pct != null ? `Battery: ${pct}%` : 'On Battery';
-    }
-  } else {
-    powerLiveBadge.classList.add('plugged');
-    powerLiveText.textContent = 'AC Power';
-  }
 
   const pauseOnBattery = pauseOnBatteryInput ? pauseOnBatteryInput.checked : false;
   const pauseBelow = pauseBelowThresholdInput ? pauseBelowThresholdInput.checked : false;
@@ -529,6 +508,15 @@ function createIconModeControl(labelText, value, onChange) {
   trio.setAttribute('role', 'group');
   trio.setAttribute('aria-label', `${labelText} mode`);
 
+  const initialMode = value || 'hover';
+  trio.dataset.mode = initialMode;
+
+  // Smooth sliding frosted glass glider
+  const glider = document.createElement('span');
+  glider.className = 'mode-glider';
+  glider.setAttribute('aria-hidden', 'true');
+  trio.appendChild(glider);
+
   const modes = [
     { value: 'off', label: 'Off' },
     { value: 'hover', label: 'Hover' },
@@ -542,8 +530,9 @@ function createIconModeControl(labelText, value, onChange) {
     btn.title = mode.label;
     btn.setAttribute('aria-label', mode.label);
     btn.innerHTML = MODE_ICONS[mode.value];
-    if ((value || 'hover') === mode.value) btn.classList.add('active');
+    if (initialMode === mode.value) btn.classList.add('active');
     btn.addEventListener('click', () => {
+      trio.dataset.mode = mode.value;
       trio.querySelectorAll('.mode-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       onChange(mode.value);
@@ -726,12 +715,19 @@ function createSwitch(checked, onChange) {
   const input = document.createElement('input');
   input.type = 'checkbox';
   input.checked = checked;
-  const slider = document.createElement('span');
-  slider.className = 'switch-slider';
-  slider.setAttribute('aria-hidden', 'true');
+  const track = document.createElement('span');
+  track.className = 'capsule-track';
+  track.setAttribute('aria-hidden', 'true');
+  const thumb = document.createElement('span');
+  thumb.className = 'capsule-thumb';
+  const dots = document.createElement('span');
+  dots.className = 'capsule-dots';
+  dots.innerHTML = '<i></i><i></i><i></i>';
+  thumb.appendChild(dots);
+  track.appendChild(thumb);
   input.addEventListener('change', () => onChange(input.checked));
   label.appendChild(input);
-  label.appendChild(slider);
+  label.appendChild(track);
   return label;
 }
 
@@ -820,15 +816,7 @@ function renderWeightsEditor(ensemble, classifierIds, classifierLookup) {
   const section = document.createElement('div');
   section.className = 'ensemble-weight-editor';
 
-  const title = document.createElement('div');
-  title.className = 'hint';
-  title.textContent = 'Classifier weights';
-  section.appendChild(title);
 
-  const hint = document.createElement('div');
-  hint.className = 'hint';
-  hint.textContent = 'Weights are normalized when used.';
-  section.appendChild(hint);
 
   const alignedWeights = normalizeWeightsToSumOne(classifierIds, ensemble.weights);
   if (!Array.isArray(ensemble.weights) || ensemble.weights.length !== classifierIds.length) {

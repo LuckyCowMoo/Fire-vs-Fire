@@ -140,6 +140,46 @@
       "ram_size": "1.5 GB VRAM / RAM"
     },
     {
+      "id": "fvf_heimdall04_b",
+      "name": "FvF Heimdall 04 B",
+      "version": "4.1.0-preview",
+      "modality": "image",
+      "status": "available",
+      "recommended": true,
+      "is_ai_detector": true,
+      "category_name": "FvF Heimdall 04 B",
+      "label": "AI generated",
+      "default_threshold": 0.7,
+      "default_color": "#FF0055",
+      "size_mb": 198.3,
+      "architecture": "Quad-Stream 24-Ch FFT + ForensicNeXt + Intrinsic Structural Grouping + AFPL Loss",
+      "tagline": "Calibrated Anti-False-Positive AI Detector",
+      "description": "FvF Heimdall 04 B features our calibrated Asymmetric False Positive Loss (AFPL) with quadratic penalty above 30% AI probability, cutting false alarms on real-world photos, art, and screenshots by 65% while preserving 88.3% overall accuracy.",
+      "files": [
+        {
+          "type": "classifier_py",
+          "relative_path": "native/classifiers/fvf_heimdall_04_b_classifier.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_04_b_classifier.py",
+          "required": true
+        },
+        {
+          "type": "support_py",
+          "relative_path": "native/classifiers/_heimdall_arch.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/_heimdall_arch.py",
+          "required": true
+        },
+        {
+          "type": "weights_pt",
+          "relative_path": "native/classifiers/fvf_heimdall_04_b_best.pt",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_04_b_best.pt",
+          "fallback_url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_04_b_best.pt",
+          "required": true
+        }
+      ],
+      "download_size": "198 MB",
+      "ram_size": "1.5 GB VRAM / RAM"
+    },
+    {
       "id": "res_net50_spider",
       "name": "ResNet 50 - Spider",
       "version": "1.0.0",

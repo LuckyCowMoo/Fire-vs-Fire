@@ -27,9 +27,9 @@ let settings = {
   imageCaptureQuality: 1,         // JPEG quality (0.2-1) for image capture
   textBlurAmount: 2,              // Blur radius (px) for flagged text
   textStrikethroughEnabled: true, // Whether to apply strikethrough on AI text
-  imageAiThreshold: 0.5,          // Threshold (0-1) for flagging images as AI (0.5 = 50%)
+  imageAiThreshold: 0.75,          // Threshold (0-1) for flagging images as AI (0.5 = 50%)
   minImageDimension: 64,          // Skip tiny images/icons below this size (px)
-  textAiThreshold: 0.5,           // Threshold (0-1) for flagging text as AI
+  textAiThreshold: 0.75,           // Threshold (0-1) for flagging text as AI
   minTextLength: 250,             // Minimum character length for text to be classified
   verboseLogs: false,             // Show detailed logging for processing details
   lazyLoad: false,                // Unload models after use (true) or keep in memory (false)
@@ -147,7 +147,7 @@ function computeEnsembleSignature(ensembles, includeStyles) {
     if (includeStyles) {
       base.weights = Array.isArray(ens.weights) ? [...ens.weights] : null;
       base.name = typeof ens.name === 'string' ? ens.name.trim() : '';
-      base.threshold = typeof ens.threshold === 'number' ? ens.threshold : 0.5;
+      base.threshold = typeof ens.threshold === 'number' ? ens.threshold : 0.75;
       base.styles = ens.styles || {};
     }
     return base;

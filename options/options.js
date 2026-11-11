@@ -1485,7 +1485,7 @@ function createNewEnsemble(modality = 'image') {
       id,
       modality,
       enabled: true,
-      threshold: 0.5,
+      threshold: 0.75,
       classifiers: [],
       weights: null,
       styles: {
@@ -1577,7 +1577,7 @@ async function load() {
     if (res && Array.isArray(res.ensembleConfigsV2) && res.ensembleConfigsV2.length) {
       ensembleConfigs = res.ensembleConfigsV2;
     } else {
-      ensembleConfigs = ENS.buildDefaultEnsembles();
+      ensembleConfigs = [];
       await saveEnsembles();
     }
 

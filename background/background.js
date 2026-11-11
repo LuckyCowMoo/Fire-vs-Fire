@@ -716,6 +716,24 @@ async function fetchFallbackCatalog() {
 }
 
 async function buildAndSaveAutoCategories(downloadedModelIds = [], customThreshold = 0.75) {
+  const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+
+  // Rule 1: ONLY if there are no categories at all!
+  const existingData = await new Promise((resolve) => {
+    if (storageArea && storageArea.get) {
+      storageArea.get(['ensembleConfigsV2'], (res) => resolve(res || {}));
+    } else {
+      resolve({});
+    }
+  });
+
+  const existingCategories = existingData && existingData.ensembleConfigsV2;
+  if (Array.isArray(existingCategories) && existingCategories.length > 0) {
+    console.log('[AutoSetupCategories] Categories already configured (' + existingCategories.length + '). Skipping auto-setup.');
+    return existingCategories;
+  }
+
+  // Fetch official catalog to inspect models and modalities
   let catalog = null;
   try {
     const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2, force: true }, { timeoutMs: 5000 });
@@ -728,42 +746,71 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     catalog = await fetchFallbackCatalog();
   }
   const models = Array.isArray(catalog.models) ? catalog.models : [];
-  const selectedSet = new Set(Array.isArray(downloadedModelIds) ? downloadedModelIds : []);
 
-  if (selectedSet.size === 0) {
-    try {
-      const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2, force: true }, { timeoutMs: 8000 });
-      if (catResp && Array.isArray(catResp.installedModels)) {
-        catResp.installedModels.forEach((id) => selectedSet.add(id));
-      }
-    } catch (_) {}
+  // Determine which models are ACTUALLY installed / downloaded
+  const installedSet = new Set(Array.isArray(downloadedModelIds) ? downloadedModelIds : []);
+  try {
+    const catResp = await sendToNative({ type: 'getOfficialCatalog', version: 2, force: true }, { timeoutMs: 5000 });
+    if (catResp && Array.isArray(catResp.installedModels)) {
+      catResp.installedModels.forEach((id) => installedSet.add(id));
+    }
+  } catch (_) {}
+
+  // If no models are actually installed, create NO categories
+  if (installedSet.size === 0) {
+    console.log('[AutoSetupCategories] No models installed on disk. Zero categories created.');
+    return [];
   }
 
-  if (selectedSet.size === 0) {
-    selectedSet.add('fvf_heimdall04');
-    selectedSet.add('fvf_heimdall03');
-    selectedSet.add('fvf_heimdall02');
-  }
-
+  // Base threshold is 75% (0.75) or higher
   const threshold = typeof customThreshold === 'number'
     ? Math.max(0.05, Math.min(0.99, customThreshold))
     : 0.75;
 
+  const modalities = ['image', 'text', 'audio', 'video'];
   const newEnsembles = [];
-  const matchedModelIds = new Set();
 
-  for (const m of models) {
-    if (!selectedSet.has(m.id) || m.is_ai_detector === false) continue;
-    matchedModelIds.add(m.id);
-    const mod = m.modality || 'image';
-    const borderColor = m.default_color || '#FF4D1C';
+  // Freshness comparator to select the NEWEST FvF model for a modality
+  const compareModelFreshness = (a, b) => {
+    const vA = String(a.version || '0').replace(/[^0-9.]/g, '').split('.').map(Number);
+    const vB = String(b.version || '0').replace(/[^0-9.]/g, '').split('.').map(Number);
+    for (let i = 0; i < Math.max(vA.length, vB.length); i++) {
+      const numA = vA[i] || 0;
+      const numB = vB[i] || 0;
+      if (numA !== numB) return numB - numA;
+    }
+    const matchA = (a.id || '').match(/\d+/);
+    const matchB = (b.id || '').match(/\d+/);
+    const numA = matchA ? parseInt(matchA[0], 10) : 0;
+    const numB = matchB ? parseInt(matchB[0], 10) : 0;
+    return numB - numA;
+  };
+
+  for (const mod of modalities) {
+    // Find all INSTALLED FvF models for this modality
+    const installedFvFModels = models.filter((m) => {
+      return (m.modality || 'image') === mod &&
+             installedSet.has(m.id) &&
+             m.is_ai_detector !== false;
+    });
+
+    // ONLY if a model of that modality is ACTUALLY downloaded!
+    if (installedFvFModels.length === 0) {
+      continue;
+    }
+
+    // Sort to pick the NEWEST FvF model
+    installedFvFModels.sort(compareModelFreshness);
+    const newestModel = installedFvFModels[0];
+
+    const borderColor = newestModel.default_color || (mod === 'image' ? '#FF1744' : '#FF6218');
     const ensemble = {
-      id: `auto_${mod}_${m.id}`,
-      name: m.category_name || m.name || `AI ${mod}`,
-      modality: mod === 'text' ? 'text' : 'image',
+      id: `auto_${mod}_${newestModel.id}`,
+      name: newestModel.name || newestModel.category_name || `AI ${mod}`,
+      modality: mod,
       enabled: true,
-      threshold,
-      classifiers: [m.id],
+      threshold, // 75%
+      classifiers: [newestModel.id],
       weights: [1],
       styles: mod === 'text'
         ? {
@@ -799,15 +846,18 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     newEnsembles.push(ensemble);
   }
 
-  for (const m of models) {
-    if (!selectedSet.has(m.id) || m.is_ai_detector !== false) continue;
+  // Also include custom object detectors (like ResNet 50 Spider) IF downloaded
+  const installedNonAiModels = models.filter((m) => {
+    return installedSet.has(m.id) && m.is_ai_detector === false;
+  });
+  for (const m of installedNonAiModels) {
     const borderColor = m.default_color || '#FFB020';
     newEnsembles.push({
       id: `auto_image_${m.id}`,
       name: m.category_name || m.name || 'Object Detector',
       modality: 'image',
       enabled: true,
-      threshold,
+      threshold, // 75%
       classifiers: [m.id],
       weights: [1],
       styles: {
@@ -826,50 +876,8 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     });
   }
 
-  for (const modelId of selectedSet) {
-    if (matchedModelIds.has(modelId)) continue;
-    const isText = modelId.includes('text') || modelId.includes('mimir');
-    const mod = isText ? 'text' : 'image';
-    const borderColor = modelId.includes('04') ? '#FF1744' : '#FF4D1C';
-    newEnsembles.push({
-      id: `auto_${mod}_${modelId}`,
-      name: modelId.replace(/^fvf_/, 'FvF ').replace(/_/g, ' '),
-      modality: mod,
-      enabled: true,
-      threshold,
-      classifiers: [modelId],
-      weights: [1],
-      styles: mod === 'text'
-        ? {
-            text: {
-              applyBlur: true,
-              blurMode: 'hover',
-              blurAmount: 2,
-              applyStrikethrough: true,
-              strikethroughMode: 'hover',
-              strikethroughColor: borderColor,
-              applyUnderline: false,
-              underlineMode: 'off',
-              underlineColor: borderColor,
-              applyHighlight: false,
-              highlightMode: 'off',
-              highlightColor: '#fff3a1'
-            }
-          }
-        : {
-            image: {
-              applyBlur: true,
-              blurAmount: 6,
-              blurMode: 'hover',
-              applyBorder: true,
-              borderMultiplier: 1.2,
-              borderColor,
-              borderMode: 'hover',
-              applyBadge: true,
-              badgeMode: 'hover'
-            }
-          }
-    });
+  if (newEnsembles.length === 0) {
+    return [];
   }
 
   const storagePayload = {
@@ -881,7 +889,6 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     onboardingCompletedAt: Date.now()
   };
 
-  const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
   if (storageArea && storageArea.set) {
     await storageArea.set(storagePayload);
   }

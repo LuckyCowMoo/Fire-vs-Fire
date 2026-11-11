@@ -729,6 +729,13 @@ async function downloadSelectedModelsAndAdvance() {
   if (progressFill) progressFill.style.width = '100%';
   if (progressPercent) progressPercent.textContent = '100%';
 
+  // Automatically configure default categories ONLY if no categories exist yet
+  const installedIds = Array.from(installedModels);
+  await sendBridgeMessage('AUTO_SETUP_CATEGORIES', {
+    downloadedModels: installedIds,
+    threshold: 0.75
+  }).catch(() => {});
+
   await new Promise((r) => setTimeout(r, 1200));
 
   if (!isInitialSetup) {

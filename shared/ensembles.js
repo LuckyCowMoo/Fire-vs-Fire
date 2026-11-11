@@ -18,7 +18,7 @@
         name: 'FvF Heimdall 04',
         modality: 'image',
         enabled: true,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall04'],
         weights: null,
         styles: {
@@ -40,7 +40,7 @@
         name: 'FvF Heimdall 03',
         modality: 'image',
         enabled: false,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall03'],
         weights: null,
         styles: {
@@ -62,7 +62,7 @@
         name: 'FvF Heimdall 02',
         modality: 'image',
         enabled: false,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall02'],
         weights: null,
         styles: {
@@ -84,7 +84,7 @@
         name: 'AI Text',
         modality: 'text',
         enabled: false,
-        threshold: settings.textAiThreshold ?? 0.5,
+        threshold: settings.textAiThreshold ?? 0.75,
         classifiers: ['text'],
         weights: null,
         styles: {

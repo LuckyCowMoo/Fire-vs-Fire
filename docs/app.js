@@ -492,9 +492,7 @@ function renderModalityQuadrants() {
 
       // Stickers & Status Badges
       let stickersHtml = '';
-      if (isInstalled) {
-        stickersHtml += `<span class="sticker-downloaded">✓ Installed</span>`;
-      } else if (!isAvailable) {
+      if (!isAvailable) {
         const badgeText = model.status === 'coming_next' ? 'Coming Next' : 'Coming Soon';
         stickersHtml += `<span class="sticker-upcoming">⏳ ${badgeText}</span>`;
       }
@@ -505,8 +503,8 @@ function renderModalityQuadrants() {
       }
       const statusLineHtml = isInstalled
         ? `<div class="model-selection-row">
-             <span class="model-status-installed-badge">
-               ✓ Installed in native/classifiers/
+             <span class="model-status-installed-badge" title="Installed in native/classifiers/">
+               ✓ Installed
              </span>
            </div>`
         : isAvailable

@@ -151,6 +151,9 @@ import sys
 class BaseClassifier(ABC):
     """Abstract base class for AI detection classifiers (multi-modal)."""
 
+    # Optional: declare extra PyPI dependencies to auto-install
+    REQUIRED_PACKAGES: List[str] = []
+
     def __init__(self, model_path: Optional[Path] = None):
         self.model_path = model_path
         self.model = None

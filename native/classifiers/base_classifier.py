@@ -1,36 +1,55 @@
 """
-Base classifier interface for modular AI detection models.
+Base classifier interface for modular content classification and AI detection.
 
-All classifiers must implement this interface to be compatible with
-the model registry and orchestrator system.
+All classifiers placed in native/classifiers/ must inherit from BaseClassifier
+to be automatically discovered, registered, and managed by the Native Host.
 
-Supports multiple modalities:
+Supports multi-modal pipelines:
 - 'image': PIL Image objects
-- 'text': Text strings
-- 'audio': Audio data (future)
-- 'video': Video data (future)
+- 'text': Text strings / token sequences
+- 'audio': Audio waveforms / spectrograms
+- 'video': Video frames / streams
 
-QUICK CHECKLIST FOR NEW CLASSIFIERS:
-===================================
-1. Import BaseClassifier
-2. Implement ALL 6 abstract methods (get_supported_modalities, load_model, 
-    preprocess_batch, classify_batch, get_device_info, get_model_name)
-3. For ML models: Use lazy imports in _ensure_imports() to avoid startup delays
-4. For GPU models: Set self.device in load_model() using _try_cuda_then_directml()
-5. In preprocess_batch: Return (batch_tensor, valid_indices) - indices must match batch_tensor order
-6. In classify_batch: Return List[float] matching batch length (scores or -1.0 for errors)
-7. Set self._is_loaded = True after successful load_model()
-8. Use _log_to_stderr() for all debug messages (avoids corrupting native messaging)
-9. Optionally override get_label() to provide a human-readable badge label
-10. Declare any extra PyPI dependencies in REQUIRED_PACKAGES (e.g. REQUIRED_PACKAGES = ["timm>=0.9.0"])
+CORE CONTRACT:
+=============
+Each subclass is an independent Python class. Hardware acceleration, framework
+choice (PyTorch, ONNX Runtime, TensorRT, OpenVINO, TensorFlow, pure Python heuristics),
+device placement, and runtime management are entirely up to the classifier implementation.
 
-COMMON GOTCHAS:
-- Don't use print() directly - use sys.stderr or _log_to_stderr()
-- valid_indices in preprocess_batch() MUST match batch_tensor order
-- Scores must be in [0.0, 1.0] where 1.0 = detected content, 0.0 = not detected content, -1.0 = error
-- Always check is_loaded() before inference; process_batch() handles this
-- If model_path is None, provide a sensible default in __init__
-- If get_label() is not overridden, the UI falls back to "AI generated"
+To integrate with the orchestrator, implement the 6 abstract methods:
+1. get_supported_modalities() -> Set[str]
+   Return supported modalities (e.g. {'image'}, {'text'}).
+2. load_model() -> tuple[bool, Optional[str]]
+   Initialize your model / engine. Return (True, None) on success or (False, "reason") on failure.
+   Set self._is_loaded = True when ready.
+3. preprocess_batch(inputs, modality) -> tuple[Any, List[int]]
+   Transform raw inputs into model input format.
+   Return (batch_tensor, valid_indices) where valid_indices maps batch items back to inputs.
+4. classify_batch(batch_tensor) -> List[float]
+   Execute inference. Return a list of float scores in [0.0, 1.0] matching batch size,
+   or -1.0 for processing errors.
+5. get_device_info() -> Dict[str, Any]
+   Diagnostic metadata for the extension UI (e.g. {'device': 'cuda', 'name': 'NVIDIA RTX 4080'}).
+6. get_model_name() -> str
+   Human-readable model name (e.g. 'FvF Heimdall 04').
+
+OPTIONAL EXTENSIONS:
+====================
+- get_label() -> str:
+  Badge text shown in the browser UI (e.g. "AI generated", "Spider", "Deepfake").
+  Defaults to "AI generated".
+- REQUIRED_PACKAGES: List[str]:
+  PyPI packages needed by this classifier (e.g. ["onnxruntime-directml>=1.18.0"]).
+  The Native Host checks these on load and can auto-install missing packages.
+- unload_model():
+  Called when freeing resources/VRAM during inactivity or modality switches.
+
+CRITICAL PROTOCOL RULE:
+=======================
+Never use print() or write to sys.stdout!
+The browser extension communicates with the Native Host via binary length-prefixed
+JSON on stdout. Any raw stdout output corrupts the protocol framing.
+Always use self._log_to_stderr() or print(..., file=sys.stderr) for debug logging.
 """
 
 from abc import ABC, abstractmethod
@@ -338,19 +357,16 @@ class BaseClassifier(ABC):
     
     def _try_cuda_then_directml(self, lib_torch=None) -> Any:
         """
-        Convenience method for setting up GPU device with proper fallback.
+        Optional helper method for PyTorch-based models on Windows/macOS/Linux.
         
-        Tries DirectML first (AMD/Intel GPU on Windows), then CUDA, then CPU.
-        Sets self.device and self._device_info if they exist.
+        Attempts device discovery in order: CUDA -> Apple Silicon MPS -> DirectML -> CPU.
+        Provided purely as an optional utility; classifiers are free to manage their own devices.
         
         Args:
-            lib_torch: torch module (if None, tries to import dynamically)
+            lib_torch: torch module (if None, attempts dynamic import)
         
         Returns:
             Device object (torch.device or equivalent)
-        
-        Example:
-            self.device = self._try_cuda_then_directml(self.torch)
         """
         if lib_torch is None:
             try:

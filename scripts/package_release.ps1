@@ -71,7 +71,7 @@ New-Item -ItemType Directory -Force -Path $nativeDst | Out-Null
 
 Get-ChildItem -Path $nativeSrc -Recurse | Where-Object {
     $_.FullName -notmatch '\\__pycache__' -and
-    $_.Extension -notin @('.pt', '.pth', '.onnx', '.log')
+    $_.Extension -notin @('.pt', '.pth', '.onnx', '.log', '.joblib', '.safetensors', '.bin')
 } | ForEach-Object {
     $relPath = $_.FullName.Substring($nativeSrc.Length + 1)
     $targetPath = Join-Path $nativeDst $relPath

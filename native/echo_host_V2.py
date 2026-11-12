@@ -1406,7 +1406,7 @@ def _normalize_ensembles(model_config: Dict[str, Any], modality: str) -> List[Di
             'weights': model_config.get('weights', None),
         }]
 
-    default_clfs = ['fvf_heimdall04'] if modality == 'image' else ['text']
+    default_clfs = ['fvf_heimdall04'] if modality == 'image' else ['fvf_mimir_02']
     return [{
         'id': f'default_{modality}',
         'classifiers': default_clfs,

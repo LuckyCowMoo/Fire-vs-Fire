@@ -107,7 +107,7 @@
         modality: 'text',
         enabled: false,
         threshold: settings.textAiThreshold ?? 0.75,
-        classifiers: ['text'],
+        classifiers: ['fvf_mimir_02'],
         weights: null,
         styles: {
           text: {

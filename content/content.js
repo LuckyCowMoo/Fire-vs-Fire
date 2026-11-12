@@ -30,7 +30,7 @@ let settings = {
   imageAiThreshold: 0.75,          // Threshold (0-1) for flagging images as AI (0.5 = 50%)
   minImageDimension: 64,          // Skip tiny images/icons below this size (px)
   textAiThreshold: 0.75,           // Threshold (0-1) for flagging text as AI
-  minTextLength: 250,             // Minimum character length for text to be classified
+  minTextLength: 150,             // Minimum character length for text to be classified
   verboseLogs: false,             // Show detailed logging for processing details
   lazyLoad: false,                // Unload models after use (true) or keep in memory (false)
   ensembles: null                 // Ensemble configs (loaded from storage)

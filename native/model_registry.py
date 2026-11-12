@@ -268,6 +268,10 @@ class ModelRegistry:
                 "fvf_heimdall_04_b": "fvf_heimdall04_b",
                 "fvf_heimdall04_b": "fvf_heimdall_04_b",
                 "fvf_heimdall04b": "fvf_heimdall_04_b",
+                "fvf_mimir_02": "fvf_mimir",
+                "fvf_mimir02": "fvf_mimir",
+                "mimir": "fvf_mimir",
+                "text": "fvf_mimir",
                 "fvf_heimdall_04b": "fvf_heimdall_04_b",
             }
             alias_target = aliases.get(classifier_id)

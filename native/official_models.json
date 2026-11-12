@@ -218,20 +218,19 @@
     },
     {
       "id": "fvf_mimir_02",
-      "name": "Mímir V2",
-      "version": "2.0.0",
+      "name": "FvF Mímir V2",
+      "version": "2.2.0",
       "modality": "text",
       "status": "available",
       "is_ai_detector": true,
-      "special_badge": "Official",
-      "category_name": "Mímir V2",
+      "category_name": "FvF Mímir V2",
       "label": "AI text",
       "default_threshold": 0.75,
       "default_color": "#FF6218",
-      "size_mb": 81.8,
-      "architecture": "Universal INT8 Causal LM Perplexity Curvature & Mindner Stylometrics",
-      "tagline": "Hardware-Accelerated Local AI Text Classifier",
-      "description": "Universal AI text classifier powered by Causal LM token perplexity curvature, entropy normalization (Binoculars metric), sentence burstiness, and Mindner stylometrics. Fully hardware-accelerated across NVIDIA RTX, AMD RX, Intel ARC, Apple Silicon, and Qualcomm Snapdragon X Elite.",
+      "size_mb": 166.9,
+      "architecture": "Dual-Channel DistilRoBERTa-AFPL Encoder + Causal LM Curvature & Normalized Mindner Stylometrics (INT8 ONNX)",
+      "tagline": "Hardware-Accelerated Dual-Channel AI Text Classifier",
+      "description": "True dual-channel AI text classifier: Channel 1 reads contextual discourse structure with a calibrated DistilRoBERTa-AFPL encoder across short and technical/historical prose, while Channel 2 fuses Causal LM perplexity curvature, rank tails, and 19 length-normalized Mindner stylometrics. Trained across Gemini, GPT-4o, o3-mini, Claude/Llama/DeepSeek, and human corpora with universal ONNX INT8 acceleration.",
       "files": [
         {
           "type": "classifier_py",
@@ -246,20 +245,42 @@
           "required": true
         },
         {
-          "type": "weights_head",
+          "type": "tokenizer_json",
+          "relative_path": "native/classifiers/mimir_tokenizer/tokenizer.json",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/mimir_tokenizer/tokenizer.json",
+          "required": false
+        },
+        {
+          "type": "tokenizer_config",
+          "relative_path": "native/classifiers/mimir_tokenizer/tokenizer_config.json",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/mimir_tokenizer/tokenizer_config.json",
+          "required": false
+        },
+        {
+          "type": "weights_joblib",
           "relative_path": "native/classifiers/fvf_mimir_head.joblib",
           "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_head.joblib",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_head.joblib",
+          "required": true
+        },
+        {
+          "type": "weights_encoder_onnx_int8",
+          "relative_path": "native/classifiers/fvf_mimir_encoder_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_encoder_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_encoder_int8.onnx",
           "required": true
         },
         {
           "type": "weights_onnx_int8",
           "relative_path": "native/classifiers/fvf_mimir_backbone_int8.onnx",
           "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_backbone_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_backbone_int8.onnx",
           "required": false
         }
       ],
-      "download_size": "82 MB",
-      "ram_size": "250 MB RAM"
+      "download_size": "167 MB",
+      "ram_size": "420 MB RAM",
+      "recommended": true
     },
     {
       "id": "fvf_huginn_01",

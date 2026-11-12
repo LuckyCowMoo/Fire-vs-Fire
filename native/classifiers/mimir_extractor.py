@@ -271,9 +271,15 @@ class RuntimeLMScorer:
                     providers_to_try.append("CoreMLExecutionProvider")
                 if "OpenVINOExecutionProvider" in available_providers:
                     providers_to_try.append("OpenVINOExecutionProvider")
+                if "QNNExecutionProvider" in available_providers:
+                    providers_to_try.append("QNNExecutionProvider")
                 providers_to_try.append("CPUExecutionProvider")
 
-                self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=providers_to_try)
+                try:
+                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=providers_to_try)
+                except Exception as ep_err:
+                    print(f"[Mimir RuntimeLMScorer] Accelerator EP fallback to ONNX CPU INT8 ({ep_err})", file=sys.stderr)
+                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=["CPUExecutionProvider"])
                 active_prov = self._ort_session.get_providers()[0]
                 
                 if "Dml" in active_prov:
@@ -497,3 +503,156 @@ class RuntimeLMScorer:
             "lm_tail_frac": 0.0, "lm_sent_ppl_mean": 0.0, "lm_sent_ppl_std": 0.0,
             "lm_sent_ppl_range_ratio": 0.0, "lm_curvature_discrepancy": 0.0,
         }
+
+
+class RuntimeTextEncoder:
+    """Channel 1 Semantic & Discourse Forensic Encoder (DistilRoBERTa-AFPL INT8).
+
+    Universal Hardware Priority:
+    DirectML (AMD/Intel/Qualcomm) -> CUDA (NVIDIA) -> CoreML (Apple) ->
+    OpenVINO (Intel) -> QNN (Qualcomm) -> ONNX CPU INT8 -> PyTorch GPU/CPU Fallback.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "distilbert/distilroberta-base",
+        onnx_model_path: Optional[Path] = None,
+        tokenizer_dir: Optional[Path] = None,
+        device: Optional[Any] = None,
+        max_length: int = 384,
+    ):
+        base_dir = Path(__file__).resolve().parent
+        self.model_name = model_name
+        self.onnx_model_path = onnx_model_path or (base_dir / "fvf_mimir_encoder_int8.onnx")
+        self.tokenizer_dir = tokenizer_dir or (base_dir / "mimir_tokenizer")
+        self.max_length = max_length
+        self._requested_device = device
+        self._tokenizer = None
+        self._ort_session = None
+        self._torch_model = None
+        self._torch = None
+        self._device = None
+        self._backend = "CPU"
+        self._device_name = "CPU"
+
+    def _load_tokenizer(self):
+        from transformers import AutoTokenizer
+        if self.tokenizer_dir and Path(self.tokenizer_dir).is_dir() and (Path(self.tokenizer_dir) / "tokenizer.json").exists():
+            return AutoTokenizer.from_pretrained(str(self.tokenizer_dir))
+        return AutoTokenizer.from_pretrained(self.model_name)
+
+    def probe_hardware_and_load(self) -> bool:
+        """Initialize the Channel 1 Encoder using ONNX Runtime INT8 or PyTorch."""
+        if self.onnx_model_path and self.onnx_model_path.exists():
+            try:
+                import onnxruntime as ort
+                available = ort.get_available_providers()
+                providers_to_try = [
+                    ep for ep in (
+                        "DmlExecutionProvider",
+                        "CUDAExecutionProvider",
+                        "CoreMLExecutionProvider",
+                        "OpenVINOExecutionProvider",
+                        "QNNExecutionProvider",
+                    )
+                    if ep in available
+                ] + ["CPUExecutionProvider"]
+
+                try:
+                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=providers_to_try)
+                except Exception as ep_err:
+                    print(f"[Mimir RuntimeTextEncoder] Accelerator EP fallback to ONNX CPU INT8 ({ep_err})", file=sys.stderr)
+                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=["CPUExecutionProvider"])
+
+                active_prov = self._ort_session.get_providers()[0]
+                if "Dml" in active_prov:
+                    self._backend, self._device_name = "DirectML", "DirectML GPU/NPU (AMD/Intel/Qualcomm)"
+                elif "CUDA" in active_prov:
+                    self._backend, self._device_name = "CUDA", "NVIDIA CUDA GPU"
+                elif "CoreML" in active_prov:
+                    self._backend, self._device_name = "CoreML", "Apple Silicon Neural Engine (CoreML)"
+                elif "OpenVINO" in active_prov:
+                    self._backend, self._device_name = "OpenVINO", "Intel OpenVINO"
+                elif "QNN" in active_prov:
+                    self._backend, self._device_name = "QNN", "Qualcomm Hexagon NPU"
+                else:
+                    self._backend, self._device_name = "ONNX-INT8", "CPU (INT8 Quantized)"
+
+                self._tokenizer = self._load_tokenizer()
+                print(f"[Mimir RuntimeTextEncoder] Initialized ONNX INT8 session on {self._device_name} ({active_prov})", file=sys.stderr)
+                return True
+            except Exception as e:
+                print(f"[Mimir RuntimeTextEncoder] ONNX init notice ({e}); trying PyTorch fallback...", file=sys.stderr)
+
+        # Fallback: PyTorch local fine-tuned checkpoint (if present in dev/training tree)
+        ckpt_dir = Path(__file__).resolve().parent.parent.parent / "training" / "checkpoints" / "mimir_encoder_best"
+        if ckpt_dir.is_dir():
+            try:
+                import torch
+                from transformers import AutoModelForSequenceClassification
+                self._torch = torch
+                if self._requested_device is not None:
+                    self._device = self._requested_device
+                elif torch.cuda.is_available():
+                    self._device = torch.device("cuda")
+                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    self._device = torch.device("mps")
+                else:
+                    self._device = torch.device("cpu")
+                self._backend = str(self._device).upper()
+                self._device_name = torch.cuda.get_device_name(0) if self._device.type == "cuda" else str(self._device)
+                self._tokenizer = self._load_tokenizer()
+                self._torch_model = AutoModelForSequenceClassification.from_pretrained(str(ckpt_dir)).to(self._device).eval()
+                print(f"[Mimir RuntimeTextEncoder] Initialized PyTorch checkpoint on {self._device_name}", file=sys.stderr)
+                return True
+            except Exception as e:
+                print(f"[Mimir RuntimeTextEncoder] PyTorch init failed: {e}", file=sys.stderr)
+        return False
+
+    def _run_window(self, window_text: str) -> float:
+        tokens = self._tokenizer(
+            window_text,
+            return_tensors="np",
+            truncation=True,
+            max_length=self.max_length,
+        )
+        input_ids = tokens["input_ids"].astype(np.int64)
+        attention_mask = tokens["attention_mask"].astype(np.int64)
+
+        if self._ort_session is not None:
+            ort_out = self._ort_session.run(
+                ["logits"],
+                {"input_ids": input_ids, "attention_mask": attention_mask},
+            )
+            return float(np.asarray(ort_out[0]).reshape(-1)[0])
+
+        if self._torch_model is not None and self._torch is not None:
+            torch = self._torch
+            with torch.no_grad():
+                ids_t = torch.tensor(input_ids, device=self._device)
+                mask_t = torch.tensor(attention_mask, device=self._device)
+                out = self._torch_model(input_ids=ids_t, attention_mask=mask_t)
+                return float(out.logits.reshape(-1)[0].item())
+
+        return 0.0
+
+    def score(self, text: str) -> Dict[str, float]:
+        cleaned = text.strip()
+        if not cleaned:
+            return {"enc_logit": 0.0, "enc_prob": 0.5}
+
+        if self._ort_session is None and self._torch_model is None:
+            if not self.probe_hardware_and_load():
+                return {"enc_logit": 0.0, "enc_prob": 0.5}
+
+        logit = self._run_window(cleaned)
+        if len(cleaned) > 1600:
+            w2 = cleaned[850:2500].strip()
+            if len(w2) >= 120:
+                logit = 0.5 * (logit + self._run_window(w2))
+
+        prob = 1.0 / (1.0 + math.exp(-max(min(logit, 30.0), -30.0)))
+        return {"enc_logit": float(logit), "enc_prob": float(prob)}
+
+    def get_hardware_info(self) -> Dict[str, str]:
+        return {"device": str(self._device or "ort"), "name": self._device_name, "backend": self._backend}

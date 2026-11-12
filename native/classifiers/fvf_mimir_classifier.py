@@ -27,6 +27,7 @@ try:
         sanitize_text,
         extract_stylometric_features,
         RuntimeLMScorer,
+        RuntimeTextEncoder,
     )
 except Exception:
     import importlib.util
@@ -43,22 +44,25 @@ except Exception:
     sanitize_text = _ext_mod.sanitize_text
     extract_stylometric_features = _ext_mod.extract_stylometric_features
     RuntimeLMScorer = _ext_mod.RuntimeLMScorer
+    RuntimeTextEncoder = _ext_mod.RuntimeTextEncoder
 
 
 class FvfMimirClassifier(BaseClassifier):
     """FvF Mímir V2 AI Text Classifier."""
 
     CLASSIFIER_ID: str = "fvf_mimir_02"
-    REQUIRED_PACKAGES: List[str] = ["lightgbm", "joblib"]
+    REQUIRED_PACKAGES: List[str] = ["transformers", "onnxruntime", "lightgbm", "scikit-learn", "joblib"]
 
     FEATURE_COLS: Tuple[str, ...] = (
-        # Stream 1: LM Perplexity & Curvature (17 features)
+        # Channel 1: Semantic & Discourse Forensic Encoder (2 features)
+        "enc_logit", "enc_prob",
+        # Channel 2A: LM Perplexity & Curvature (17 features)
         "lm_ppl_global", "lm_mean_nll", "lm_entropy_mean", "lm_ppl_norm",
         "lm_logprob_mean", "lm_logprob_std", "lm_logprob_skew", "lm_logprob_kurtosis",
         "lm_top1_frac", "lm_top5_frac", "lm_top10_frac", "lm_top100_frac",
         "lm_tail_frac", "lm_sent_ppl_mean", "lm_sent_ppl_std", "lm_sent_ppl_range_ratio",
         "lm_curvature_discrepancy",
-        # Stream 2: Mindner Stylometrics (19 robust forensic features, excluding tone/length shortcuts)
+        # Channel 2B: Length-Normalized Mindner Stylometrics (19 features, no raw length/sentence count)
         "stylo_words_per_sentence_mean", "stylo_ttr", "stylo_yules_k", "stylo_simpson_d",
         "stylo_flesch_reading_ease", "stylo_flesch_kincaid_grade", "stylo_ari",
         "stylo_syllables_per_word", "stylo_determiner_density", "stylo_preposition_density",
@@ -79,9 +83,11 @@ class FvfMimirClassifier(BaseClassifier):
                 resolved_path = p
                 break
         super().__init__(model_path=model_path or resolved_path or candidate_paths[0])
+        self._text_encoder: Optional[RuntimeTextEncoder] = None
         self._lm_scorer: Optional[RuntimeLMScorer] = None
         self._head_bundle: Optional[Any] = None
         self._classifier_head: Optional[Any] = None
+        self._active_features: Tuple[str, ...] = self.FEATURE_COLS
         self._device_info: Dict[str, Any] = {"device": "cpu", "name": "CPU", "backend": "CPU"}
 
     def get_supported_modalities(self) -> Set[str]:
@@ -101,21 +107,34 @@ class FvfMimirClassifier(BaseClassifier):
         device = self._try_cuda_then_directml()
         self._log_to_stderr(f"[FvfMimirClassifier] Probing hardware accelerators (Active: {self._device_info.get('name', 'CPU')})...")
 
-        # Initialize Universal LM Scorer
+        # Channel 1: Semantic & Discourse Forensic Encoder (DistilRoBERTa-AFPL INT8)
+        self._text_encoder = RuntimeTextEncoder(device=device)
+        if not self._text_encoder.probe_hardware_and_load():
+            self._log_to_stderr("[FvfMimirClassifier] Notice: Text encoder unavailable; using Channel 2 fallback.")
+        else:
+            enc_hw = self._text_encoder.get_hardware_info()
+            self._device_info = enc_hw
+
+        # Channel 2: Causal LM Perplexity & Curvature Scorer
         self._lm_scorer = RuntimeLMScorer(device=device)
         if not self._lm_scorer.probe_hardware_and_load():
             self._log_to_stderr("[FvfMimirClassifier] Notice: LM scorer using fallback.")
-        else:
-            hw = self._lm_scorer.get_hardware_info()
-            self._device_info = hw
+        elif not self._text_encoder or self._device_info.get("backend") == "CPU":
+            self._device_info = self._lm_scorer.get_hardware_info()
 
-        # Load calibrated classifier head bundle
+        # Load calibrated fusion head bundle
         if self.model_path and Path(self.model_path).exists():
             try:
                 import joblib
                 self._head_bundle = joblib.load(self.model_path)
-                self._classifier_head = self._head_bundle.get("classifier")
-                self._log_to_stderr(f"[FvfMimirClassifier] Loaded calibrated classifier head from {self.model_path}")
+                self._classifier_head = self._head_bundle.get("model") or self._head_bundle.get("classifier")
+                bundle_feats = self._head_bundle.get("features")
+                if bundle_feats:
+                    self._active_features = tuple(bundle_feats)
+                self._log_to_stderr(
+                    f"[FvfMimirClassifier] Loaded Dual-Channel head v{self._head_bundle.get('version', '2.2')} "
+                    f"({len(self._active_features)} features) from {self.model_path}"
+                )
             except Exception as e:
                 self._log_to_stderr(f"[FvfMimirClassifier] Failed loading head from {self.model_path}: {e}")
                 self._classifier_head = None
@@ -127,7 +146,7 @@ class FvfMimirClassifier(BaseClassifier):
 
     def preprocess_batch(self, inputs: List[Any], modality: str) -> Tuple[Any, List[int]]:
         if modality != "text":
-            return {"features": np.empty((0, len(self.FEATURE_COLS)))}, []
+            return {"features": np.empty((0, len(self._active_features)))}, []
 
         valid_indices: List[int] = []
         feature_rows: List[List[float]] = []
@@ -142,20 +161,22 @@ class FvfMimirClassifier(BaseClassifier):
 
             valid_indices.append(idx)
 
-            # Stream 1: LM Perplexity & Curvature
+            # Channel 1: Semantic & Discourse Forensic Encoder
+            enc_feats = self._text_encoder.score(sanitized) if self._text_encoder else {"enc_logit": 0.0, "enc_prob": 0.5}
+            # Channel 2A: LM Perplexity & Curvature
             lm_feats = self._lm_scorer.score(sanitized) if self._lm_scorer else {}
-            # Stream 2: Mindner Stylometrics
+            # Channel 2B: Length-Normalized Mindner Stylometrics
             sty_feats = extract_stylometric_features(sanitized)
 
-            row_dict = {**lm_feats, **sty_feats}
+            row_dict = {**enc_feats, **lm_feats, **sty_feats}
             feature_vector = [
                 float(row_dict[col]) if (col in row_dict and row_dict[col] is not None) else np.nan
-                for col in self.FEATURE_COLS
+                for col in self._active_features
             ]
             feature_rows.append(feature_vector)
 
         if not feature_rows:
-            return {"features": np.empty((0, len(self.FEATURE_COLS)))}, []
+            return {"features": np.empty((0, len(self._active_features)))}, []
 
         matrix = np.array(feature_rows, dtype=np.float32)
         return {"features": matrix}, valid_indices
@@ -175,19 +196,23 @@ class FvfMimirClassifier(BaseClassifier):
 
         # Baseline heuristic fallback if head weights are not yet generated
         scores: List[float] = []
-        col_to_idx = {c: i for i, c in enumerate(self.FEATURE_COLS)}
+        col_to_idx = {c: i for i, c in enumerate(self._active_features)}
         for row in matrix:
-            ppl_norm = row[col_to_idx["lm_ppl_norm"]] if "lm_ppl_norm" in col_to_idx else 1.0
-            top1 = row[col_to_idx["lm_top1_frac"]] if "lm_top1_frac" in col_to_idx else 0.35
-            tail = row[col_to_idx["lm_tail_frac"]] if "lm_tail_frac" in col_to_idx else 0.15
+            if "enc_prob" in col_to_idx:
+                scores.append(float(row[col_to_idx["enc_prob"]]))
+            else:
+                ppl_norm = row[col_to_idx["lm_ppl_norm"]] if "lm_ppl_norm" in col_to_idx else 1.0
+                top1 = row[col_to_idx["lm_top1_frac"]] if "lm_top1_frac" in col_to_idx else 0.35
+                tail = row[col_to_idx["lm_tail_frac"]] if "lm_tail_frac" in col_to_idx else 0.15
 
-            logit = 1.2 * (0.86 - ppl_norm) + 1.5 * (top1 - 0.38) - 1.2 * (tail - 0.10)
-            score = float(1.0 / (1.0 + math.exp(-max(min(logit * 2.5, 20.0), -20.0))))
-            scores.append(score)
+                logit = 1.2 * (0.86 - ppl_norm) + 1.5 * (top1 - 0.38) - 1.2 * (tail - 0.10)
+                score = float(1.0 / (1.0 + math.exp(-max(min(logit * 2.5, 20.0), -20.0))))
+                scores.append(score)
 
         return scores
 
     def unload_model(self) -> None:
+        self._text_encoder = None
         self._lm_scorer = None
         self._classifier_head = None
         self._is_loaded = False

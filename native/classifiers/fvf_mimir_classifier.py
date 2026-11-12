@@ -52,19 +52,19 @@ class FvfMimirClassifier(BaseClassifier):
     REQUIRED_PACKAGES: List[str] = ["lightgbm", "joblib"]
 
     FEATURE_COLS: Tuple[str, ...] = (
+        # Stream 1: LM Perplexity & Curvature (17 features)
         "lm_ppl_global", "lm_mean_nll", "lm_entropy_mean", "lm_ppl_norm",
         "lm_logprob_mean", "lm_logprob_std", "lm_logprob_skew", "lm_logprob_kurtosis",
         "lm_top1_frac", "lm_top5_frac", "lm_top10_frac", "lm_top100_frac",
         "lm_tail_frac", "lm_sent_ppl_mean", "lm_sent_ppl_std", "lm_sent_ppl_range_ratio",
-        "lm_curvature_discrepancy", "stylo_word_count", "stylo_sentence_count",
-        "stylo_words_per_sentence_mean", "stylo_words_per_sentence_std",
-        "stylo_sentence_length_cv", "stylo_ttr", "stylo_yules_k", "stylo_simpson_d",
+        "lm_curvature_discrepancy",
+        # Stream 2: Mindner Stylometrics (19 robust forensic features, excluding tone/length shortcuts)
+        "stylo_words_per_sentence_mean", "stylo_ttr", "stylo_yules_k", "stylo_simpson_d",
         "stylo_flesch_reading_ease", "stylo_flesch_kincaid_grade", "stylo_ari",
         "stylo_syllables_per_word", "stylo_determiner_density", "stylo_preposition_density",
-        "stylo_conjunction_density", "stylo_pronoun_1st_density", "stylo_pronoun_2nd_density",
-        "stylo_pronoun_3rd_density", "stylo_all_pronoun_density", "stylo_verb_density",
-        "stylo_adverb_density", "stylo_adjective_density", "stylo_comma_density",
-        "stylo_punct_density", "stylo_pacing_std",
+        "stylo_conjunction_density", "stylo_pronoun_3rd_density", "stylo_all_pronoun_density",
+        "stylo_verb_density", "stylo_adverb_density", "stylo_adjective_density",
+        "stylo_comma_density", "stylo_punct_density", "stylo_pacing_std",
     )
 
     def __init__(self, model_path: Optional[Path] = None):
@@ -177,13 +177,12 @@ class FvfMimirClassifier(BaseClassifier):
         scores: List[float] = []
         col_to_idx = {c: i for i, c in enumerate(self.FEATURE_COLS)}
         for row in matrix:
-            ppl_norm = row[col_to_idx.get("lm_ppl_norm", 0)]
-            burstiness = row[col_to_idx.get("lm_sent_ppl_std", 0)]
-            cv_len = row[col_to_idx.get("stylo_sentence_length_cv", 0)]
-            top1 = row[col_to_idx.get("lm_top1_frac", 0)]
+            ppl_norm = row[col_to_idx["lm_ppl_norm"]] if "lm_ppl_norm" in col_to_idx else 1.0
+            top1 = row[col_to_idx["lm_top1_frac"]] if "lm_top1_frac" in col_to_idx else 0.35
+            tail = row[col_to_idx["lm_tail_frac"]] if "lm_tail_frac" in col_to_idx else 0.15
 
-            logit = 1.5 * (0.88 - ppl_norm) + 0.05 * (12.0 - burstiness) + 1.2 * (0.40 - cv_len) + 1.5 * (top1 - 0.90)
-            score = float(1.0 / (1.0 + math.exp(-max(min(logit * 3.0, 20.0), -20.0))))
+            logit = 1.2 * (0.86 - ppl_norm) + 1.5 * (top1 - 0.38) - 1.2 * (tail - 0.10)
+            score = float(1.0 / (1.0 + math.exp(-max(min(logit * 2.5, 20.0), -20.0))))
             scores.append(score)
 
         return scores

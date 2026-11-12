@@ -1,564 +1,544 @@
-<!doctype html>
-<html lang="en" data-fvf-onboarding="true">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fire vs Fire — Local AI Detection &amp; Setup</title>
-    <link rel="icon" type="image/svg+xml" href="./assets/icon-red.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <!-- Interactive Ember Canvas -->
-    <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
-
-    <div class="site-shell">
-      <!-- ==================================================================
-           SCREEN 1: INSTALL NATIVE HOST (HARDWARE-ACCELERATED AI ENVIRONMENT)
-           ================================================================== -->
-      <section class="wizard-screen active" id="screen-1" data-screen="1">
-        <div class="screen-header">
-          <h1 class="display-title">Install the Local Native Host</h1>
-          <p class="lead-subtitle">
-            You’ve installed the <strong>Fire vs Fire</strong> browser extension! Next, install the
-            <strong>Native Host</strong>—the local environment where AI classification actually happens.
-          </p>
-        </div>
-
-        <div class="glass-card-3d native-hero-card" data-tilt style="max-width: 820px;">
-          <div id="native-why-section">
-            <h2 style="font-size: 1.45rem; font-weight: 800; margin-bottom: 12px;">
-              Why is the Native Host separate from the browser?
-            </h2>
-            <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 1.05rem; line-height: 1.6;">
-              Web browsers run inside a restricted sandbox with limited hardware access. Real AI classification needs direct hardware &amp; GPU acceleration to run fast enough to keep up with live web browsing.
-            </p>
-          </div>
-
-          <!-- Post-download step-by-step instructions (revealed after clicking download) -->
-          <div id="native-install-instructions" style="display: none;">
-            <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 16px; color: #ffb38a;">
-              How to Install in File Explorer (2 Quick Steps)
-            </h2>
-            <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px;">
-              <div style="display: flex; gap: 14px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);">
-                <div style="background: rgba(255,98,24,0.25); color: #ff8a3d; font-weight: 800; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.95rem;">1</div>
-                <div>
-                  <strong style="color: #ffffff; font-size: 1rem;">Extract the downloaded ZIP</strong>
-                  <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px; line-height: 1.5;">
-                    Open your <code>Downloads</code> folder, right-click <code>FireVsFire-NativeHost.zip</code>, and choose <strong>Extract All…</strong>.
-                  </div>
-                </div>
-              </div>
-
-              <div style="display: flex; gap: 14px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);">
-                <div style="background: rgba(255,98,24,0.25); color: #ff8a3d; font-weight: 800; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.95rem;">2</div>
-                <div>
-                  <strong style="color: #ffffff; font-size: 1rem;">Double-click <code>Install-FireVsFire-NativeHost.bat</code></strong>
-                  <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px; line-height: 1.5;">
-                    Inside the extracted folder, simply double-click <strong>Install-FireVsFire-NativeHost.bat</strong> in File Explorer.
-                    <span style="display: block; margin-top: 4px; color: #a3ff70; font-size: 0.85rem;">✓ No terminal needed! It auto-configures Python, GPU acceleration, and registers the browser bridge in 1 click.</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Live detection status callout -->
-            <div id="native-live-status-box" style="padding: 14px 18px; border-radius: 14px; background: rgba(255, 140, 0, 0.1); border: 1px solid rgba(255, 140, 0, 0.35); display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px;">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <span id="native-pulse-icon" style="font-size: 1.3rem;">⏳</span>
-                <div>
-                  <div id="native-status-heading" style="font-weight: 700; color: #ffb020; font-size: 0.98rem;">Waiting for Native Host connection…</div>
-                  <div id="native-status-detail" style="font-size: 0.84rem; color: var(--text-secondary); margin-top: 2px;">
-                    Keep this tab open. As soon as the installer completes, this page will automatically advance!
-                  </div>
-                </div>
-              </div>
-              <button type="button" class="btn-ember-outline" id="check-connection-btn" style="padding: 8px 16px; font-size: 0.84rem; white-space: nowrap;">
-                ↻ Check Now
-              </button>
-            </div>
-          </div>
-
-          <div style="display: flex; flex-direction: column; gap: 14px;">
-            <div class="native-action-bar">
-              <a
-                href="https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="btn-fire"
-                id="download-native-host-btn"
-              >
-                <span>Download Native Host</span>
-              </a>
-              <button type="button" class="btn-ember-outline" id="skip-to-models-btn" disabled style="opacity: 0.45; cursor: not-allowed;">
-                <span>Choose Models →</span>
-              </button>
-            </div>
-            <div id="native-not-connected-hint" style="font-size: 0.84rem; color: #ff9d66; display: none;">
-              ⚠️ Native Host must be installed and connected before proceeding to model downloads.
-              <a href="#" id="force-proceed-models-btn" style="color: #ffc299; text-decoration: underline; margin-left: 8px;">Already installed? Choose Models →</a>
-            </div>
-            <div>
-              <a
-                href="https://github.com/LuckyCowMoo/Fire-vs-Fire"
-                target="_blank"
-                rel="noopener noreferrer"
-                style="font-size: 0.88rem; color: #ffb38a; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;"
-              >
-                View Source on GitHub ↗
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ==================================================================
-           SCREEN 2: 4 MODALITY QUADRANTS (FIRST-PARTY CLASSIFIER SELECTOR)
-           ================================================================== -->
-      <section class="wizard-screen" id="screen-2" data-screen="2">
-        <div class="screen-header" style="margin-bottom: 24px;">
-          <h1 class="display-title" style="margin-bottom: 4px;">Choose Your First-Party Classifiers</h1>
-          <p style="color: var(--text-secondary); font-size: 0.88rem; margin: 0;">Auto-discovers any classifier or weights in <code>native/classifiers/</code> (auto-scanning in background)</p>
-        </div>
-
-        <!-- 4 Modality Quadrants Grid (Populated dynamically from official_models.json) -->
-        <div class="quadrants-grid" id="modality-quadrants-container">
-          <!-- Quadrants rendered dynamically by app.js -->
-        </div>
-
-        <!-- Expandable Developer Guide: Build Your Own Classifier with Full BaseClassifier API -->
-        <details class="glass-card-3d byo-classifier-card">
-          <summary>
-            <span>Want to build your own classifier? Click to see the BaseClassifier API</span>
-            <span style="font-size: 0.82rem; color: #ffb38a;">BaseClassifier API ▾</span>
-          </summary>
-          <pre class="code-block-ember"><code id="base-classifier-code">from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Set
-from pathlib import Path
-import sys
-
-class BaseClassifier(ABC):
-    REQUIRED_PACKAGES: List[str] = []
-
-    def __init__(self, model_path: Optional[Path] = None):
-        self.model_path = model_path
-        self.model = None
-        self.device = None
-        self._is_loaded = False
-
-    @abstractmethod
-    def get_supported_modalities(self) -> Set[str]:
-        """Return supported modalities: {'image'}, {'text'}, {'audio'}, or {'video'}."""
-        pass
-
-    @abstractmethod
-    def load_model(self) -> tuple[bool, Optional[str]]:
-        """Load weights onto device. Return (success: bool, error_reason: Optional[str])."""
-        pass
-
-    @abstractmethod
-    def preprocess_batch(self, inputs: List[Any], modality: str) -> tuple[Any, List[int]]:
-        """Preprocess inputs for inference. Return (batch_tensor, valid_indices)."""
-        pass
-
-    @abstractmethod
-    def classify_batch(self, batch_tensor: Any) -> List[float]:
-        """Run model inference. Return List of scores in [0.0, 1.0], or -1.0 for error."""
-        pass
-
-    @abstractmethod
-    def get_device_info(self) -> Dict[str, Any]:
-        """Return dict with keys: 'device', 'name', 'backend' (e.g. CUDA, DirectML, CPU)."""
-        pass
-
-    @abstractmethod
-    def get_model_name(self) -> str:
-        """Return human-readable model name."""
-        pass
-
-    def get_label(self) -> str:
-        """Human-readable badge label (e.g. 'AI generated', 'Spider')."""
-        return "AI generated"
-
-    def is_loaded(self) -> bool:
-        """Check if model is currently loaded in memory."""
-        return self._is_loaded
-
-    def unload_model(self):
-        """Unload model from memory for resource efficiency."""
-        self.model = None
-        self._is_loaded = False
-
-    def process_batch(self, inputs: List[Any], modality: str) -> List[float]:
-        """Convenience method combining load_model, preprocess_batch, and classify_batch."""
-        if not self.is_loaded():
-            success, _ = self.load_model()
-            if not success:
-                return [-1.0] * len(inputs)
-        batch_tensor, valid_indices = self.preprocess_batch(inputs, modality)
-        if not valid_indices:
-            return [-1.0] * len(inputs)
-        scores = self.classify_batch(batch_tensor)
-        results = [-1.0] * len(inputs)
-        for idx, score in zip(valid_indices, scores):
-            results[idx] = score
-        return results
-
-    def _log_to_stderr(self, message: str) -> None:
-        """Safe stderr logging to avoid corrupting native messaging JSON on stdout."""
-        try:
-            print(message, file=sys.stderr, flush=True)
-        except Exception:
-            pass</code></pre>
-        </details>
-
-        <!-- Dedicated Live Model Download Progress Bar -->
-        <div id="models-download-progress-panel" class="glass-card-3d" style="display: none; padding: 22px 28px; margin-bottom: 16px; border: 1px solid rgba(255, 98, 24, 0.45); background: rgba(22, 8, 5, 0.9); box-shadow: 0 0 32px rgba(255, 98, 24, 0.25);">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <div>
-              <strong id="download-progress-title" style="font-size: 1.1rem; color: #fff; font-weight: 800;">Downloading Classifiers…</strong>
-              <div id="download-progress-subtitle" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 3px;">
-                Downloading model weights directly into local native host…
-              </div>
-            </div>
-            <span id="download-progress-percent" style="font-size: 1.35rem; font-weight: 800; color: #ff8a3d;">0%</span>
-          </div>
-          <div style="height: 12px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.12);">
-            <div id="download-progress-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #ff4500, #ff8a3d, #ffb38a); border-radius: 999px; transition: width 0.3s ease; box-shadow: 0 0 16px rgba(255, 98, 24, 0.6);"></div>
-          </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-            <span id="download-progress-status-text" style="font-size: 0.84rem; color: #ffb38a;">Initializing download stream…</span>
-            <span style="font-size: 0.82rem; color: var(--text-muted);">Please keep this tab open</span>
-          </div>
-        </div>
-
-        <div
-          class="glass-card-3d"
-          style="padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;"
-        >
-          <div>
-            <div style="font-weight: 800; font-size: 1.05rem;" id="selected-models-summary">
-              Selected: FvF Heimdall V2
-            </div>
-            <div style="font-size: 0.84rem; color: var(--text-secondary);" id="download-overall-status">
-              download selected models via the Native Host into <code>native/classifiers/</code>.
-            </div>
-          </div>
-
-          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-            <button type="button" class="btn-ember-outline" id="back-to-step1-btn">
-              ← Back
-            </button>
-            <button type="button" class="btn-fire" id="download-and-continue-btn">
-              <span>⬇ Download Selected &amp; Continue →</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ==================================================================
-           SCREEN 3: FORUM KNOWLEDGE BASE & SYSTEM ARCHITECTURE GUIDE
-           ================================================================== -->
-      <section class="wizard-screen" id="screen-3" data-screen="3">
-        <div class="screen-header">
-          <div class="forum-pinned-badge">
-            <span>📌 Pinned Knowledge Base • Core Architecture &amp; Extension Guide</span>
-          </div>
-          <h1 class="display-title" style="margin-top: 8px;">Fire vs Fire: Inside the Engine</h1>
-          <p class="lead-subtitle">
-            A deep-dive technical overview of how the Browser Extension and Native Host work together to classify web content with zero telemetry.
-          </p>
-        </div>
-
-        <div class="forum-wrapper">
-          <!-- Author / Community Thread Header -->
-          <div class="glass-card-3d forum-author-card" data-tilt>
-            <div class="forum-author-left">
-              <div class="forum-avatar-flame">
-                <img src="./assets/icon.svg" alt="Lead Architect" />
-              </div>
-              <div class="forum-author-info">
-                <div class="forum-author-name">
-                  <span>LuckyCowMoo</span>
-                  <span class="forum-badge-verified">Lead Architect</span>
-                </div>
-                <div class="forum-post-meta">
-                  <span>Knowledge Base Thread #1</span> • 
-                  <span>~5 min read</span> • 
-                  <span>Fire vs Fire v2.2 Architecture</span>
-                </div>
-              </div>
-            </div>
-            <div class="forum-tags-group">
-              <span class="forum-pill-tag">#LocalGPU</span>
-              <span class="forum-pill-tag">#ZeroTelemetry</span>
-              <span class="forum-pill-tag">#DynamicPrioritization</span>
-            </div>
-          </div>
-
-          <!-- Thread 1: Dual Architecture -->
-          <article class="glass-card-3d forum-thread-card" data-tilt>
-            <div class="forum-thread-header">
-              <span class="forum-topic-chip">01</span>
-              <div>
-                <h2 class="forum-thread-title">The Dual Architecture: Why an Extension + Native Host?</h2>
-                <span class="forum-thread-sub">Solving the browser sandboxing and compute limits</span>
-              </div>
-            </div>
-            <div class="forum-thread-body">
-              <p>
-                People often ask: <em>"Why do I need to download a local Python server? Why can't a browser extension just classify everything directly in JavaScript?"</em>
-              </p>
-              <p>
-                The answer comes down to silicon and sandboxing. Modern state-of-the-art vision models (such as <strong>Heimdall 04</strong>, 24-channel FFT forensic nets, and ConvNeXt-Base backbones) require hundreds of megabytes of neural parameters and billions of floating-point operations.
-              </p>
-              <p>
-                Browser extensions operate inside isolated JavaScript Web Workers. These environments are strictly memory-capped (typically 2 to 4 GB shared across all browser tabs) and are strictly barred by browser security from accessing low-level hardware handles—like NVIDIA Tensor Cores, CUDA device streams, or AMD DirectML pipelines. Running models inside the browser would instantly freeze tabs, exhaust RAM, and stutter user scrolling.
-              </p>
-              <div class="forum-callout-box">
-                <strong>⚡ The Two-Halves Solution:</strong>
-                <ul class="forum-bullets">
-                  <li><strong>The Browser Extension (The Eyes):</strong> Scans the DOM as pages render, intercepts visible images and paragraphs, applies visual styling (hover blurs, border glows, info badges), and manages user preferences.</li>
-                  <li><strong>The Native Inference Host (The Brain):</strong> A lightweight, standalone Python engine running natively on your operating system. It interfaces directly with your GPU (CUDA, DirectML, MPS) or CPU, holding models warm in memory for instantaneous matrix math.</li>
-                  <li><strong>Native Messaging Bridge:</strong> The browser and the host communicate locally via standard OS pipes (<code>stdin</code> / <code>stdout</code>) in structured JSON packets—fast, private, and requiring zero network overhead.</li>
-                </ul>
-              </div>
-            </div>
-          </article>
-
-          <!-- Thread 2: Zero-Internet Privacy Guarantee -->
-          <article class="glass-card-3d forum-thread-card" data-tilt>
-            <div class="forum-thread-header">
-              <span class="forum-topic-chip">02</span>
-              <div>
-                <h2 class="forum-thread-title">The Zero-Internet Privacy Guarantee</h2>
-                <span class="forum-thread-sub">100% on-device processing: what you browse never leaves your PC</span>
-              </div>
-            </div>
-            <div class="forum-thread-body">
-              <p>
-                In an era where most AI tools send user data, prompts, and photos to cloud data centers for processing, <strong>Fire vs Fire takes an uncompromising stance on privacy:</strong>
-              </p>
-              <ul class="forum-bullets">
-                <li><strong>No Cloud Roundtrips:</strong> Every single classification happens strictly inside your computer's RAM and GPU.</li>
-                <li><strong>Zero Inbound Ports &amp; Zero Outbound Sockets:</strong> The Native Host has zero network listening sockets. During classification, it does not send telemetry, ping analytics servers, or transmit your visited URLs.</li>
-                <li><strong>Air-Gapped Safety:</strong> If you unplug your Ethernet cable or disconnect from Wi-Fi, Fire vs Fire continues to classify web images and text without missing a beat.</li>
-                <li><strong>Encrypted Pipeline:</strong> Even when transferring images from the browser to the local Python host, data flows purely through your operating system's local memory IPC pipes.</li>
-              </ul>
-            </div>
-          </article>
-
-          <!-- Thread 3: Dynamic Prioritization & The Streaming Pipeline -->
-          <article class="glass-card-3d forum-thread-card" data-tilt>
-            <div class="forum-thread-header">
-              <span class="forum-topic-chip">03</span>
-              <div>
-                <h2 class="forum-thread-title">Dynamic Prioritization &amp; Single-Item Streaming</h2>
-                <span class="forum-thread-sub">How Fire vs Fire eliminates lag and stale queue bottlenecks</span>
-              </div>
-            </div>
-            <div class="forum-thread-body">
-              <p>
-                Early prototypes collected images into static batches (e.g., 16 items) and waited for the batch to fill before dispatching. However, in real-world browsing—especially when rapidly switching between tabs or scrolling social feeds—static batches create massive latency. When you switch tabs, the old queue continues churning through images you aren't even looking at!
-              </p>
-              <p>
-                Our <strong>Dynamic Prioritization Engine (v2.2)</strong> introduces a smart 3-tier priority schedule:
-              </p>
-              <div class="forum-priority-grid">
-                <div class="priority-card p0">
-                  <span class="priority-label">Priority 0 • Immediate</span>
-                  <strong>Active Viewport</strong>
-                  <p>Content directly visible on your physical screen right now. These items jump to the front of the queue and are classified instantly.</p>
-                </div>
-                <div class="priority-card p1">
-                  <span class="priority-label">Priority 1 • Background</span>
-                  <strong>Offscreen Fold</strong>
-                  <p>Content located below the fold is queued asynchronously. As you scroll downward, it is already tagged before you reach it.</p>
-                </div>
-                <div class="priority-card p2">
-                  <span class="priority-label">Priority 2 • Auto-Purge</span>
-                  <strong>Inactive Tabs</strong>
-                  <p>If you switch to another browser tab or navigate away, pending tasks from the previous page are instantly dropped so hardware is never wasted.</p>
-                </div>
-              </div>
-              <p style="margin-top: 14px;">
-                Additionally, individual large media payloads are dynamically sliced into safe chunks beneath the 1 MB Native Messaging packet limit and reconstructed seamlessly on the other side.
-              </p>
-            </div>
-          </article>
-
-          <!-- Thread 4: Sub-Millisecond RAM Content Cache -->
-          <article class="glass-card-3d forum-thread-card" data-tilt>
-            <div class="forum-thread-header">
-              <span class="forum-topic-chip">04</span>
-              <div>
-                <h2 class="forum-thread-title">Sub-Millisecond In-RAM Content Caching</h2>
-                <span class="forum-thread-sub">Eliminating redundant neural forward passes</span>
-              </div>
-            </div>
-            <div class="forum-thread-body">
-              <p>
-                Modern websites reuse the same assets repeatedly: author avatars on forum threads, website brand logos, navigation buttons, and viral memes shared across multiple posts.
-              </p>
-              <p>
-                Fire vs Fire incorporates an in-memory <strong>LRU Content Cache</strong> inside the Native Host:
-              </p>
-              <ul class="forum-bullets">
-                <li>Upon arrival, each media payload is hashed with a high-throughput perceptual checksum.</li>
-                <li>If the hash matches an item classified earlier in your session, the Native Host bypasses the neural forward pass entirely and returns the cached probability in <strong>under 0.5 milliseconds</strong>.</li>
-                <li>This reduces GPU thermals, prevents unnecessary battery consumption, and ensures instantaneous tagging on frequently visited domains.</li>
-              </ul>
-            </div>
-          </article>
-
-          <!-- Thread 5: Power & Battery Management -->
-          <article class="glass-card-3d forum-thread-card" data-tilt>
-            <div class="forum-thread-header">
-              <span class="forum-topic-chip">05</span>
-              <div>
-                <h2 class="forum-thread-title">Battery Awareness &amp; Thermal Efficiency</h2>
-                <span class="forum-thread-sub">Intelligent power policies for laptop users</span>
-              </div>
-            </div>
-            <div class="forum-thread-body">
-              <p>
-                High-end deep learning inference can draw noticeable power on mobile devices. Fire vs Fire provides native power awareness directly integrated into the master switch:
-              </p>
-              <ul class="forum-bullets">
-                <li><strong>AC Power Detection:</strong> The Native Host queries Windows Kernel / OS power APIs to detect whether your laptop is plugged into the wall or running on battery.</li>
-                <li><strong>"Only when plugged in":</strong> Toggle this sub-button to automatically pause classification whenever you unplug, preserving battery for browsing.</li>
-                <li><strong>"Pause below threshold":</strong> Set a safety threshold (e.g. 20%). If your battery dips below this level, Fire vs Fire gently stands down until recharged.</li>
-                <li><strong>"Keep the Engine Warm":</strong> Unlike command-line scripts that reboot Python and reload 200 MB model weights for every image, Fire vs Fire keeps the neural engine warm in memory while browsing, preventing disk thrashing and high CPU initialization spikes.</li>
-              </ul>
-            </div>
-          </article>
-
-          <!-- Thread 6: Troubleshooting & Common Questions -->
-          <article class="glass-card-3d forum-thread-card" data-tilt>
-            <div class="forum-thread-header">
-              <span class="forum-topic-chip">06</span>
-              <div>
-                <h2 class="forum-thread-title">Frequently Asked Questions &amp; Troubleshooting</h2>
-                <span class="forum-thread-sub">Quick answers to common questions</span>
-              </div>
-            </div>
-            <div class="forum-thread-body">
-              <div class="forum-faq-item">
-                <strong>Q: What do the toolbar flame icons and counters mean?</strong>
-                <p>
-                  A <strong>green flame with a counter</strong> means active scanning is in progress (the counter indicates remaining items). A <strong>red flame</strong> means the local AI host is connected, healthy, idle, and standing by. A <strong>muted flame</strong> means the Native Host is disconnected.
-                </p>
-              </div>
-              <div class="forum-faq-item">
-                <strong>Q: How do I test if my Native Host is working?</strong>
-                <p>
-                  Click the flame icon in your browser bar, select <strong>Options</strong>, open the <strong>Advanced</strong> panel, and click <strong>⚡ Test Connection</strong>. It will ping the native host and report your GPU/CPU device info.
-                </p>
-              </div>
-              <div class="forum-faq-item">
-                <strong>Q: Can I build my own custom classifiers?</strong>
-                <p>
-                  Yes! Fire vs Fire is fully extensible. Any Python script inheriting from <code>BaseClassifier</code> placed in <code>native/classifiers/</code> is automatically discovered and loaded into the Options category selector.
-                </p>
-              </div>
-            </div>
-          </article>
-
-          <!-- Forum Helpful Bar & Navigation -->
-          <div class="forum-nav-footer">
-            <button type="button" class="btn-ember-outline" id="back-to-step2-btn">
-              ← Back to Classifiers
-            </button>
-            <div class="forum-helpful-pill" id="forum-helpful-btn" role="button" tabindex="0">
-              <span class="helpful-thumb">👍</span>
-              <span>Helpful Guide (42)</span>
-            </div>
-            <button type="button" class="btn-fire" id="finish-setup-btn">
-              <span>Proceed to Browsing →</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ==================================================================
-           SCREEN 4: FINAL READY PAGE + OPTIONAL KO-FI SUPPORT
-           ================================================================== -->
-      <section class="wizard-screen" id="screen-4" data-screen="4">
-        <div class="glass-card-3d ready-hero-card" data-tilt>
-          <div class="ready-check-orb" style="background: transparent; border: none; box-shadow: none;">
-            <img src="./assets/icon.svg" alt="Fire vs Fire Logo" style="width: 76px; height: 76px; object-fit: contain;" />
-          </div>
-          <h1 class="display-title" style="margin-bottom: 14px;">
-            Fire vs Fire is now ready to go, you can close this page
-          </h1>
-          <p class="lead-subtitle" style="max-width: 700px; margin: 0 auto;" id="final-ready-summary">
-            Your extension is ready to scan. Open any website to see Fire vs Fire classify content locally on your hardware.
-          </p>
-          <div style="margin-top: 24px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap;">
-            <a href="./feed.html" class="btn-fire" style="display: inline-flex;">
-              <span>🧪 Test Extension on Sample Feed →</span>
-            </a>
-            <button type="button" class="btn-ember-outline" id="goto-guide-btn" style="display: inline-flex;">
-              <span>📖 Extension &amp; Host Guide</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Optional Ko-fi Support Card with Explicit Non-Paywall Guarantee -->
-        <div class="glass-card-3d kofi-support-card" data-tilt>
-          <div>
-            <h2 style="font-size: 1.65rem; font-weight: 800; margin-bottom: 14px;">
-              Help support Me &amp; my projects
-            </h2>
-            <p style="color: var(--text-secondary); font-size: 0.98rem; line-height: 1.6; margin-bottom: 16px;">
-              Fire vs Fire and all first-party models (Heimdall V2, Spider, and the upcoming Mímir , Huginn , and Bragi) are built independently and given to the community for free.
-            </p>
-
-            <div class="ethical-pledge-box" style="margin-bottom: 16px;">
-              <strong>💚 100% Free Forever — Zero Paywalls:</strong><br />
-              Making a donation on Ko-fi is purely optional to support me and my future projects. Making a payment will not unlock any additional features, models, or higher speeds.
-            </div>
-
-            <div style="margin-top: 22px;">
-              <a
-                href="https://luckycowmoo.github.io/simple-page/"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="btn-fire"
-                style="display: inline-flex;"
-              >
-                <span>Check out my other projects</span>
-              </a>
-            </div>
-          </div>
-
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;">
-            <iframe
-              id="kofiframe"
-              src="https://ko-fi.com/leaharmstrong/?hidefeed=true&widget=true&embed=true"
-              style="border: none; width: 100%; max-width: 320px; height: 520px; background: #ffffff; border-radius: 18px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);"
-              title="Support Leah Armstrong"
-              loading="lazy"
-            ></iframe>
-            <a
-              href="https://ko-fi.com/leaharmstrong"
-              target="_blank"
-              rel="noopener noreferrer"
-              style="margin-top: 10px; font-size: 0.8rem; color: #ffb38a; text-decoration: underline;"
-            >
-              Open Ko-fi in new tab ↗
-            </a>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <script src="./app.js?v=2.1.0"></script>
-  </body>
-</html>
+<!doctype html>
+<html lang="en" data-fvf-onboarding="true">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fire vs Fire — Local AI Detection &amp; Setup</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/icon-red.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- Interactive Ember Canvas -->
+    <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
+
+    <div class="site-shell">
+      <!-- ==================================================================
+           SCREEN 1: INSTALL NATIVE HOST (HARDWARE-ACCELERATED AI ENVIRONMENT)
+           ================================================================== -->
+      <section class="wizard-screen active" id="screen-1" data-screen="1">
+        <div class="screen-header">
+          <h1 class="display-title">Install the Local Native Host</h1>
+          <p class="lead-subtitle">
+            You’ve installed the <strong>Fire vs Fire</strong> browser extension! Next, install the
+            <strong>Native Host</strong>—the local environment where AI classification actually happens.
+          </p>
+        </div>
+
+        <div class="glass-card-3d native-hero-card" data-tilt style="max-width: 820px;">
+          <div id="native-why-section">
+            <h2 style="font-size: 1.45rem; font-weight: 800; margin-bottom: 12px;">
+              Why is the Native Host separate from the browser?
+            </h2>
+            <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 1.05rem; line-height: 1.6;">
+              Web browsers run inside a restricted sandbox with limited hardware access. Real AI classification needs direct hardware &amp; GPU acceleration to run fast enough to keep up with live web browsing.
+            </p>
+          </div>
+
+          <!-- Post-download step-by-step instructions (revealed after clicking download) -->
+          <div id="native-install-instructions" style="display: none;">
+            <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 16px; color: #ffb38a;">
+              How to Install in File Explorer (2 Quick Steps)
+            </h2>
+            <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px;">
+              <div style="display: flex; gap: 14px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);">
+                <div style="background: rgba(255,98,24,0.25); color: #ff8a3d; font-weight: 800; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.95rem;">1</div>
+                <div>
+                  <strong style="color: #ffffff; font-size: 1rem;">Extract the downloaded ZIP</strong>
+                  <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px; line-height: 1.5;">
+                    Open your <code>Downloads</code> folder, right-click <code>FireVsFire-NativeHost.zip</code>, and choose <strong>Extract All…</strong>.
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 14px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);">
+                <div style="background: rgba(255,98,24,0.25); color: #ff8a3d; font-weight: 800; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.95rem;">2</div>
+                <div>
+                  <strong style="color: #ffffff; font-size: 1rem;">Double-click <code>Install-FireVsFire-NativeHost.bat</code></strong>
+                  <div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 4px; line-height: 1.5;">
+                    Inside the extracted folder, simply double-click <strong>Install-FireVsFire-NativeHost.bat</strong> in File Explorer.
+                    <span style="display: block; margin-top: 4px; color: #a3ff70; font-size: 0.85rem;">✓ No terminal needed! It auto-configures Python, GPU acceleration, and registers the browser bridge in 1 click.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live detection status callout -->
+            <div id="native-live-status-box" style="padding: 14px 18px; border-radius: 14px; background: rgba(255, 140, 0, 0.1); border: 1px solid rgba(255, 140, 0, 0.35); display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span id="native-pulse-icon" style="font-size: 1.3rem;">⏳</span>
+                <div>
+                  <div id="native-status-heading" style="font-weight: 700; color: #ffb020; font-size: 0.98rem;">Waiting for Native Host connection…</div>
+                  <div id="native-status-detail" style="font-size: 0.84rem; color: var(--text-secondary); margin-top: 2px;">
+                    Keep this tab open. As soon as the installer completes, this page will automatically advance!
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="btn-ember-outline" id="check-connection-btn" style="padding: 8px 16px; font-size: 0.84rem; white-space: nowrap;">
+                ↻ Check Now
+              </button>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="native-action-bar">
+              <a
+                href="https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn-fire"
+                id="download-native-host-btn"
+              >
+                <span>Download Native Host</span>
+              </a>
+              <button type="button" class="btn-ember-outline" id="skip-to-models-btn" disabled style="opacity: 0.45; cursor: not-allowed;">
+                <span>Choose Models →</span>
+              </button>
+            </div>
+            <div id="native-not-connected-hint" style="font-size: 0.84rem; color: #ff9d66; display: none;">
+              ⚠️ Native Host must be installed and connected before proceeding to model downloads.
+              <a href="#" id="force-proceed-models-btn" style="color: #ffc299; text-decoration: underline; margin-left: 8px;">Already installed? Choose Models →</a>
+            </div>
+            <div>
+              <a
+                href="https://github.com/LuckyCowMoo/Fire-vs-Fire"
+                target="_blank"
+                rel="noopener noreferrer"
+                style="font-size: 0.88rem; color: #ffb38a; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;"
+              >
+                View Source on GitHub ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================================================================
+           SCREEN 2: 4 MODALITY QUADRANTS (FIRST-PARTY CLASSIFIER SELECTOR)
+           ================================================================== -->
+      <section class="wizard-screen" id="screen-2" data-screen="2">
+        <div class="screen-header" style="margin-bottom: 24px;">
+          <h1 class="display-title" style="margin-bottom: 4px;">Choose Your First-Party Classifiers</h1>
+          <p style="color: var(--text-secondary); font-size: 0.88rem; margin: 0;">Auto-discovers any classifier or weights in <code>native/classifiers/</code> (auto-scanning in background)</p>
+        </div>
+
+        <!-- 4 Modality Quadrants Grid (Populated dynamically from official_models.json) -->
+        <div class="quadrants-grid" id="modality-quadrants-container">
+          <!-- Quadrants rendered dynamically by app.js -->
+        </div>
+
+        <!-- Expandable Developer Guide: Build Your Own Classifier with Full BaseClassifier API -->
+        <details class="glass-card-3d byo-classifier-card">
+          <summary>
+            <span>Want to build your own classifier? Click to see the BaseClassifier API</span>
+            <span style="font-size: 0.82rem; color: #ffb38a;">BaseClassifier API ▾</span>
+          </summary>
+          <pre class="code-block-ember"><code id="base-classifier-code">from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional, Set
+from pathlib import Path
+import sys
+
+class BaseClassifier(ABC):
+    REQUIRED_PACKAGES: List[str] = []
+
+    def __init__(self, model_path: Optional[Path] = None):
+        self.model_path = model_path
+        self.model = None
+        self.device = None
+        self._is_loaded = False
+
+    @abstractmethod
+    def get_supported_modalities(self) -> Set[str]:
+        """Return supported modalities: {'image'}, {'text'}, {'audio'}, or {'video'}."""
+        pass
+
+    @abstractmethod
+    def load_model(self) -> tuple[bool, Optional[str]]:
+        """Load weights onto device. Return (success: bool, error_reason: Optional[str])."""
+        pass
+
+    @abstractmethod
+    def preprocess_batch(self, inputs: List[Any], modality: str) -> tuple[Any, List[int]]:
+        """Preprocess inputs for inference. Return (batch_tensor, valid_indices)."""
+        pass
+
+    @abstractmethod
+    def classify_batch(self, batch_tensor: Any) -> List[float]:
+        """Run model inference. Return List of scores in [0.0, 1.0], or -1.0 for error."""
+        pass
+
+    @abstractmethod
+    def get_device_info(self) -> Dict[str, Any]:
+        """Return dict with keys: 'device', 'name', 'backend' (e.g. CUDA, DirectML, CPU)."""
+        pass
+
+    @abstractmethod
+    def get_model_name(self) -> str:
+        """Return human-readable model name."""
+        pass
+
+    def get_label(self) -> str:
+        """Human-readable badge label (e.g. 'AI generated', 'Spider')."""
+        return "AI generated"
+
+    def is_loaded(self) -> bool:
+        """Check if model is currently loaded in memory."""
+        return self._is_loaded
+
+    def unload_model(self):
+        """Unload model from memory for resource efficiency."""
+        self.model = None
+        self._is_loaded = False
+
+    def process_batch(self, inputs: List[Any], modality: str) -> List[float]:
+        """Convenience method combining load_model, preprocess_batch, and classify_batch."""
+        if not self.is_loaded():
+            success, _ = self.load_model()
+            if not success:
+                return [-1.0] * len(inputs)
+        batch_tensor, valid_indices = self.preprocess_batch(inputs, modality)
+        if not valid_indices:
+            return [-1.0] * len(inputs)
+        scores = self.classify_batch(batch_tensor)
+        results = [-1.0] * len(inputs)
+        for idx, score in zip(valid_indices, scores):
+            results[idx] = score
+        return results
+
+    def _log_to_stderr(self, message: str) -> None:
+        """Safe stderr logging to avoid corrupting native messaging JSON on stdout."""
+        try:
+            print(message, file=sys.stderr, flush=True)
+        except Exception:
+            pass</code></pre>
+        </details>
+
+        <div
+          class="glass-card-3d"
+          style="padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;"
+        >
+          <div>
+            <div style="font-weight: 800; font-size: 1.05rem;" id="selected-models-summary">
+              Installed Classifiers
+            </div>
+            <div style="font-size: 0.84rem; color: var(--text-secondary);" id="download-overall-status">
+              Download or uninstall classifiers directly on the tiles above.
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <button type="button" class="btn-ember-outline" id="back-to-step1-btn">
+              ← Back
+            </button>
+            <button type="button" class="btn-fire" id="download-and-continue-btn">
+              <span>Continue to Detection →</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================================================================
+           SCREEN 3: FORUM KNOWLEDGE BASE & SYSTEM ARCHITECTURE GUIDE
+           ================================================================== -->
+      <section class="wizard-screen" id="screen-3" data-screen="3">
+        <div class="screen-header">
+          <div class="forum-pinned-badge">
+            <span>📌 Pinned Knowledge Base • Core Architecture &amp; Extension Guide</span>
+          </div>
+          <h1 class="display-title" style="margin-top: 8px;">Fire vs Fire: Inside the Engine</h1>
+          <p class="lead-subtitle">
+            A deep-dive technical overview of how the Browser Extension and Native Host work together to classify web content with zero telemetry.
+          </p>
+        </div>
+
+        <div class="forum-wrapper">
+          <!-- Author / Community Thread Header -->
+          <div class="glass-card-3d forum-author-card" data-tilt>
+            <div class="forum-author-left">
+              <div class="forum-avatar-flame">
+                <img src="./assets/icon.svg" alt="Lead Architect" />
+              </div>
+              <div class="forum-author-info">
+                <div class="forum-author-name">
+                  <span>LuckyCowMoo</span>
+                  <span class="forum-badge-verified">Lead Architect</span>
+                </div>
+                <div class="forum-post-meta">
+                  <span>Knowledge Base Thread #1</span> • 
+                  <span>~5 min read</span> • 
+                  <span>Fire vs Fire v2.2 Architecture</span>
+                </div>
+              </div>
+            </div>
+            <div class="forum-tags-group">
+              <span class="forum-pill-tag">#LocalGPU</span>
+              <span class="forum-pill-tag">#ZeroTelemetry</span>
+              <span class="forum-pill-tag">#DynamicPrioritization</span>
+            </div>
+          </div>
+
+          <!-- Thread 1: Dual Architecture -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">01</span>
+              <div>
+                <h2 class="forum-thread-title">The Dual Architecture: Why an Extension + Native Host?</h2>
+                <span class="forum-thread-sub">Solving the browser sandboxing and compute limits</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                People often ask: <em>"Why do I need to download a local Python server? Why can't a browser extension just classify everything directly in JavaScript?"</em>
+              </p>
+              <p>
+                The answer comes down to silicon and sandboxing. Modern state-of-the-art vision models (such as <strong>Heimdall 04</strong>, 24-channel FFT forensic nets, and ConvNeXt-Base backbones) require hundreds of megabytes of neural parameters and billions of floating-point operations.
+              </p>
+              <p>
+                Browser extensions operate inside isolated JavaScript Web Workers. These environments are strictly memory-capped (typically 2 to 4 GB shared across all browser tabs) and are strictly barred by browser security from accessing low-level hardware handles—like NVIDIA Tensor Cores, CUDA device streams, or AMD DirectML pipelines. Running models inside the browser would instantly freeze tabs, exhaust RAM, and stutter user scrolling.
+              </p>
+              <div class="forum-callout-box">
+                <strong>⚡ The Two-Halves Solution:</strong>
+                <ul class="forum-bullets">
+                  <li><strong>The Browser Extension (The Eyes):</strong> Scans the DOM as pages render, intercepts visible images and paragraphs, applies visual styling (hover blurs, border glows, info badges), and manages user preferences.</li>
+                  <li><strong>The Native Inference Host (The Brain):</strong> A lightweight, standalone Python engine running natively on your operating system. It interfaces directly with your GPU (CUDA, DirectML, MPS) or CPU, holding models warm in memory for instantaneous matrix math.</li>
+                  <li><strong>Native Messaging Bridge:</strong> The browser and the host communicate locally via standard OS pipes (<code>stdin</code> / <code>stdout</code>) in structured JSON packets—fast, private, and requiring zero network overhead.</li>
+                </ul>
+              </div>
+            </div>
+          </article>
+
+          <!-- Thread 2: Zero-Internet Privacy Guarantee -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">02</span>
+              <div>
+                <h2 class="forum-thread-title">The Zero-Internet Privacy Guarantee</h2>
+                <span class="forum-thread-sub">100% on-device processing: what you browse never leaves your PC</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                In an era where most AI tools send user data, prompts, and photos to cloud data centers for processing, <strong>Fire vs Fire takes an uncompromising stance on privacy:</strong>
+              </p>
+              <ul class="forum-bullets">
+                <li><strong>No Cloud Roundtrips:</strong> Every single classification happens strictly inside your computer's RAM and GPU.</li>
+                <li><strong>Zero Inbound Ports &amp; Zero Outbound Sockets:</strong> The Native Host has zero network listening sockets. During classification, it does not send telemetry, ping analytics servers, or transmit your visited URLs.</li>
+                <li><strong>Air-Gapped Safety:</strong> If you unplug your Ethernet cable or disconnect from Wi-Fi, Fire vs Fire continues to classify web images and text without missing a beat.</li>
+                <li><strong>Encrypted Pipeline:</strong> Even when transferring images from the browser to the local Python host, data flows purely through your operating system's local memory IPC pipes.</li>
+              </ul>
+            </div>
+          </article>
+
+          <!-- Thread 3: Dynamic Prioritization & The Streaming Pipeline -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">03</span>
+              <div>
+                <h2 class="forum-thread-title">Dynamic Prioritization &amp; Single-Item Streaming</h2>
+                <span class="forum-thread-sub">How Fire vs Fire eliminates lag and stale queue bottlenecks</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                Early prototypes collected images into static batches (e.g., 16 items) and waited for the batch to fill before dispatching. However, in real-world browsing—especially when rapidly switching between tabs or scrolling social feeds—static batches create massive latency. When you switch tabs, the old queue continues churning through images you aren't even looking at!
+              </p>
+              <p>
+                Our <strong>Dynamic Prioritization Engine (v2.2)</strong> introduces a smart 3-tier priority schedule:
+              </p>
+              <div class="forum-priority-grid">
+                <div class="priority-card p0">
+                  <span class="priority-label">Priority 0 • Immediate</span>
+                  <strong>Active Viewport</strong>
+                  <p>Content directly visible on your physical screen right now. These items jump to the front of the queue and are classified instantly.</p>
+                </div>
+                <div class="priority-card p1">
+                  <span class="priority-label">Priority 1 • Background</span>
+                  <strong>Offscreen Fold</strong>
+                  <p>Content located below the fold is queued asynchronously. As you scroll downward, it is already tagged before you reach it.</p>
+                </div>
+                <div class="priority-card p2">
+                  <span class="priority-label">Priority 2 • Auto-Purge</span>
+                  <strong>Inactive Tabs</strong>
+                  <p>If you switch to another browser tab or navigate away, pending tasks from the previous page are instantly dropped so hardware is never wasted.</p>
+                </div>
+              </div>
+              <p style="margin-top: 14px;">
+                Additionally, individual large media payloads are dynamically sliced into safe chunks beneath the 1 MB Native Messaging packet limit and reconstructed seamlessly on the other side.
+              </p>
+            </div>
+          </article>
+
+          <!-- Thread 4: Sub-Millisecond RAM Content Cache -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">04</span>
+              <div>
+                <h2 class="forum-thread-title">Sub-Millisecond In-RAM Content Caching</h2>
+                <span class="forum-thread-sub">Eliminating redundant neural forward passes</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                Modern websites reuse the same assets repeatedly: author avatars on forum threads, website brand logos, navigation buttons, and viral memes shared across multiple posts.
+              </p>
+              <p>
+                Fire vs Fire incorporates an in-memory <strong>LRU Content Cache</strong> inside the Native Host:
+              </p>
+              <ul class="forum-bullets">
+                <li>Upon arrival, each media payload is hashed with a high-throughput perceptual checksum.</li>
+                <li>If the hash matches an item classified earlier in your session, the Native Host bypasses the neural forward pass entirely and returns the cached probability in <strong>under 0.5 milliseconds</strong>.</li>
+                <li>This reduces GPU thermals, prevents unnecessary battery consumption, and ensures instantaneous tagging on frequently visited domains.</li>
+              </ul>
+            </div>
+          </article>
+
+          <!-- Thread 5: Power & Battery Management -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">05</span>
+              <div>
+                <h2 class="forum-thread-title">Battery Awareness &amp; Thermal Efficiency</h2>
+                <span class="forum-thread-sub">Intelligent power policies for laptop users</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <p>
+                High-end deep learning inference can draw noticeable power on mobile devices. Fire vs Fire provides native power awareness directly integrated into the master switch:
+              </p>
+              <ul class="forum-bullets">
+                <li><strong>AC Power Detection:</strong> The Native Host queries Windows Kernel / OS power APIs to detect whether your laptop is plugged into the wall or running on battery.</li>
+                <li><strong>"Only when plugged in":</strong> Toggle this sub-button to automatically pause classification whenever you unplug, preserving battery for browsing.</li>
+                <li><strong>"Pause below threshold":</strong> Set a safety threshold (e.g. 20%). If your battery dips below this level, Fire vs Fire gently stands down until recharged.</li>
+                <li><strong>"Keep the Engine Warm":</strong> Unlike command-line scripts that reboot Python and reload 200 MB model weights for every image, Fire vs Fire keeps the neural engine warm in memory while browsing, preventing disk thrashing and high CPU initialization spikes.</li>
+              </ul>
+            </div>
+          </article>
+
+          <!-- Thread 6: Troubleshooting & Common Questions -->
+          <article class="glass-card-3d forum-thread-card" data-tilt>
+            <div class="forum-thread-header">
+              <span class="forum-topic-chip">06</span>
+              <div>
+                <h2 class="forum-thread-title">Frequently Asked Questions &amp; Troubleshooting</h2>
+                <span class="forum-thread-sub">Quick answers to common questions</span>
+              </div>
+            </div>
+            <div class="forum-thread-body">
+              <div class="forum-faq-item">
+                <strong>Q: What do the toolbar flame icons and counters mean?</strong>
+                <p>
+                  A <strong>green flame with a counter</strong> means active scanning is in progress (the counter indicates remaining items). A <strong>red flame</strong> means the local AI host is connected, healthy, idle, and standing by. A <strong>muted flame</strong> means the Native Host is disconnected.
+                </p>
+              </div>
+              <div class="forum-faq-item">
+                <strong>Q: How do I test if my Native Host is working?</strong>
+                <p>
+                  Click the flame icon in your browser bar, select <strong>Options</strong>, open the <strong>Advanced</strong> panel, and click <strong>⚡ Test Connection</strong>. It will ping the native host and report your GPU/CPU device info.
+                </p>
+              </div>
+              <div class="forum-faq-item">
+                <strong>Q: Can I build my own custom classifiers?</strong>
+                <p>
+                  Yes! Fire vs Fire is fully extensible. Any Python script inheriting from <code>BaseClassifier</code> placed in <code>native/classifiers/</code> is automatically discovered and loaded into the Options category selector.
+                </p>
+              </div>
+            </div>
+          </article>
+
+          <!-- Forum Helpful Bar & Navigation -->
+          <div class="forum-nav-footer">
+            <button type="button" class="btn-ember-outline" id="back-to-step2-btn">
+              ← Back to Classifiers
+            </button>
+            <div class="forum-helpful-pill" id="forum-helpful-btn" role="button" tabindex="0">
+              <span class="helpful-thumb">👍</span>
+              <span>Helpful Guide (42)</span>
+            </div>
+            <button type="button" class="btn-fire" id="finish-setup-btn">
+              <span>Proceed to Browsing →</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================================================================
+           SCREEN 4: FINAL READY PAGE + OPTIONAL KO-FI SUPPORT
+           ================================================================== -->
+      <section class="wizard-screen" id="screen-4" data-screen="4">
+        <div class="glass-card-3d ready-hero-card" data-tilt>
+          <div class="ready-check-orb" style="background: transparent; border: none; box-shadow: none;">
+            <img src="./assets/icon.svg" alt="Fire vs Fire Logo" style="width: 76px; height: 76px; object-fit: contain;" />
+          </div>
+          <h1 class="display-title" style="margin-bottom: 14px;">
+            Fire vs Fire is now ready to go, you can close this page
+          </h1>
+          <p class="lead-subtitle" style="max-width: 700px; margin: 0 auto;" id="final-ready-summary">
+            Your extension is ready to scan. Open any website to see Fire vs Fire classify content locally on your hardware.
+          </p>
+          <div style="margin-top: 24px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap;">
+            <a href="./feed.html" class="btn-fire" style="display: inline-flex;">
+              <span>🧪 Test Extension on Sample Feed →</span>
+            </a>
+            <button type="button" class="btn-ember-outline" id="goto-guide-btn" style="display: inline-flex;">
+              <span>📖 Extension &amp; Host Guide</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Optional Ko-fi Support Card with Explicit Non-Paywall Guarantee -->
+        <div class="glass-card-3d kofi-support-card" data-tilt>
+          <div>
+            <h2 style="font-size: 1.65rem; font-weight: 800; margin-bottom: 14px;">
+              Help support Me &amp; my projects
+            </h2>
+            <p style="color: var(--text-secondary); font-size: 0.98rem; line-height: 1.6; margin-bottom: 16px;">
+              Fire vs Fire and all first-party models (Heimdall V2, Spider, and the upcoming Mímir , Huginn , and Bragi) are built independently and given to the community for free.
+            </p>
+
+            <div class="ethical-pledge-box" style="margin-bottom: 16px;">
+              <strong>💚 100% Free Forever — Zero Paywalls:</strong><br />
+              Making a donation on Ko-fi is purely optional to support me and my future projects. Making a payment will not unlock any additional features, models, or higher speeds.
+            </div>
+
+            <div style="margin-top: 22px;">
+              <a
+                href="https://luckycowmoo.github.io/simple-page/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn-fire"
+                style="display: inline-flex;"
+              >
+                <span>Check out my other projects</span>
+              </a>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;">
+            <iframe
+              id="kofiframe"
+              src="https://ko-fi.com/leaharmstrong/?hidefeed=true&widget=true&embed=true"
+              style="border: none; width: 100%; max-width: 320px; height: 520px; background: #ffffff; border-radius: 18px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);"
+              title="Support Leah Armstrong"
+              loading="lazy"
+            ></iframe>
+            <a
+              href="https://ko-fi.com/leaharmstrong"
+              target="_blank"
+              rel="noopener noreferrer"
+              style="margin-top: 10px; font-size: 0.8rem; color: #ffb38a; text-decoration: underline;"
+            >
+              Open Ko-fi in new tab ↗
+            </a>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="./app.js?v=2.1.0"></script>
+  </body>
+</html>

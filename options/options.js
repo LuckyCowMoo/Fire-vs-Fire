@@ -403,6 +403,7 @@ function setRunState(isLoading, activeCount = 0) {
 }
 
 async function refreshRunState() {
+  if (document.hidden) return;
   try {
     const resp = await ext.runtime.sendMessage({ type: 'GET_ACTIVITY_STATUS' });
     if (!resp || resp.ok !== true) return;

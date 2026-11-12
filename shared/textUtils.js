@@ -12,7 +12,7 @@
   }
 
   function normalizeElementText(el) {
-    return (el.innerText || el.textContent || '')
+    return (el.textContent || '')
       .replace(/\s+/g, ' ')
       .trim();
   }

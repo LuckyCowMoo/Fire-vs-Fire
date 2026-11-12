@@ -48,7 +48,7 @@ let currentHoverEl = null;       // Tracks the current hovered AI-detected eleme
 let hoverRafPending = false;     // Throttle pointermove hover updates to one per frame
 let lastPointerEvent = null;
 let scanPaused = false;            // Pause periodic scans while tab is hidden
-let processedImages = new Set(); // Set of img elements already processed
+let processedImages = new WeakSet(); // WeakSet: elements automatically GC'd when removed from DOM
 let activeJobIds = new Set();    // Legacy job ID tracking
 let itemResults = new Map();     // itemId -> { modality, ensembles: { ensembleId: { score, label, displayLabel } } }
 let lastEnsembleSignature = null;
@@ -77,7 +77,7 @@ const MUTATION_FLUSH_MS = 120;
 const MAX_ITEM_RESULTS = 3000;
 const PERIODIC_SCAN_MS = 30000;
 
-let processedTextElements = new Set();
+let processedTextElements = new WeakSet();
 
 function isElementInViewport(el) {
   if (!el || typeof el.getBoundingClientRect !== 'function') return false;
@@ -113,6 +113,12 @@ function getEnsemblesByModality() {
     if (ens.modality === 'text') byModality.text.push(ens);
   });
   return byModality;
+}
+
+function hasActiveModality(modality) {
+  if (!settings.enabled) return false;
+  const byMod = getEnsemblesByModality();
+  return Array.isArray(byMod[modality]) && byMod[modality].length > 0;
 }
 
 function buildModelConfig() {
@@ -191,8 +197,18 @@ function trackElement(itemId, element) {
 function getElementsForItem(itemId) {
   const entry = elementMap.get(itemId);
   if (!entry) return [];
-  if (entry instanceof Set) return Array.from(entry);
-  return [entry];
+  if (entry instanceof Set) {
+    const alive = [];
+    for (const el of entry) {
+      if (el && el.isConnected) alive.push(el);
+      else entry.delete(el);
+    }
+    if (entry.size === 0) elementMap.delete(itemId);
+    return alive;
+  }
+  if (entry && entry.isConnected) return [entry];
+  elementMap.delete(itemId);
+  return [];
 }
 
 function hasResultsForElement(el) {
@@ -287,19 +303,6 @@ function cleanupStaleEntries() {
     }
   }
 
-  for (const img of processedImages) {
-    if (!img?.isConnected) {
-      processedImages.delete(img);
-      unobserveImage(img);
-    }
-  }
-
-  for (const text of processedTextElements) {
-    if (!text?.isConnected) {
-      processedTextElements.delete(text);
-    }
-  }
-
   if (currentHoverEl && !currentHoverEl.isConnected) {
     currentHoverEl = null;
   }
@@ -312,14 +315,16 @@ function findAiDetectedUnderPointer(evt) {
   const y = evt.clientY;
   if (typeof x !== 'number' || typeof y !== 'number') return null;
 
-  // 1. Check direct target or closest ancestor
+  // 1. Check direct target or closest ancestor (instant, zero reflow cost)
   if (evt.target instanceof Element) {
     const direct = evt.target.closest('.ai-detected');
     if (direct) return direct;
   }
 
+  // Only hit-test if there are active AI detected images on this page
+  if (aiDetectedImageCount <= 0) return null;
+
   // 2. Penetrate transparent overlay divs/elements using document.elementsFromPoint(x, y)
-  // This penetrates ANY overlay elements, click traps, or buttons sitting in front of the image
   if (typeof document.elementsFromPoint === 'function') {
     try {
       const elements = document.elementsFromPoint(x, y);
@@ -338,18 +343,19 @@ function findAiDetectedUnderPointer(evt) {
     } catch (_) {}
   }
 
-  // 3. Fallback: Check bounding client rects of tracked processed images
-  // (In case an overlay has pointer-events: none, opaque backdrop, or complex stacking context)
-  for (const img of processedImages) {
-    if (img && img.isConnected && img.classList && img.classList.contains('ai-detected')) {
-      try {
+  // 3. Fallback: Check bounding rects ONLY of actual .ai-detected images (NOT all images)
+  try {
+    const detectedImgs = document.querySelectorAll('img.ai-detected');
+    for (let i = 0; i < detectedImgs.length; i++) {
+      const img = detectedImgs[i];
+      if (img && img.isConnected) {
         const rect = img.getBoundingClientRect();
         if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
           return img;
         }
-      } catch (_) {}
+      }
     }
-  }
+  } catch (_) {}
 
   return null;
 }
@@ -442,7 +448,10 @@ function imageToBase64(imgElement) {
     const quality = typeof settings.imageCaptureQuality === 'number'
       ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality))
       : 0.90;
-    return canvas.toDataURL('image/jpeg', quality);
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    canvas.width = 0;
+    canvas.height = 0;
+    return dataUrl;
   } catch (_) {
     // Tainted cross-origin canvas: background.js will capture & downscale via extension `<all_urls>` privileges
     return null;
@@ -519,10 +528,12 @@ function dispatchSingleTextItem(section, modelConfig) {
 
 function scheduleClassification(images) {
   /**
-   * Immediately streams discovered images individually to the Native Host,
-   * sending in-viewport (P0) images first followed by offscreen (P1) images.
+   * Streams discovered images individually to Native Host,
+   * sending in-viewport (P0) images first, yielding to the browser event loop
+   * so main thread rendering is never blocked.
    */
   if (!settings.enabled || !images || !images.length) return;
+  if (!hasActiveModality('image')) return;
   const modelConfig = buildModelConfig();
 
   // Annotate viewport status and sort so in-viewport items are dispatched first
@@ -531,9 +542,22 @@ function scheduleClassification(images) {
   });
   const sorted = images.slice().sort((a, b) => (b.inViewport ? 1 : 0) - (a.inViewport ? 1 : 0));
 
-  sorted.forEach((img) => {
-    dispatchSingleImageItem(img, modelConfig);
-  });
+  const dispatchBatch = (items, index = 0) => {
+    const BATCH_SIZE = 4;
+    const end = Math.min(items.length, index + BATCH_SIZE);
+    for (let i = index; i < end; i++) {
+      dispatchSingleImageItem(items[i], modelConfig);
+    }
+    if (end < items.length) {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => dispatchBatch(items, end), { timeout: 100 });
+      } else {
+        setTimeout(() => dispatchBatch(items, end), 20);
+      }
+    }
+  };
+
+  dispatchBatch(sorted);
 }
 
 function scheduleTextClassification(textSections) {
@@ -541,6 +565,7 @@ function scheduleTextClassification(textSections) {
    * Immediately streams discovered text sections individually to the Native Host.
    */
   if (!settings.enabled || !textSections || !textSections.length) return;
+  if (!hasActiveModality('text')) return;
   const modelConfig = buildModelConfig();
 
   textSections.forEach((section) => {
@@ -551,13 +576,17 @@ function scheduleTextClassification(textSections) {
 function processMutationBatch(mutations) {
   if (!settings.enabled || scanPaused) return;
 
+  const hasImages = hasActiveModality('image');
+  const hasText = hasActiveModality('text');
+  if (!hasImages && !hasText) return;
+
   const newImages = [];
   const newText = [];
 
   mutations.forEach((mutation) => {
     mutation.removedNodes.forEach((node) => cleanupRemovedSubtree(node));
 
-    if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+    if (hasImages && mutation.type === 'attributes' && mutation.attributeName === 'src') {
       const el = mutation.target;
       if (el.tagName && el.tagName.toLowerCase() === 'img') {
         const oldItemId = elementToItemId.get(el);
@@ -580,7 +609,7 @@ function processMutationBatch(mutations) {
     mutation.addedNodes.forEach((node) => {
       if (node.nodeType !== 1) return;
 
-      if (node.tagName && node.tagName.toLowerCase() === 'img') {
+      if (hasImages && node.tagName && node.tagName.toLowerCase() === 'img') {
         const img = processImageElement(node);
         if (img) newImages.push(img);
         return;
@@ -589,19 +618,19 @@ function processMutationBatch(mutations) {
       if (!node.querySelectorAll) return;
 
       try {
-        if (node.tagName && TU.isTextTagName(node.tagName.toLowerCase())) {
+        if (hasText && node.tagName && TU.isTextTagName(node.tagName.toLowerCase())) {
           const text = processTextElement(node);
           if (text) newText.push(text);
         }
 
-        if (node.querySelector('img')) {
+        if (hasImages && node.querySelector('img')) {
           node.querySelectorAll('img').forEach((el) => {
             const img = processImageElement(el);
             if (img) newImages.push(img);
           });
         }
 
-        if (node.querySelector(TU.TEXT_SELECTORS)) {
+        if (hasText && node.querySelector(TU.TEXT_SELECTORS)) {
           node.querySelectorAll(TU.TEXT_SELECTORS).forEach((el) => {
             const text = processTextElement(el);
             if (text) newText.push(text);
@@ -965,7 +994,7 @@ function queueClassifierTimings(results) {
     } catch (e) {
       if (settings.verboseLogs) console.warn('[AI Detector] updateClassifierTimings failed', e);
     }
-  }, 3000);
+  }, 15000);
 }
 
 function applyStylesForItem(itemId) {
@@ -1082,6 +1111,7 @@ function applyResultChunk(response) {
 }
 
 function extractLongText() {
+  if (!hasActiveModality('text')) return [];
   try {
     const nodes = Array.from(document.querySelectorAll(TU.TEXT_SELECTORS));
     const seen = new Set();
@@ -1223,8 +1253,18 @@ function performInitialExtraction() {
     console.log('[AI Detector] Disabled in options; skipping scan');
     return;
   }
-  const initialImages = scanAllImages();
-  const initialTextSections = extractLongText();
+  const hasImages = hasActiveModality('image');
+  const hasText = hasActiveModality('text');
+
+  if (!hasImages && !hasText) {
+    if (settings.verboseLogs) {
+      console.log('[AI Detector] No active image or text classifiers configured; skipping scan');
+    }
+    return;
+  }
+
+  const initialImages = hasImages ? scanAllImages() : [];
+  const initialTextSections = hasText ? extractLongText() : [];
 
   if (initialImages.length > 0 || initialTextSections.length > 0) {
     console.log(`[AI Detector] Streaming ${initialImages.length} images, ${initialTextSections.length} text sections individually`);
@@ -1618,8 +1658,8 @@ function resetState() {
   cachedTextSections = [];
   elementMap.clear();
   elementToItemId = new WeakMap();
-  processedImages.clear();
-  processedTextElements.clear();
+  processedImages = new WeakSet();
+  processedTextElements = new WeakSet();
   seenTextContent.clear();
   seenImageUrls.clear();
   pendingClassification = [];

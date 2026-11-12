@@ -366,6 +366,8 @@ async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 0
               type: 'image/jpeg',
               quality: Math.max(0.5, Math.min(0.95, quality))
             });
+            offCanvas.width = 0;
+            offCanvas.height = 0;
             return await blobToDataUrl(outBlob);
           } else if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
             const canvas = document.createElement('canvas');
@@ -374,7 +376,10 @@ async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 0
             const ctx = canvas.getContext('2d');
             ctx.drawImage(bitmap, 0, 0, w, h);
             bitmap.close?.();
-            return canvas.toDataURL('image/jpeg', Math.max(0.5, Math.min(0.95, quality)));
+            const dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.5, Math.min(0.95, quality)));
+            canvas.width = 0;
+            canvas.height = 0;
+            return dataUrl;
           }
         }
         bitmap.close?.();

@@ -1,105 +1,259 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Extension Options</title>
+    <title>Fire Vs Fire</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./options.css" />
+    <link rel="stylesheet" href="../content/content.css" />
   </head>
   <body>
-    <main>
-      <img
-        src="../icons/icon.svg"
-        alt="Fire Vs Fire"
-        class="logo"
-        id="status-logo"
-      />
-      <h2>Fire Vs Fire Options</h2>
-      <p class="run-state idle" id="run-state" aria-live="polite">
-        <span class="dot" aria-hidden="true"></span>
-        <span id="run-state-text">Idle</span>
-      </p>
+    <!-- Floating Embers Background Engine -->
+    <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
 
-      <section class="settings-group">
-        <h3>Detection</h3>
-        <label>
-          <input type="checkbox" id="enabled" checked />
-          Enable detection
-        </label>
-
-        <label>
-          <input type="checkbox" id="altTextOnly" />
-          Only process images with alt text (faster, likley to skip unnecesairy
-          images)
-        </label>
-
-        <label>
-          Minimum text length to classify (chars):
-          <input
-            type="number"
-            id="minTextLength"
-            min="50"
-            max="2000"
-            step="10"
-            value="250"
-            style="width: 70px"
+    <main class="popup-root">
+      <header class="app-header">
+        <div class="logo-wrap">
+          <img
+            src="../icons/icon.svg"
+            alt=""
+            class="logo"
+            id="status-logo"
           />
-        </label>
-      </section>
-
-      <section class="settings-group">
-        <h3>Categories</h3>
-        <div id="ensemble-list"></div>
-        <div class="row">
-          <button id="add-ensemble" type="button">New category</button>
-          <button id="refresh-models" type="button">Refresh classifiers</button>
         </div>
-        <p id="model-status" class="status" hidden></p>
-      </section>
+        <h1 class="app-title">Fire Vs Fire</h1>
+        <p class="run-state idle" id="run-state" aria-live="polite">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="run-state-text">Connected — Idle</span>
+        </p>
+      </header>
 
-      <section class="settings-group">
-        <h3>Dev</h3>
-        <label>
-          Classification debounce delay (ms):
-          <input
-            type="range"
-            id="classificationDelay"
-            min="0"
-            max="500"
-            step="10"
-            value="100"
-          />
-          <span id="classificationDelayValue">100</span>ms
-        </label>
+      <!-- Quick Navigation & App Hub -->
+      <div class="quick-nav-bar">
+        <button id="open-fullpage-btn" type="button" class="nav-pill-btn" title="Open Settings in a full browser tab">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          <span>Full Page</span>
+        </button>
+        <button id="open-models-btn" type="button" class="nav-pill-btn" title="Open 4-Quadrant Model Downloads">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span>FvF Classifiers</span>
+        </button>
+        <button id="open-guide-btn" type="button" class="nav-pill-btn" title="View Guide on How to Use Fire vs Fire">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <span>How to Use</span>
+        </button>
+      </div>
 
-        <label>
-          Image capture quality:
-          <input
-            type="range"
-            id="imageCaptureQuality"
-            min="0.2"
-            max="1"
-            step="0.05"
-            value="1"
-          />
-          <span id="imageCaptureQualityValue">1.00</span>
-        </label>
+      <!-- Detection Master Switch & Battery Controls -->
+      <section class="panel detection-panel">
+        <div class="master-toggle-wrap">
+          <div class="master-toggle-meta">
+            <strong class="master-toggle-title">Enable detection</strong>
+            <span class="master-toggle-desc">Classify content as you browse</span>
+          </div>
+          <label class="switch master-capsule-switch" for="enabled" title="Toggle AI Detection">
+            <input type="checkbox" id="enabled" checked />
+            <span class="capsule-track" aria-hidden="true">
+              <span class="capsule-label label-off">OFF</span>
+              <span class="capsule-label label-on">ON</span>
+              <span class="capsule-thumb">
+                <span class="capsule-dots"><i></i><i></i><i></i></span>
+              </span>
+            </span>
+          </label>
+        </div>
 
-        <label>
-          <input type="checkbox" id="verboseLogs" />
-          More log details (split batches, GPU info, timing)
-        </label>
+        <!-- In-Line Battery & Power Controls (Text above each button, no % readout) -->
+        <div class="power-controls-row" id="power-controls-row">
+          <!-- Control 1: Only when plugged in -->
+          <div class="power-col">
+            <span class="power-col-title">Only when plugged in</span>
+            <label class="switch switch-sm" for="pauseOnBattery" title="Only run classifiers when connected to AC power">
+              <input type="checkbox" id="pauseOnBattery" />
+              <span class="capsule-track" aria-hidden="true">
+                <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+              </span>
+            </label>
+          </div>
 
-        <label>
-          <input type="checkbox" id="lazyLoad" />
-          Instantly unload models to save memory
-        </label>
-        
-        <div class="row" style="margin-top: 16px;">
-          <button id="reclassify-all" type="button">Reclassify all pages</button>
+          <!-- Control 2: Pause below threshold -->
+          <div class="power-col">
+            <span class="power-col-title">Pause below threshold</span>
+            <div class="power-threshold-group">
+              <label class="switch switch-sm" for="pauseBelowThreshold" title="Pause when battery drops below threshold">
+                <input type="checkbox" id="pauseBelowThreshold" />
+                <span class="capsule-track" aria-hidden="true">
+                  <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+                </span>
+              </label>
+              <select id="batteryThreshold" class="power-select-pill" title="Battery threshold percentage">
+                <option value="10">10%</option>
+                <option value="15">15%</option>
+                <option value="20" selected>20%</option>
+                <option value="25">25%</option>
+                <option value="30">30%</option>
+                <option value="40">40%</option>
+                <option value="50">50%</option>
+              </select>
+            </div>
+          </div>
         </div>
       </section>
+
+      <details class="collapsible filters-panel">
+        <summary class="collapsible-summary">Filters</summary>
+        <div class="collapsible-body">
+          <label class="toggle-row">
+            <span class="toggle-row-text">Only process images with alt text</span>
+            <span class="switch">
+              <input type="checkbox" id="altTextOnly" checked />
+              <span class="capsule-track" aria-hidden="true">
+                <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+              </span>
+            </span>
+          </label>
+          <p class="field-hint">
+            Faster; likely to skip unnecessary images.
+          </p>
+
+          <label class="field">
+            <span class="field-label">Minimum text length (characters)</span>
+            <input
+              type="number"
+              class="input-number"
+              id="minTextLength"
+              min="50"
+              max="2000"
+              step="10"
+              value="250"
+            />
+          </label>
+        </div>
+      </details>
+
+      <section class="panel categories-panel" id="categories-section">
+        <div class="panel-heading">
+          <h2 class="panel-title">Categories</h2>
+        </div>
+
+        <button id="add-ensemble" type="button" class="btn btn-outline btn-block">
+          + New category
+        </button>
+
+        <div id="category-strip-wrap" class="category-strip-wrap" hidden>
+          <div id="category-strip" class="category-strip" role="tablist"></div>
+        </div>
+
+        <div id="category-panel" class="category-detail" hidden></div>
+      </section>
+
+      <details class="collapsible advanced-panel">
+        <summary class="collapsible-summary">Advanced</summary>
+        <div class="collapsible-body">
+          <!-- Native Host Diagnostics in Advanced -->
+          <div class="advanced-section-group" style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+            <div style="font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;">
+              Native Inference Host Diagnostics
+            </div>
+            <div class="host-update-controls" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <button id="reconnect-host-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
+                <span>⚡ Test Connection</span>
+              </button>
+              <button id="check-host-update-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
+                <span>↻ Check for Updates</span>
+              </button>
+              <div id="host-update-status" class="host-update-status" style="display: none; width: 100%; margin-top: 6px;"></div>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button id="refresh-models" type="button" class="btn btn-outline">
+              Refresh classifiers
+            </button>
+          </div>
+          <p id="model-status" class="status" hidden></p>
+          <div class="btn-row" style="margin-top: 6px;">
+            <button id="open-onboarding" type="button" class="btn btn-outline btn-block">
+              FvF Classifiers &amp; Setup Guide
+            </button>
+          </div>
+
+          <label class="field">
+            <span class="field-label">
+              Classification debounce
+              <span class="field-value-inline"
+                ><span id="classificationDelayValue">100</span> ms</span
+              >
+            </span>
+            <input
+              type="range"
+              class="range-accent"
+              id="classificationDelay"
+              min="0"
+              max="500"
+              step="10"
+              value="100"
+            />
+          </label>
+
+          <label class="field">
+            <span class="field-label">
+              Image capture quality
+              <span class="field-value-inline" id="imageCaptureQualityValue"
+                >1.00</span
+              >
+            </span>
+            <input
+              type="range"
+              class="range-accent"
+              id="imageCaptureQuality"
+              min="0.2"
+              max="1"
+              step="0.05"
+              value="1"
+            />
+          </label>
+
+          <label class="toggle-row">
+            <span class="toggle-row-text">Verbose logs (batches, GPU, timing)</span>
+            <span class="switch">
+              <input type="checkbox" id="verboseLogs" />
+              <span class="capsule-track" aria-hidden="true">
+                <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+              </span>
+            </span>
+          </label>
+
+          <label class="toggle-row">
+            <span class="toggle-row-text">Instantly unload models to save memory</span>
+            <span class="switch">
+              <input type="checkbox" id="lazyLoad" />
+              <span class="capsule-track" aria-hidden="true">
+                <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+              </span>
+            </span>
+          </label>
+
+          <div class="btn-row">
+            <button id="reclassify-all" type="button" class="btn btn-outline">
+              Reclassify all pages
+            </button>
+            <button id="cancel-all" type="button" class="btn btn-outline">
+              Cancel all classifications
+            </button>
+          </div>
+        </div>
+      </details>
     </main>
+    <div id="particle-layer" class="particle-layer" aria-hidden="true"></div>
+    <script src="../shared/visualEffects.js"></script>
+    <script src="../shared/ensembles.js"></script>
     <script src="./options.js" type="module"></script>
   </body>
 </html>

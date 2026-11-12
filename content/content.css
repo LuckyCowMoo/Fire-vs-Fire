@@ -7,7 +7,8 @@ img.ai-detected {
 }
 
 img.ai-detected:hover,
-a:hover > img.ai-detected {
+a:hover > img.ai-detected,
+img.ai-detected.fvf-hover-active {
   filter: blur(0px) saturate(1) brightness(1) !important;
   animation: none !important;
 }

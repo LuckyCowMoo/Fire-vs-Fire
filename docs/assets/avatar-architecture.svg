@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f7971e" />
+      <stop offset="100%" stop-color="#ffd200" />
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="50" fill="url(#arcGrad)" />
+  <!-- Classical columns / Basilica facade -->
+  <path d="M26 72 L74 72 M30 72 L30 46 M42 72 L42 46 M58 72 L58 46 M70 72 L70 46 M24 46 L76 46 M50 26 L22 46 M50 26 L78 46" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <circle cx="50" cy="38" r="4" fill="#ffffff" />
+</svg>

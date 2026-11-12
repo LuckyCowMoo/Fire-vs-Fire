@@ -11,7 +11,6 @@
       "version": "2.1.0",
       "modality": "image",
       "status": "available",
-      "recommended": true,
       "is_ai_detector": true,
       "category_name": "FvF Heimdall V2",
       "label": "AI generated",
@@ -22,13 +21,6 @@
       "tagline": "local AI Image classifier",
       "description": "Our flagship first-party AI image classifier. Extracts 20 low-level forensic signal channels across 5 spatial crops fused with a ConvNeXt-Base semantic backbone.",
       "files": [
-        {
-          "type": "weights_onnx_int8",
-          "relative_path": "native/classifiers/fvf_heimdall_02_int8.onnx",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_int8.onnx",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_int8.onnx",
-          "required": false
-        },
         {
           "type": "classifier_py",
           "relative_path": "native/classifiers/fvf_heimdall_02_classifier.py",
@@ -44,15 +36,15 @@
         {
           "type": "weights_pt",
           "relative_path": "native/classifiers/fvf_heimdall_02_best.pt",
-          "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_02_best.pt",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.pt",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.pt",
+          "fallback_url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_02_best.pt",
           "required": true
         },
         {
-          "type": "weights_onnx",
-          "relative_path": "native/classifiers/fvf_heimdall_02_best.onnx",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.onnx",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_best.onnx",
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/fvf_heimdall_02_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_02_int8.onnx",
           "required": false
         }
       ],
@@ -65,7 +57,6 @@
       "version": "3.0.0-preview",
       "modality": "image",
       "status": "available",
-      "recommended": false,
       "is_ai_detector": true,
       "category_name": "FvF Heimdall 03",
       "label": "AI generated",
@@ -76,13 +67,6 @@
       "tagline": "24-Ch FFT + ForensicNeXt AI Image Classifier",
       "description": "Our next-generation AI image classifier. Extracts 24 forensic channels including 2D Fast Fourier Transform (FFT) spectral log-magnitude, high-pass residual, chrominance spectrum, and directional grid harmonics, fused with a 14.5M parameter ForensicNeXt backbone and ConvNeXt-V2 Base semantic stream.",
       "files": [
-        {
-          "type": "weights_onnx_int8",
-          "relative_path": "native/classifiers/fvf_heimdall_03_int8.onnx",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_int8.onnx",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_int8.onnx",
-          "required": false
-        },
         {
           "type": "classifier_py",
           "relative_path": "native/classifiers/fvf_heimdall_03_classifier.py",
@@ -98,20 +82,20 @@
         {
           "type": "weights_pt",
           "relative_path": "native/classifiers/fvf_heimdall_03_best.pt",
-          "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_03_best.pt",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.pt",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.pt",
+          "fallback_url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_03_best.pt",
           "required": true
         },
         {
-          "type": "weights_onnx",
-          "relative_path": "native/classifiers/fvf_heimdall_03_best.onnx",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.onnx",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_best.onnx",
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/fvf_heimdall_03_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_03_int8.onnx",
           "required": false
         }
       ],
       "download_size": "207 MB",
-      "ram_size": "1.5 GB VRAM / RAM"
+      "ram_size": "1.4 GB VRAM / RAM"
     },
     {
       "id": "fvf_heimdall04",
@@ -119,7 +103,6 @@
       "version": "4.0.0-preview",
       "modality": "image",
       "status": "available",
-      "recommended": true,
       "is_ai_detector": true,
       "category_name": "FvF Heimdall 04",
       "label": "AI generated",
@@ -146,7 +129,47 @@
           "type": "weights_pt",
           "relative_path": "native/classifiers/fvf_heimdall_04_best.pt",
           "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_04_best.pt",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_04_best.pt",
+          "fallback_url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_04_best.pt",
+          "required": true
+        }
+      ],
+      "download_size": "198 MB",
+      "ram_size": "1.4 GB VRAM / RAM"
+    },
+    {
+      "id": "fvf_heimdall04_b",
+      "name": "FvF Heimdall 04 B",
+      "version": "4.1.0-preview",
+      "modality": "image",
+      "status": "available",
+      "recommended": true,
+      "is_ai_detector": true,
+      "category_name": "FvF Heimdall 04 B",
+      "label": "AI generated",
+      "default_threshold": 0.7,
+      "default_color": "#FF0055",
+      "size_mb": 198.3,
+      "architecture": "Quad-Stream 24-Ch FFT + ForensicNeXt + Intrinsic Structural Grouping + AFPL Loss",
+      "tagline": "Calibrated Anti-False-Positive AI Detector",
+      "description": "FvF Heimdall 04 B features our calibrated Asymmetric False Positive Loss (AFPL) with quadratic penalty above 30% AI probability, cutting false alarms on real-world photos, art, and screenshots by 65% while preserving 88.3% overall accuracy.",
+      "files": [
+        {
+          "type": "classifier_py",
+          "relative_path": "native/classifiers/fvf_heimdall_04_b_classifier.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_04_b_classifier.py",
+          "required": true
+        },
+        {
+          "type": "support_py",
+          "relative_path": "native/classifiers/_heimdall_arch.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/_heimdall_arch.py",
+          "required": true
+        },
+        {
+          "type": "weights_pt",
+          "relative_path": "native/classifiers/fvf_heimdall_04_b_best.pt",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_heimdall_04_b_best.pt",
+          "fallback_url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_heimdall_04_b_best.pt",
           "required": true
         }
       ],
@@ -159,9 +182,7 @@
       "version": "1.0.0",
       "modality": "image",
       "status": "available",
-      "recommended": false,
       "is_ai_detector": false,
-      "special_badge": "Object classifier",
       "category_name": "ResNet50 Spider",
       "label": "Spider",
       "default_threshold": 0.75,
@@ -169,15 +190,8 @@
       "size_mb": 90.0,
       "architecture": "ResNet-50 Binary Vision Classifier",
       "tagline": "Detects spiders",
-      "description": "Demonstrates that Fire vs Fire can classify any visual concept\u2014not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
+      "description": "Demonstrates that Fire vs Fire can classify any visual concept—not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
       "files": [
-        {
-          "type": "weights_onnx_int8",
-          "relative_path": "native/classifiers/spider_detector_resnet50_int8.onnx",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50_int8.onnx",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50_int8.onnx",
-          "required": false
-        },
         {
           "type": "classifier_py",
           "relative_path": "native/classifiers/Resnet50_spider.py",
@@ -187,15 +201,15 @@
         {
           "type": "weights_pt",
           "relative_path": "native/classifiers/spider_detector_resnet50.pt",
-          "url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/spider_detector_resnet50.pt",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.pt",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.pt",
+          "fallback_url": "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/spider_detector_resnet50.pt",
           "required": true
         },
         {
-          "type": "weights_onnx",
-          "relative_path": "native/classifiers/spider_detector_resnet50.onnx",
-          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.onnx",
-          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50.onnx",
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/spider_detector_resnet50_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/spider_detector_resnet50_int8.onnx",
           "required": false
         }
       ],
@@ -204,14 +218,13 @@
     },
     {
       "id": "fvf_mimir_02",
-      "name": "M\u00edmir V2",
+      "name": "Mímir V2",
       "version": "2.0.0-preview",
       "modality": "text",
       "status": "coming_next",
-      "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Next",
-      "category_name": "M\u00edmir V2",
+      "category_name": "Mímir V2",
       "label": "AI text",
       "default_threshold": 0.75,
       "default_color": "#FF6218",
@@ -221,7 +234,7 @@
       "description": "Evaluates token entropy, perplexity curvature, and structural repetition to flag synthetic articles, comments, and LLM-generated essays completely offline.",
       "files": [],
       "download_size": "280 MB",
-      "ram_size": "800 MB RAM"
+      "ram_size": "650 MB RAM"
     },
     {
       "id": "fvf_huginn_01",
@@ -229,7 +242,6 @@
       "version": "1.0.0-preview",
       "modality": "video",
       "status": "coming_soon",
-      "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Soon",
       "category_name": "Huginn V1",
@@ -250,7 +262,6 @@
       "version": "1.0.0-preview",
       "modality": "audio",
       "status": "coming_soon",
-      "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Soon",
       "category_name": "Bragi V1",
@@ -262,8 +273,8 @@
       "tagline": "Voice Clone & Synthetic Audio Detector",
       "description": "Detects phase discontinuities, high-frequency vocoder aliasing, and unnatural breath cadence in synthetic speech and AI music.",
       "files": [],
-      "download_size": "210 MB",
-      "ram_size": "600 MB RAM"
+      "download_size": "195 MB",
+      "ram_size": "500 MB RAM"
     }
   ],
   "host_version": "2.1.0",

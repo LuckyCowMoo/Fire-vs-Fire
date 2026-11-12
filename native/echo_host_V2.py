@@ -2136,6 +2136,74 @@ def apply_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
     return resp
 
 
+def get_system_power_status(request_id: Optional[str] = None) -> Dict[str, Any]:
+    """Detect whether host is plugged in, battery percentage, and charging status."""
+    is_plugged = True
+    has_battery = False
+    pct: Optional[int] = 100
+    charging = False
+    source = 'unknown'
+
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            class SYSTEM_POWER_STATUS(ctypes.Structure):
+                _fields_ = [
+                    ('ACLineStatus', ctypes.c_byte),
+                    ('BatteryFlag', ctypes.c_byte),
+                    ('BatteryLifePercent', ctypes.c_byte),
+                    ('SystemStatusFlag', ctypes.c_byte),
+                    ('BatteryLifeTime', ctypes.c_ulong),
+                    ('BatteryFullLifeTime', ctypes.c_ulong),
+                ]
+            s = SYSTEM_POWER_STATUS()
+            if ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(s)):
+                is_plugged = (s.ACLineStatus == 1)
+                has_battery = not bool(s.BatteryFlag & 128)
+                pct = int(s.BatteryLifePercent) if s.BatteryLifePercent <= 100 else None
+                charging = bool(s.BatteryFlag & 8)
+                source = 'win32_api'
+        elif sys.platform.startswith('linux'):
+            power_dir = Path('/sys/class/power_supply')
+            if power_dir.is_dir():
+                for supply in power_dir.iterdir():
+                    type_file = supply / 'type'
+                    if type_file.is_file():
+                        stype = type_file.read_text(encoding='utf-8').strip().lower()
+                        if stype == 'mains':
+                            online_file = supply / 'online'
+                            if online_file.is_file():
+                                is_plugged = (online_file.read_text(encoding='utf-8').strip() == '1')
+                                source = 'linux_sysfs'
+                        elif stype == 'battery':
+                            has_battery = True
+                            cap_file = supply / 'capacity'
+                            if cap_file.is_file():
+                                try:
+                                    pct = int(cap_file.read_text(encoding='utf-8').strip())
+                                except ValueError:
+                                    pass
+                            status_file = supply / 'status'
+                            if status_file.is_file():
+                                charging = (status_file.read_text(encoding='utf-8').strip().lower() == 'charging')
+                            source = 'linux_sysfs'
+    except Exception as e:
+        safe_log(f"Error querying power status: {e}")
+
+    resp: Dict[str, Any] = {
+        'ok': True,
+        'type': 'powerStatus',
+        'is_plugged_in': is_plugged,
+        'has_battery': has_battery,
+        'battery_percent': pct,
+        'charging': charging,
+        'source': source
+    }
+    if request_id:
+        resp['requestId'] = request_id
+    return resp
+
+
 # ============================================================================
 # Global Singletons & Main I/O Loop
 # ============================================================================
@@ -2222,6 +2290,11 @@ def main() -> None:
 
             elif mtype == 'getOfficialCatalog':
                 send_message(get_official_catalog_response(msg.get('requestId')))
+                continue
+
+            elif mtype == 'getPowerStatus':
+                req_id = msg.get('requestId')
+                send_message(get_system_power_status(req_id))
                 continue
 
             elif mtype == 'downloadOfficialModel':

@@ -11,7 +11,6 @@
       "version": "2.1.0",
       "modality": "image",
       "status": "available",
-      "recommended": true,
       "is_ai_detector": true,
       "category_name": "FvF Heimdall V2",
       "label": "AI generated",
@@ -58,7 +57,6 @@
       "version": "3.0.0-preview",
       "modality": "image",
       "status": "available",
-      "recommended": false,
       "is_ai_detector": true,
       "category_name": "FvF Heimdall 03",
       "label": "AI generated",
@@ -97,7 +95,7 @@
         }
       ],
       "download_size": "207 MB",
-      "ram_size": "1.5 GB VRAM / RAM"
+      "ram_size": "1.4 GB VRAM / RAM"
     },
     {
       "id": "fvf_heimdall04",
@@ -105,7 +103,6 @@
       "version": "4.0.0-preview",
       "modality": "image",
       "status": "available",
-      "recommended": true,
       "is_ai_detector": true,
       "category_name": "FvF Heimdall 04",
       "label": "AI generated",
@@ -137,7 +134,7 @@
         }
       ],
       "download_size": "198 MB",
-      "ram_size": "1.5 GB VRAM / RAM"
+      "ram_size": "1.4 GB VRAM / RAM"
     },
     {
       "id": "fvf_heimdall04_b",
@@ -185,9 +182,7 @@
       "version": "1.0.0",
       "modality": "image",
       "status": "available",
-      "recommended": false,
       "is_ai_detector": false,
-      "special_badge": "Object classifier",
       "category_name": "ResNet50 Spider",
       "label": "Spider",
       "default_threshold": 0.75,
@@ -195,7 +190,7 @@
       "size_mb": 90.0,
       "architecture": "ResNet-50 Binary Vision Classifier",
       "tagline": "Detects spiders",
-      "description": "Demonstrates that Fire vs Fire can classify any visual concept\u2014not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
+      "description": "Demonstrates that Fire vs Fire can classify any visual concept—not just AI! This model detects real and illustrated spiders on web pages so they are blurred automatically before you see them. Note: This model detects spiders, NOT AI-generated content.",
       "files": [
         {
           "type": "classifier_py",
@@ -223,14 +218,13 @@
     },
     {
       "id": "fvf_mimir_02",
-      "name": "M\u00edmir V2",
+      "name": "Mímir V2",
       "version": "2.0.0-preview",
       "modality": "text",
       "status": "coming_next",
-      "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Next",
-      "category_name": "M\u00edmir V2",
+      "category_name": "Mímir V2",
       "label": "AI text",
       "default_threshold": 0.75,
       "default_color": "#FF6218",
@@ -240,7 +234,7 @@
       "description": "Evaluates token entropy, perplexity curvature, and structural repetition to flag synthetic articles, comments, and LLM-generated essays completely offline.",
       "files": [],
       "download_size": "280 MB",
-      "ram_size": "800 MB RAM"
+      "ram_size": "650 MB RAM"
     },
     {
       "id": "fvf_huginn_01",
@@ -248,7 +242,6 @@
       "version": "1.0.0-preview",
       "modality": "video",
       "status": "coming_soon",
-      "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Soon",
       "category_name": "Huginn V1",
@@ -269,7 +262,6 @@
       "version": "1.0.0-preview",
       "modality": "audio",
       "status": "coming_soon",
-      "recommended": true,
       "is_ai_detector": true,
       "special_badge": "Coming Soon",
       "category_name": "Bragi V1",
@@ -281,8 +273,8 @@
       "tagline": "Voice Clone & Synthetic Audio Detector",
       "description": "Detects phase discontinuities, high-frequency vocoder aliasing, and unnatural breath cadence in synthetic speech and AI music.",
       "files": [],
-      "download_size": "210 MB",
-      "ram_size": "600 MB RAM"
+      "download_size": "195 MB",
+      "ram_size": "500 MB RAM"
     }
   ],
   "host_version": "2.1.0",

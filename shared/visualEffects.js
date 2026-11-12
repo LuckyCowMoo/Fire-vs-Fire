@@ -243,7 +243,7 @@
     const blurCandidates = matched.map(({ cfg }) => {
       const styles = cfg.styles?.image || {};
       const mode = styles.blurMode || (styles.applyBlur === false ? 'off' : 'hover');
-      const amount = styles.blurAmount ?? settings.blurAmount ?? 4;
+      const amount = styles.blurAmount ?? settings.blurAmount ?? 3;
       return { mode, amount };
     });
 

@@ -18,8 +18,8 @@ let currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Da
  */
 let settings = {
   enabled: true,                  // Master toggle for the extension
-  altTextOnly: false,             // If true, only process images with alt text
-  blurAmount: 4,                  // Blur radius (px) for flagged images
+  altTextOnly: true,              // If true, only process images with alt text (default: true)
+  blurAmount: 3,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
   miniBatchSize: 16,              // Legacy setting
@@ -27,9 +27,9 @@ let settings = {
   imageCaptureQuality: 1,         // JPEG quality (0.2-1) for image capture
   textBlurAmount: 2,              // Blur radius (px) for flagged text
   textStrikethroughEnabled: true, // Whether to apply strikethrough on AI text
-  imageAiThreshold: 0.5,          // Threshold (0-1) for flagging images as AI (0.5 = 50%)
+  imageAiThreshold: 0.75,          // Threshold (0-1) for flagging images as AI (0.5 = 50%)
   minImageDimension: 64,          // Skip tiny images/icons below this size (px)
-  textAiThreshold: 0.5,           // Threshold (0-1) for flagging text as AI
+  textAiThreshold: 0.75,           // Threshold (0-1) for flagging text as AI
   minTextLength: 250,             // Minimum character length for text to be classified
   verboseLogs: false,             // Show detailed logging for processing details
   lazyLoad: false,                // Unload models after use (true) or keep in memory (false)
@@ -147,7 +147,7 @@ function computeEnsembleSignature(ensembles, includeStyles) {
     if (includeStyles) {
       base.weights = Array.isArray(ens.weights) ? [...ens.weights] : null;
       base.name = typeof ens.name === 'string' ? ens.name.trim() : '';
-      base.threshold = typeof ens.threshold === 'number' ? ens.threshold : 0.5;
+      base.threshold = typeof ens.threshold === 'number' ? ens.threshold : 0.75;
       base.styles = ens.styles || {};
     }
     return base;
@@ -307,13 +307,59 @@ function cleanupStaleEntries() {
   pruneItemResults();
 }
 
+function findAiDetectedUnderPointer(evt) {
+  const x = evt.clientX;
+  const y = evt.clientY;
+  if (typeof x !== 'number' || typeof y !== 'number') return null;
+
+  // 1. Check direct target or closest ancestor
+  if (evt.target instanceof Element) {
+    const direct = evt.target.closest('.ai-detected');
+    if (direct) return direct;
+  }
+
+  // 2. Penetrate transparent overlay divs/elements using document.elementsFromPoint(x, y)
+  // This penetrates ANY overlay elements, click traps, or buttons sitting in front of the image
+  if (typeof document.elementsFromPoint === 'function') {
+    try {
+      const elements = document.elementsFromPoint(x, y);
+      if (elements && elements.length) {
+        for (let i = 0; i < elements.length; i++) {
+          const el = elements[i];
+          if (el && el.classList && el.classList.contains('ai-detected')) {
+            return el;
+          }
+          const parent = el && el.closest && el.closest('.ai-detected');
+          if (parent) {
+            return parent;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Fallback: Check bounding client rects of tracked processed images
+  // (In case an overlay has pointer-events: none, opaque backdrop, or complex stacking context)
+  for (const img of processedImages) {
+    if (img && img.isConnected && img.classList && img.classList.contains('ai-detected')) {
+      try {
+        const rect = img.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          return img;
+        }
+      } catch (_) {}
+    }
+  }
+
+  return null;
+}
+
 function handlePointerMoveHover(evt) {
-  const candidate = evt.target instanceof Element
-    ? evt.target.closest('.ai-detected')
-    : null;
+  const candidate = findAiDetectedUnderPointer(evt);
 
   if (candidate === currentHoverEl) return;
   if (currentHoverEl && currentHoverEl !== candidate) {
+    currentHoverEl.classList.remove('fvf-hover-active');
     if (hasResultsForElement(currentHoverEl)) {
       if (currentHoverEl.dataset.aiImageStyle) {
         VE.applyImageInteractionState(currentHoverEl, 'rest', settings);
@@ -325,6 +371,7 @@ function handlePointerMoveHover(evt) {
   }
   currentHoverEl = candidate;
   if (currentHoverEl && hasResultsForElement(currentHoverEl)) {
+    currentHoverEl.classList.add('fvf-hover-active');
     if (currentHoverEl.dataset.aiImageStyle) {
       VE.applyImageInteractionState(currentHoverEl, 'hover', settings);
     } else {
@@ -1433,12 +1480,12 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
                   applyBlur: true,
                   blurAmount: (settings.blurAmount ?? 4) * 2,
                   blurMode: 'hover',
-                  applyBorder: true,
+                  applyBorder: false,
                   borderMultiplier: (settings.borderMultiplier ?? 1) * 2,
                   borderColor: '#808080',
-                  borderMode: 'hover',
+                  borderMode: 'off',
                   applyBadge: true,
-                  badgeMode: 'hover'
+                  badgeMode: 'always'
                 }
               }
             });

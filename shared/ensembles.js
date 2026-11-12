@@ -18,20 +18,20 @@
         name: 'FvF Heimdall 04 B',
         modality: 'image',
         enabled: true,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall04_b'],
         weights: null,
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor: '#FF0055',
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },
@@ -40,20 +40,20 @@
         name: 'FvF Heimdall 04',
         modality: 'image',
         enabled: true,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall04'],
         weights: null,
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor: '#FF1744',
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },
@@ -62,20 +62,20 @@
         name: 'FvF Heimdall 03',
         modality: 'image',
         enabled: false,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall03'],
         weights: null,
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor,
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },
@@ -84,20 +84,20 @@
         name: 'FvF Heimdall 02',
         modality: 'image',
         enabled: false,
-        threshold: settings.imageAiThreshold ?? 0.5,
+        threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall02'],
         weights: null,
         styles: {
           image: {
             applyBlur: true,
-            blurAmount: settings.blurAmount ?? 4,
-            applyBorder: true,
+            blurAmount: settings.blurAmount ?? 3,
+            applyBorder: false,
             borderMultiplier: settings.borderMultiplier ?? 1,
             borderColor: '#FF4D1C',
             applyBadge: true,
             blurMode: 'hover',
-            borderMode: 'hover',
-            badgeMode: 'hover'
+            borderMode: 'off',
+            badgeMode: 'always'
           }
         }
       },
@@ -106,7 +106,7 @@
         name: 'AI Text',
         modality: 'text',
         enabled: false,
-        threshold: settings.textAiThreshold ?? 0.5,
+        threshold: settings.textAiThreshold ?? 0.75,
         classifiers: ['text'],
         weights: null,
         styles: {

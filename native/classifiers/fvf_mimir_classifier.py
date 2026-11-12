@@ -48,6 +48,7 @@ except Exception:
 class FvfMimirClassifier(BaseClassifier):
     """FvF Mímir V2 AI Text Classifier."""
 
+    CLASSIFIER_ID: str = "fvf_mimir_02"
     REQUIRED_PACKAGES: List[str] = ["lightgbm", "joblib"]
 
     FEATURE_COLS: Tuple[str, ...] = (

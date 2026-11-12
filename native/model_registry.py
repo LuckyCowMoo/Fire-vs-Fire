@@ -119,7 +119,7 @@ class ModelRegistry:
                         obj is not BaseClassifier and
                         obj.__module__ == f"classifiers.{module_name}"):
 
-                        classifier_id = self._generate_id(name)
+                        classifier_id = getattr(obj, "CLASSIFIER_ID", None) or self._generate_id(name)
                         self._classifiers[classifier_id] = obj
                         self._classifier_sources[classifier_id] = py_file
                         print(f"[Registry] Discovered: {classifier_id} -> {name}", file=sys.stderr)

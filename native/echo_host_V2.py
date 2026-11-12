@@ -1751,8 +1751,18 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
         cid = detail["id"]
         weights_ready = detail.get("weights_ready", False)
 
-        if cid in models_by_id:
-            m = models_by_id[cid]
+        matched_id = cid if cid in models_by_id else None
+        if not matched_id:
+            for mid in models_by_id:
+                if mid == cid or mid.replace("_", "") == cid.replace("_", ""):
+                    matched_id = mid
+                    break
+                if cid in ("fvf_mimir", "mimir") and "mimir" in mid:
+                    matched_id = mid
+                    break
+
+        if matched_id:
+            m = models_by_id[matched_id]
             if weights_ready:
                 m["installed"] = True
             if detail.get("download_size") and detail["download_size"] != "Local":

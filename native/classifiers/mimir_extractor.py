@@ -168,8 +168,8 @@ def extract_stylometric_features(text: str) -> Dict[str, float]:
     n_sents = len(sentences)
     sent_word_counts = [len(_WORD_RE.findall(s)) for s in sentences]
     w_mean = mean(sent_word_counts) if sent_word_counts else 0.0
-    w_std = pstdev(sent_word_counts) if len(sent_word_counts) > 1 else 0.0
-    w_cv = _safe_div(w_std, w_mean)
+    w_std = pstdev(sent_word_counts) if len(sent_word_counts) > 1 else np.nan
+    w_cv = _safe_div(w_std, w_mean) if len(sent_word_counts) > 1 else np.nan
     syllables = sum(count_syllables(w) for w in words)
     syllables_per_word = _safe_div(syllables, n_words)
     ttr = _safe_div(len(set(words)), n_words)
@@ -189,7 +189,7 @@ def extract_stylometric_features(text: str) -> Dict[str, float]:
     punct_count = len(_PUNCT_RE.findall(raw))
     punct_splits = _PUNCT_RE.split(raw)
     seg_lengths = [len(_WORD_RE.findall(seg)) for seg in punct_splits if seg.strip()]
-    pacing_std = pstdev(seg_lengths) if len(seg_lengths) > 1 else 0.0
+    pacing_std = pstdev(seg_lengths) if len(seg_lengths) > 1 else np.nan
 
     return {
         "stylo_word_count": float(n_words),
@@ -390,7 +390,8 @@ class RuntimeLMScorer:
                 nll = -target_log_probs
                 probs = torch.exp(log_probs).squeeze(0)
                 entropy = -(probs * log_probs.squeeze(0)).sum(dim=-1)
-                ranks = (logits.squeeze(0) > target_log_probs.unsqueeze(-1)).sum(dim=-1) + 1
+                target_logits = logits.squeeze(0).gather(-1, targets.squeeze(0).unsqueeze(-1)).squeeze(-1)
+                ranks = (logits.squeeze(0) > target_logits.unsqueeze(-1)).sum(dim=-1) + 1
 
                 nll_np = nll.detach().cpu().numpy()
                 ent_np = entropy.detach().cpu().numpy()
@@ -409,17 +410,18 @@ class RuntimeLMScorer:
         sum_exp = np.sum(exp_logits, axis=-1, keepdims=True)
         log_probs = (logits - max_logits) - np.log(sum_exp)
 
-        # Target token log-probabilities
+        # Target token log-probabilities and target logits
         row_indices = np.arange(len(targets))
         target_log_probs = log_probs[row_indices, targets]
+        target_logits = logits[row_indices, targets]
         nll = -target_log_probs
 
         # Entropy: -sum(p * log_p)
         probs = np.exp(log_probs)
         entropy = -np.sum(probs * log_probs, axis=-1)
 
-        # Ranks: count of elements greater than target log-prob + 1
-        ranks = np.sum(logits > target_log_probs[:, None], axis=-1) + 1
+        # Ranks: count of elements greater than target logit + 1
+        ranks = np.sum(logits > target_logits[:, None], axis=-1) + 1
 
         return self._assemble_features(nll, entropy, ranks, target_log_probs, targets)
 
@@ -468,10 +470,10 @@ class RuntimeLMScorer:
             sent_ppls.append(math.exp(min(np.mean(cur_nlls), 20.0)))
 
         sent_ppl_mean = float(np.mean(sent_ppls)) if sent_ppls else ppl_global
-        sent_ppl_std = float(np.std(sent_ppls)) if len(sent_ppls) > 1 else 0.0
+        sent_ppl_std = float(np.std(sent_ppls)) if len(sent_ppls) > 1 else np.nan
         sent_ppl_min = float(np.min(sent_ppls)) if sent_ppls else ppl_global
         sent_ppl_max = float(np.max(sent_ppls)) if sent_ppls else ppl_global
-        sent_ppl_range = float(sent_ppl_max / max(sent_ppl_min, 1e-4))
+        sent_ppl_range = float(sent_ppl_max / max(sent_ppl_min, 1e-4)) if len(sent_ppls) > 1 else np.nan
         curv_disc = float(np.mean(np.abs(nll_np - ent_np)))
 
         return {

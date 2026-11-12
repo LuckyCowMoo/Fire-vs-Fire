@@ -148,7 +148,10 @@ class FvfMimirClassifier(BaseClassifier):
             sty_feats = extract_stylometric_features(sanitized)
 
             row_dict = {**lm_feats, **sty_feats}
-            feature_vector = [float(row_dict.get(col, 0.0)) for col in self.FEATURE_COLS]
+            feature_vector = [
+                float(row_dict[col]) if (col in row_dict and row_dict[col] is not None) else np.nan
+                for col in self.FEATURE_COLS
+            ]
             feature_rows.append(feature_vector)
 
         if not feature_rows:

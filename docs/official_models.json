@@ -218,23 +218,50 @@
     },
     {
       "id": "fvf_mimir_02",
-      "name": "Mímir V2",
-      "version": "2.0.0-preview",
+      "name": "FvF Mímir V2",
+      "version": "2.0.0",
       "modality": "text",
-      "status": "coming_next",
+      "status": "available",
       "is_ai_detector": true,
-      "special_badge": "Coming Next",
-      "category_name": "Mímir V2",
+      "category_name": "FvF Mímir V2",
       "label": "AI text",
       "default_threshold": 0.75,
       "default_color": "#FF6218",
-      "size_mb": 280.0,
-      "architecture": "Bi-Directional Token Burstiness & Syntactic Transformer",
-      "tagline": "Local AI Text Classifier",
-      "description": "Evaluates token entropy, perplexity curvature, and structural repetition to flag synthetic articles, comments, and LLM-generated essays completely offline.",
-      "files": [],
-      "download_size": "280 MB",
-      "ram_size": "650 MB RAM"
+      "size_mb": 81.2,
+      "architecture": "Universal Dual-Stream Curvature & Mindner Stylometrics (INT8 ONNX + AFPL LightGBM)",
+      "tagline": "Hardware-Accelerated Local AI Text Classifier",
+      "description": "FvF Mímir V2 combines causal language model perplexity curvature, token rank distribution, and 25 Mindner stylometrics with an anti-false-positive calibrated LightGBM head. Accelerated via DirectML, CUDA, CoreML, and CPU across NVIDIA, AMD, Intel, Apple, and Qualcomm.",
+      "files": [
+        {
+          "type": "classifier_py",
+          "relative_path": "native/classifiers/fvf_mimir_classifier.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_mimir_classifier.py",
+          "required": true
+        },
+        {
+          "type": "support_py",
+          "relative_path": "native/classifiers/mimir_extractor.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/mimir_extractor.py",
+          "required": true
+        },
+        {
+          "type": "weights_joblib",
+          "relative_path": "native/classifiers/fvf_mimir_head.joblib",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_head.joblib",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_head.joblib",
+          "required": true
+        },
+        {
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/fvf_mimir_backbone_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_backbone_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_backbone_int8.onnx",
+          "required": false
+        }
+      ],
+      "download_size": "82 MB",
+      "ram_size": "250 MB RAM",
+      "recommended": true
     },
     {
       "id": "fvf_huginn_01",

@@ -96,7 +96,7 @@
               >
                 <span>Download Native Host</span>
               </a>
-              <button type="button" class="btn-ember-outline" id="skip-to-models-btn" disabled style="opacity: 0.45; cursor: not-allowed;">
+              <button type="button" class="btn-ember-outline" id="skip-to-models-btn">
                 <span>Choose Models →</span>
               </button>
             </div>
@@ -124,7 +124,7 @@
       <section class="wizard-screen" id="screen-2" data-screen="2">
         <div class="screen-header" style="margin-bottom: 24px;">
           <h1 class="display-title" style="margin-bottom: 4px;">Choose Your First-Party Classifiers</h1>
-          <p style="color: var(--text-secondary); font-size: 0.88rem; margin: 0;">Auto-discovers any classifier or weights in <code>native/classifiers/</code> (auto-scanning in background)</p>
+          <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 8px auto 0; max-width: 780px; line-height: 1.55;">The Fire vs Fire browser extension uses modular "classifiers". These are small AI models that run on your own computer to determine the origin or contents of media in your browser. I have developed many classifier iterations trying to make the most accurate model possible, and will continue to do so going forward. You can use this screen to view the current published classifiers. In the future, I may put multiple power levels of models here, for computers with more or less capabilities. Video and audio classifiers are coming soon.</p>
         </div>
 
         <!-- 4 Modality Quadrants Grid (Populated dynamically from official_models.json) -->
@@ -135,7 +135,7 @@
         <!-- Expandable Developer Guide: Build Your Own Classifier with Full BaseClassifier API -->
         <details class="glass-card-3d byo-classifier-card">
           <summary>
-            <span>Want to build your own classifier? Click to see the BaseClassifier API</span>
+            <span>Want to build your own classifier? I encourage you to try!</span>
             <span style="font-size: 0.82rem; color: #ffb38a;">BaseClassifier API ▾</span>
           </summary>
           <pre class="code-block-ember"><code id="base-classifier-code">from abc import ABC, abstractmethod

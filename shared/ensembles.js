@@ -103,9 +103,9 @@
       },
       {
         id: 'ai_text',
-        name: 'AI Text',
+        name: 'Mimir 02 B',
         modality: 'text',
-        enabled: false,
+        enabled: true,
         threshold: settings.textAiThreshold ?? 0.75,
         classifiers: ['fvf_mimir_02'],
         weights: null,

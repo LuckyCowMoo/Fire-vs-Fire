@@ -19,6 +19,7 @@ let currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Da
 let settings = {
   enabled: true,                  // Master toggle for the extension
   altTextOnly: true,              // If true, only process images with alt text (default: true)
+  ignoreSmallImages: true,        // Skip physically small images such as avatars and UI icons
   blurAmount: 3,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
@@ -28,9 +29,9 @@ let settings = {
   textBlurAmount: 2,              // Blur radius (px) for flagged text
   textStrikethroughEnabled: true, // Whether to apply strikethrough on AI text
   imageAiThreshold: 0.75,          // Threshold (0-1) for flagging images as AI (0.5 = 50%)
-  minImageDimension: 64,          // Skip tiny images/icons below this size (px)
+  minImageDimension: 80,          // Minimum natural and rendered pixel size (px) for images
   textAiThreshold: 0.75,           // Threshold (0-1) for flagging text as AI
-  minTextLength: 150,             // Minimum character length for text to be classified
+  minTextLength: 250,             // Minimum character length for text to be classified
   verboseLogs: false,             // Show detailed logging for processing details
   lazyLoad: false,                // Unload models after use (true) or keep in memory (false)
   ensembles: null                 // Ensemble configs (loaded from storage)
@@ -731,12 +732,88 @@ function initIntersectionObserver() {
   });
 }
 
+function getMinTextLength() {
+  const value = Number(settings.minTextLength);
+  return Number.isFinite(value) && value >= 50 ? value : 250;
+}
+
+function getEligibleTextForElement(el) {
+  if (!el || !(el instanceof Element)) return null;
+  if (TU.hasNestedTextCandidate(el)) return null;
+
+  const text = TU.normalizeElementText(el);
+  if (!text || text.length < getMinTextLength()) return null;
+  return text;
+}
+
+function getMinImageDimension() {
+  const value = Number(settings.minImageDimension);
+  return Number.isFinite(value) && value >= 16 ? value : 80;
+}
+
+function parseExplicitCssPixels(raw) {
+  if (!raw || typeof raw !== 'string') return 0;
+  const trimmed = raw.trim();
+  if (!trimmed.endsWith('px')) return 0;
+  const num = parseFloat(trimmed);
+  return Number.isFinite(num) && num > 0 ? num : 0;
+}
+
+function getRenderedImageDimensions(el) {
+  const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+  let width = rect && rect.width > 0 ? rect.width : (el.clientWidth || 0);
+  let height = rect && rect.height > 0 ? rect.height : (el.clientHeight || 0);
+
+  if (width <= 0 && el.getAttribute) {
+    const attrW = parseFloat(el.getAttribute('width'));
+    if (Number.isFinite(attrW) && attrW > 0) width = attrW;
+  }
+  if (height <= 0 && el.getAttribute) {
+    const attrH = parseFloat(el.getAttribute('height'));
+    if (Number.isFinite(attrH) && attrH > 0) height = attrH;
+  }
+
+  if ((width <= 0 || height <= 0) && typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const style = window.getComputedStyle(el);
+      if (style) {
+        if (width <= 0) {
+          width = parseExplicitCssPixels(style.width) || parseExplicitCssPixels(style.maxWidth);
+        }
+        if (height <= 0) {
+          height = parseExplicitCssPixels(style.height) || parseExplicitCssPixels(style.maxHeight);
+        }
+      }
+    } catch (_) {}
+  }
+
+  return { width, height };
+}
+
+function isPhysicallySmallImage(el, nw, nh) {
+  if (!settings.ignoreSmallImages) return false;
+  const minDim = getMinImageDimension();
+  if (nw < minDim || nh < minDim) {
+    return true;
+  }
+
+  const rendered = getRenderedImageDimensions(el);
+  if (rendered.width > 0 && rendered.width < minDim) {
+    return true;
+  }
+  if (rendered.height > 0 && rendered.height < minDim) {
+    return true;
+  }
+
+  return false;
+}
+
 function processTextElement(el) {
   if (!el || !(el instanceof Element)) return null;
   if (processedTextElements.has(el)) return null;
 
-  const text = TU.normalizeElementText(el);
-  if (!text || text.length < settings.minTextLength) return null;
+  const text = getEligibleTextForElement(el);
+  if (!text) return null;
 
   if (seenTextContent.has(text)) return null;
   seenTextContent.add(text);
@@ -778,12 +855,8 @@ function processImageElement(el, isLazy = false) {
     return null;
   }
 
-  const displayW = el.clientWidth || el.width || 0;
-  const displayH = el.clientHeight || el.height || 0;
-  const effectiveW = Math.max(nw, displayW);
-  const effectiveH = Math.max(nh, displayH);
-  const minDim = Number(settings.minImageDimension || 64);
-  if (effectiveW < minDim || effectiveH < minDim) {
+  // Filter out physically small images (profile avatars, UI/navigation icons, tiny sprites)
+  if (isPhysicallySmallImage(el, nw, nh)) {
     return null;
   }
 
@@ -1114,15 +1187,15 @@ function extractLongText() {
   if (!hasActiveModality('text')) return [];
   try {
     const nodes = Array.from(document.querySelectorAll(TU.TEXT_SELECTORS));
-    const seen = new Set();
     const sections = [];
 
     nodes.forEach((el) => {
-      if (TU.hasNestedTextCandidate(el)) return;
-      const text = TU.normalizeElementText(el);
-      if (!text || text.length < settings.minTextLength) return;
-      if (seen.has(text)) return;
-      seen.add(text);
+      if (processedTextElements.has(el)) return;
+      const text = getEligibleTextForElement(el);
+      if (!text) return;
+      if (seenTextContent.has(text)) return;
+      seenTextContent.add(text);
+      processedTextElements.add(el);
       sections.push(TU.buildTextSection(el, sections.length, text));
     });
 
@@ -1144,6 +1217,7 @@ async function loadSettings() {
     const res = await storageArea.get([
       'enabled',
       'altTextOnly',
+      'ignoreSmallImages',
       'blurAmount',
       'borderMultiplier',
       'borderColor',
@@ -1163,6 +1237,7 @@ async function loadSettings() {
 
     if (res && typeof res.enabled === 'boolean') settings.enabled = res.enabled;
     if (res && typeof res.altTextOnly === 'boolean') settings.altTextOnly = res.altTextOnly;
+    if (res && typeof res.ignoreSmallImages === 'boolean') settings.ignoreSmallImages = res.ignoreSmallImages;
     if (res && typeof res.blurAmount === 'number') settings.blurAmount = res.blurAmount;
     if (res && typeof res.borderMultiplier === 'number') settings.borderMultiplier = res.borderMultiplier;
     if (res && typeof res.borderColor === 'string') settings.borderColor = res.borderColor;
@@ -1175,8 +1250,12 @@ async function loadSettings() {
     if (res && typeof res.textAiThreshold === 'number') settings.textAiThreshold = res.textAiThreshold;
     if (res && typeof res.verboseLogs === 'boolean') settings.verboseLogs = res.verboseLogs;
     if (res && typeof res.lazyLoad === 'boolean') settings.lazyLoad = res.lazyLoad;
-    if (res && typeof res.minTextLength === 'number') settings.minTextLength = res.minTextLength;
-    if (res && typeof res.minImageDimension === 'number') settings.minImageDimension = res.minImageDimension;
+    if (res && typeof res.minTextLength === 'number' && Number.isFinite(res.minTextLength)) {
+      settings.minTextLength = Math.max(50, Math.min(2000, res.minTextLength));
+    }
+    if (res && typeof res.minImageDimension === 'number' && Number.isFinite(res.minImageDimension)) {
+      settings.minImageDimension = Math.max(16, Math.min(512, res.minImageDimension));
+    }
     if (res && Array.isArray(res.ensembleConfigsV2)) settings.ensembles = res.ensembleConfigsV2;
     updateEnsembleSignatures();
   } catch (e) {
@@ -1291,6 +1370,7 @@ const ALLOWED_ONBOARDING_ACTIONS = new Set([
   'OPEN_GUIDE_PAGE',
   'GET_OFFICIAL_CATALOG',
   'DOWNLOAD_OFFICIAL_MODEL',
+  'UNINSTALL_OFFICIAL_MODEL',
   'AUTO_SETUP_CATEGORIES',
   'SAVE_ONBOARDING_ENSEMBLES'
 ]);
@@ -1692,9 +1772,9 @@ async function reloadSettingsAndRescan() {
 
 if (ext && ext.storage && ext.storage.onChanged) {
   ext.storage.onChanged.addListener((changes) => {
-    const classificationKeys = ['enabled', 'altTextOnly', 'minTextLength'];
+    const classificationKeys = ['enabled', 'altTextOnly', 'ignoreSmallImages', 'minImageDimension', 'minTextLength'];
     const visualKeys = ['blurAmount', 'borderMultiplier', 'borderColor', 'textBlurAmount', 'textStrikethroughEnabled', 'imageAiThreshold', 'textAiThreshold'];
-    const performanceKeys = ['classificationDelay', 'verboseLogs', 'lazyLoad', 'imageCaptureQuality', 'miniBatchSize', 'minImageDimension'];
+    const performanceKeys = ['classificationDelay', 'verboseLogs', 'lazyLoad', 'imageCaptureQuality', 'miniBatchSize'];
 
     const ensembleChanged = Object.prototype.hasOwnProperty.call(changes, 'ensembleConfigsV2');
     let handledByEnsemble = false;

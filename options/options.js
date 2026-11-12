@@ -18,6 +18,8 @@ const MODE_ICONS = {
 
 const enabledInput = document.getElementById('enabled');
 const altTextOnlyInput = document.getElementById('altTextOnly');
+const ignoreSmallImagesInput = document.getElementById('ignoreSmallImages');
+const minImageDimensionInput = document.getElementById('minImageDimension');
 const classificationDelayInput = document.getElementById('classificationDelay');
 const classificationDelayValue = document.getElementById('classificationDelayValue');
 const imageCaptureQualityInput = document.getElementById('imageCaptureQuality');
@@ -1538,6 +1540,8 @@ async function load() {
       ? await storageArea.get([
           'enabled',
           'altTextOnly',
+          'ignoreSmallImages',
+          'minImageDimension',
           'pauseOnBattery',
           'pauseBelowThreshold',
           'batteryThreshold',
@@ -1555,6 +1559,21 @@ async function load() {
       altTextOnlyInput.checked = res.altTextOnly;
     } else {
       altTextOnlyInput.checked = true; // Default true on first install
+    }
+    if (ignoreSmallImagesInput) {
+      if (res && typeof res.ignoreSmallImages === 'boolean') {
+        ignoreSmallImagesInput.checked = res.ignoreSmallImages;
+      } else {
+        ignoreSmallImagesInput.checked = true; // Default true on first install
+      }
+    }
+    if (minImageDimensionInput) {
+      if (res && typeof res.minImageDimension === 'number') {
+        minImageDimensionInput.value = res.minImageDimension;
+      }
+      if (ignoreSmallImagesInput) {
+        minImageDimensionInput.disabled = !ignoreSmallImagesInput.checked;
+      }
     }
     if (pauseOnBatteryInput && res && typeof res.pauseOnBattery === 'boolean') {
       pauseOnBatteryInput.checked = res.pauseOnBattery;
@@ -1665,6 +1684,23 @@ enabledInput.addEventListener('change', async () => {
 altTextOnlyInput.addEventListener('change', async () => {
   await saveSetting('altTextOnly', altTextOnlyInput.checked);
 });
+
+if (ignoreSmallImagesInput) {
+  ignoreSmallImagesInput.addEventListener('change', async () => {
+    if (minImageDimensionInput) {
+      minImageDimensionInput.disabled = !ignoreSmallImagesInput.checked;
+    }
+    await saveSetting('ignoreSmallImages', ignoreSmallImagesInput.checked);
+  });
+}
+
+if (minImageDimensionInput) {
+  minImageDimensionInput.addEventListener('change', async () => {
+    const value = Math.max(16, Math.min(512, parseInt(minImageDimensionInput.value, 10) || 80));
+    minImageDimensionInput.value = value;
+    await saveSetting('minImageDimension', value);
+  });
+}
 
 if (pauseOnBatteryInput) {
   pauseOnBatteryInput.addEventListener('change', async () => {
@@ -1826,7 +1862,8 @@ if (refreshBtn) {
   const openOnboardingBtn = document.getElementById('open-onboarding');
   if (openOnboardingBtn) {
     openOnboardingBtn.addEventListener('click', () => {
-      ext.runtime.sendMessage({ type: 'OPEN_ONBOARDING' }).catch(() => {});
+      const msgType = isHostConnected ? 'OPEN_MODELS_HUB' : 'OPEN_ONBOARDING';
+      ext.runtime.sendMessage({ type: msgType }).catch(() => {});
     });
   }
 }

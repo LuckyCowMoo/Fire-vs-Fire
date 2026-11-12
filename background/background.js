@@ -933,11 +933,19 @@ ext.runtime.onInstalled.addListener((details) => {
   }
 
   if (!details || details.reason === 'install') {
-    ext.storage.local.get(['altTextOnly']).then((existing) => {
-      if (typeof existing.altTextOnly !== 'boolean') {
-        ext.storage.local.set({ altTextOnly: true }).catch(() => {});
-      }
-    }).catch(() => {});
+    const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+    if (storageArea && storageArea.get && storageArea.set) {
+      storageArea.get(['altTextOnly', 'ignoreSmallImages', 'minImageDimension', 'minTextLength']).then((existing) => {
+        const defaults = {};
+        if (typeof existing?.altTextOnly !== 'boolean') defaults.altTextOnly = true;
+        if (typeof existing?.ignoreSmallImages !== 'boolean') defaults.ignoreSmallImages = true;
+        if (typeof existing?.minImageDimension !== 'number') defaults.minImageDimension = 80;
+        if (typeof existing?.minTextLength !== 'number') defaults.minTextLength = 250;
+        if (Object.keys(defaults).length > 0) {
+          storageArea.set(defaults).catch(() => {});
+        }
+      }).catch(() => {});
+    }
     openOnboardingExperience();
   }
 });

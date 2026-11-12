@@ -122,6 +122,32 @@
             Faster; likely to skip unnecessary images.
           </p>
 
+          <label class="toggle-row">
+            <span class="toggle-row-text">Ignore small UI &amp; profile images</span>
+            <span class="switch">
+              <input type="checkbox" id="ignoreSmallImages" checked />
+              <span class="capsule-track" aria-hidden="true">
+                <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+              </span>
+            </span>
+          </label>
+          <p class="field-hint">
+            Skips physically small images like profile pictures and navigation icons.
+          </p>
+
+          <label class="field">
+            <span class="field-label">Minimum image size (px)</span>
+            <input
+              type="number"
+              class="input-number"
+              id="minImageDimension"
+              min="16"
+              max="512"
+              step="8"
+              value="80"
+            />
+          </label>
+
           <label class="field">
             <span class="field-label">Minimum text length (characters)</span>
             <input

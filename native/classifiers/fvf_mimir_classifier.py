@@ -1,4 +1,4 @@
-"""FvF Mímir V2 AI Text Classifier.
+"""Mimir 02 B AI Text Classifier.
 
 Official text classification model for Fire vs Fire.
 Combines causal LM perplexity curvature (Binoculars/Fast-DetectGPT) and
@@ -48,7 +48,7 @@ except Exception:
 
 
 class FvfMimirClassifier(BaseClassifier):
-    """FvF Mímir V2 AI Text Classifier."""
+    """Mimir 02 B AI Text Classifier."""
 
     CLASSIFIER_ID: str = "fvf_mimir_02"
     REQUIRED_PACKAGES: List[str] = ["transformers", "onnxruntime", "lightgbm", "scikit-learn", "joblib"]
@@ -94,7 +94,7 @@ class FvfMimirClassifier(BaseClassifier):
         return {"text"}
 
     def get_model_name(self) -> str:
-        return "FvF Mímir V2"
+        return "Mimir 02 B"
 
     def get_label(self) -> str:
         return "AI text"

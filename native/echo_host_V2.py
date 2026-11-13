@@ -1864,8 +1864,6 @@ def get_official_catalog_response(request_id: Optional[str] = None) -> Dict[str,
 
 
 def download_official_model(model_id: str, request_id: Optional[str] = None, force_download: bool = False) -> Dict[str, Any]:
-    from concurrent.futures import ThreadPoolExecutor
-
     if not model_id or not isinstance(model_id, str):
         resp = {"ok": False, "error": "Invalid modelId"}
         if request_id:
@@ -1893,6 +1891,10 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
             resp["requestId"] = request_id
         return resp
 
+    # The total download size is already known and displayed on the model tile
+    catalog_mb = float(target_model.get("size_mb") or 0.0)
+    known_total_bytes = int(catalog_mb * 1024 * 1024) if catalog_mb > 0 else 0
+
     browser_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "*/*",
@@ -1918,9 +1920,40 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
 
     ssl_contexts = _get_ssl_contexts()
     total_files = len(files)
-    file_specs = []
+    downloaded_files = []
 
-    for f_entry in files:
+    cumulative_bytes = 0
+    effective_total_bytes = known_total_bytes
+
+    def _emit_progress(done_bytes: int, total_bytes: int, pct_override: Optional[int] = None) -> None:
+        tot = max(done_bytes, total_bytes)
+        if pct_override is not None:
+            pct = pct_override
+        elif tot > 0:
+            pct = int((done_bytes / tot) * 100)
+        else:
+            pct = 0
+        pct = max(0, min(100, pct))
+        mb_done = done_bytes / (1024 * 1024)
+        mb_tot = tot / (1024 * 1024)
+        try:
+            send_message({
+                "version": 2,
+                "type": "downloadProgress",
+                "requestId": request_id,
+                "modelId": model_id,
+                "bytesDownloaded": done_bytes,
+                "totalBytes": tot,
+                "percent": pct,
+                "status": f"{mb_done:.1f} / {mb_tot:.1f} MB",
+            })
+        except Exception:
+            pass
+
+    # Immediately emit 0% with known total size on tile
+    _emit_progress(0, effective_total_bytes, pct_override=0)
+
+    for file_idx, f_entry in enumerate(files):
         rel_path = f_entry.get("relative_path", "")
         primary_url = f_entry.get("url", "")
         fallback_url = f_entry.get("fallback_url", "")
@@ -1939,111 +1972,20 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
             return resp
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
-        urls_to_try = [primary_url]
-        if fallback_url and _is_allowed_official_url(fallback_url) and fallback_url != primary_url:
-            urls_to_try.append(fallback_url)
-
-        file_specs.append({
-            "entry": f_entry,
-            "rel_path": rel_path,
-            "dest_path": dest_path,
-            "urls": urls_to_try,
-            "required": f_entry.get("required", True),
-        })
-
-    def _probe_single_size(spec) -> int:
-        dest = spec["dest_path"]
-        if not force_download and dest.exists() and dest.stat().st_size > 0:
-            return dest.stat().st_size
-        for candidate_url in spec["urls"]:
-            for ctx in ssl_contexts:
-                try:
-                    req = Request(candidate_url, headers=browser_headers, method="HEAD")
-                    with urlopen(req, context=ctx, timeout=8) as resp_head:
-                        cl = resp_head.headers.get("Content-Length")
-                        if cl and cl.isdigit():
-                            return int(cl)
-                    break
-                except Exception as exc:
-                    err_str = f"{type(exc).__name__}: {exc}"
-                    if "SSL" not in err_str and "CERTIFICATE" not in err_str:
-                        break
-        return 0
-
-    with ThreadPoolExecutor(max_workers=min(4, max(1, total_files))) as probe_pool:
-        expected_sizes = list(probe_pool.map(_probe_single_size, file_specs))
-
-    catalog_fallback_bytes = int(float(target_model.get("size_mb") or 0) * 1024 * 1024)
-
-    def _aggregate_total(active_idx: Optional[int] = None, active_bytes: int = 0) -> int:
-        total = sum(expected_sizes)
-        if active_idx is not None and active_bytes > expected_sizes[active_idx]:
-            total += (active_bytes - expected_sizes[active_idx])
-        if total <= 0:
-            total = max(catalog_fallback_bytes, active_bytes)
-        return total
-
-    def _emit_aggregate_progress(
-        bytes_done: int,
-        total_bytes_all: int,
-        file_name: str,
-        file_idx_1based: int,
-        pct_override: Optional[int] = None,
-        status_text: Optional[str] = None,
-    ) -> None:
-        if pct_override is not None:
-            pct = pct_override
-        elif total_bytes_all > 0:
-            pct = int((bytes_done / total_bytes_all) * 100)
-        else:
-            pct = 0
-        pct = max(0, min(100, pct))
-        try:
-            send_message({
-                "version": 2,
-                "type": "downloadProgress",
-                "requestId": request_id,
-                "modelId": model_id,
-                "file": file_name,
-                "fileIndex": file_idx_1based,
-                "totalFiles": total_files,
-                "bytesDownloaded": bytes_done,
-                "totalBytes": total_bytes_all,
-                "percent": pct,
-                "status": status_text or (f"{bytes_done / (1024 * 1024):.1f} / {total_bytes_all / (1024 * 1024):.1f} MB" if total_bytes_all > 0 else "Downloading…"),
-            })
-        except Exception:
-            pass
-
-    completed_bytes = 0
-    downloaded_files = []
-
-    initial_total = _aggregate_total()
-    if initial_total > 0:
-        _emit_aggregate_progress(0, initial_total, file_specs[0]["dest_path"].name, 1, pct_override=0)
-
-    for file_idx, spec in enumerate(file_specs):
-        f_entry = spec["entry"]
-        rel_path = spec["rel_path"]
-        dest_path = spec["dest_path"]
-        urls_to_try = spec["urls"]
 
         if not force_download and dest_path.exists() and dest_path.stat().st_size > 0:
             file_size = dest_path.stat().st_size
-            expected_sizes[file_idx] = file_size
-            completed_bytes += file_size
-            agg_total = max(completed_bytes, _aggregate_total())
+            cumulative_bytes += file_size
+            if cumulative_bytes > effective_total_bytes:
+                effective_total_bytes = cumulative_bytes
             is_last = (file_idx == total_files - 1)
-            raw_pct = int((completed_bytes / agg_total) * 100) if agg_total > 0 else (100 if is_last else 0)
-            _emit_aggregate_progress(
-                completed_bytes,
-                agg_total,
-                dest_path.name,
-                file_idx + 1,
-                pct_override=100 if is_last else min(99, raw_pct),
-            )
+            _emit_progress(cumulative_bytes, effective_total_bytes, pct_override=100 if is_last else None)
             downloaded_files.append(rel_path)
             continue
+
+        urls_to_try = [primary_url]
+        if fallback_url and _is_allowed_official_url(fallback_url) and fallback_url != primary_url:
+            urls_to_try.append(fallback_url)
 
         last_err = None
         success = False
@@ -2057,10 +1999,7 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
                     log(f"[Downloader] Fetching {model_id} file {rel_path} from {candidate_url} (ssl_attempt={ctx_idx+1})")
                     req = Request(candidate_url, headers=browser_headers)
                     with urlopen(req, context=ctx, timeout=300) as response:
-                        content_len = response.headers.get("Content-Length")
-                        if content_len and content_len.isdigit():
-                            expected_sizes[file_idx] = int(content_len)
-                        bytes_so_far = 0
+                        file_bytes_so_far = 0
                         last_emit = time.time()
                         with open(tmp_path, "wb") as out_f:
                             while True:
@@ -2068,43 +2007,36 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
                                 if not chunk:
                                     break
                                 out_f.write(chunk)
-                                bytes_so_far += len(chunk)
+                                chunk_len = len(chunk)
+                                file_bytes_so_far += chunk_len
+                                cumulative_bytes += chunk_len
+                                if cumulative_bytes > effective_total_bytes:
+                                    effective_total_bytes = cumulative_bytes
                                 now = time.time()
-                                if now - last_emit >= 0.2:
+                                if now - last_emit >= 0.15:
                                     last_emit = now
-                                    agg_done = completed_bytes + bytes_so_far
-                                    agg_total = max(agg_done, _aggregate_total(file_idx, bytes_so_far))
-                                    raw_pct = int((agg_done / agg_total) * 100) if agg_total > 0 else 0
-                                    _emit_aggregate_progress(
-                                        agg_done,
-                                        agg_total,
-                                        dest_path.name,
-                                        file_idx + 1,
-                                        pct_override=min(99, max(0, raw_pct)),
-                                    )
+                                    raw_pct = int((cumulative_bytes / effective_total_bytes) * 100) if effective_total_bytes > 0 else 0
+                                    _emit_progress(cumulative_bytes, effective_total_bytes, pct_override=min(99, max(0, raw_pct)))
 
                     if tmp_path.exists() and tmp_path.stat().st_size > 0:
                         os.replace(tmp_path, dest_path)
                         success = True
                         downloaded_files.append(rel_path)
                         actual_size = dest_path.stat().st_size
-                        expected_sizes[file_idx] = actual_size
-                        completed_bytes += actual_size
+                        drift = actual_size - file_bytes_so_far
+                        if drift != 0:
+                            cumulative_bytes += drift
+                            if cumulative_bytes > effective_total_bytes:
+                                effective_total_bytes = cumulative_bytes
                         log(f"[Downloader] Successfully downloaded {dest_path.name} ({actual_size} bytes)")
-                        agg_total = max(completed_bytes, _aggregate_total())
                         is_last = (file_idx == total_files - 1)
-                        raw_pct = int((completed_bytes / agg_total) * 100) if agg_total > 0 else (100 if is_last else 0)
-                        _emit_aggregate_progress(
-                            completed_bytes,
-                            agg_total,
-                            dest_path.name,
-                            file_idx + 1,
-                            pct_override=100 if is_last else min(99, raw_pct),
-                        )
+                        raw_pct = int((cumulative_bytes / effective_total_bytes) * 100) if effective_total_bytes > 0 else (100 if is_last else 0)
+                        _emit_progress(cumulative_bytes, effective_total_bytes, pct_override=100 if is_last else min(99, raw_pct))
                         break
                 except Exception as exc:
                     last_err = f"{type(exc).__name__}: {exc}"
                     log(f"[Downloader] Error downloading {candidate_url} with ssl context #{ctx_idx+1}: {last_err}")
+                    cumulative_bytes -= file_bytes_so_far
                     try:
                         if tmp_path.exists():
                             tmp_path.unlink()
@@ -2116,16 +2048,13 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
         if not success:
             if dest_path.exists() and dest_path.stat().st_size > 0:
                 actual_size = dest_path.stat().st_size
-                expected_sizes[file_idx] = actual_size
-                completed_bytes += actual_size
+                cumulative_bytes += actual_size
+                if cumulative_bytes > effective_total_bytes:
+                    effective_total_bytes = cumulative_bytes
                 downloaded_files.append(rel_path)
                 continue
-            if not spec["required"]:
+            if not f_entry.get("required", True):
                 log(f"[Downloader] Optional file {rel_path} skipped: {last_err}")
-                expected_sizes[file_idx] = 0
-                if file_idx == total_files - 1 and completed_bytes > 0:
-                    agg_total = max(completed_bytes, _aggregate_total())
-                    _emit_aggregate_progress(completed_bytes, agg_total, dest_path.name, file_idx + 1, pct_override=100)
                 continue
             resp = {
                 "ok": False,
@@ -2135,6 +2064,9 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
             if request_id:
                 resp["requestId"] = request_id
             return resp
+
+    final_total = max(cumulative_bytes, effective_total_bytes)
+    _emit_progress(final_total, final_total, pct_override=100)
 
     registry = get_registry()
     registry.discover_classifiers(force=True)

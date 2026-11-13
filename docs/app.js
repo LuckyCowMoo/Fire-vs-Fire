@@ -556,7 +556,7 @@ function createModelTileElement(model) {
           <div class="model-progress-fill" id="progress-fill-${model.id}" style="width: 0%;"></div>
         </div>
         <div class="model-progress-text">
-          <span id="progress-label-${model.id}" class="model-progress-label">Preparing download…</span>
+          <span id="progress-label-${model.id}" class="model-progress-label">0.0 / ${dlText}</span>
           <span id="progress-pct-${model.id}" class="model-progress-pct">0%</span>
         </div>
       </div>
@@ -681,22 +681,43 @@ function handleDownloadProgressEvent(progress) {
 
   if (wrap) wrap.hidden = false;
 
-  const hasBytes = progress.bytesDownloaded != null && progress.totalBytes && progress.totalBytes > 0;
-  const rawPct = hasBytes
-    ? (progress.bytesDownloaded / progress.totalBytes) * 100
-    : (progress.percent || 0);
-  const p = Math.max(0, Math.min(100, Math.round(rawPct)));
+  const modelObj = (officialCatalog?.models || []).find((m) => m.id === modelId);
+  const catalogTotalMb = modelObj?.size_mb
+    ? Number(modelObj.size_mb)
+    : (parseFloat(modelObj?.download_size) || 0);
 
-  if (fill) fill.style.width = `${p}%`;
-  if (pct) pct.textContent = `${p}%`;
+  let mbTotal = catalogTotalMb;
+  if (progress.totalBytes && progress.totalBytes > 0) {
+    mbTotal = progress.totalBytes / (1024 * 1024);
+  }
+
+  let mbDone = 0;
+  if (progress.bytesDownloaded != null) {
+    mbDone = progress.bytesDownloaded / (1024 * 1024);
+  }
+
+  let percent = 0;
+  if (progress.percent != null && Number.isFinite(progress.percent)) {
+    percent = Math.min(100, Math.max(0, Math.round(progress.percent)));
+  } else if (mbTotal > 0) {
+    percent = Math.min(100, Math.max(0, Math.round((mbDone / mbTotal) * 100)));
+  }
+
+  if (percent >= 100 || progress.percent === 100) {
+    percent = 100;
+    if (mbTotal > 0 && mbDone < mbTotal) mbDone = mbTotal;
+  }
+
+  if (fill) fill.style.width = `${percent}%`;
+  if (pct) pct.textContent = `${percent}%`;
 
   if (label) {
-    if (hasBytes) {
-      const mbDone = (progress.bytesDownloaded / (1024 * 1024)).toFixed(1);
-      const mbTotal = (progress.totalBytes / (1024 * 1024)).toFixed(1);
-      label.textContent = `${mbDone} / ${mbTotal} MB`;
+    if (mbTotal > 0) {
+      label.textContent = `${mbDone.toFixed(1)} / ${mbTotal.toFixed(1)} MB`;
+    } else if (progress.status) {
+      label.textContent = progress.status;
     } else {
-      label.textContent = 'Downloading…';
+      label.textContent = `${percent}%`;
     }
   }
 }
@@ -719,7 +740,10 @@ async function downloadSingleModel(modelId) {
   if (wrap) wrap.hidden = false;
   if (fill) fill.style.width = '0%';
   if (pct) pct.textContent = '0%';
-  if (label) label.textContent = 'Preparing…';
+    const modelObj = (officialCatalog?.models || []).find((m) => m.id === modelId);
+  const totalMbVal = modelObj?.size_mb || parseFloat(modelObj?.download_size) || 0;
+  const totalMbStr = totalMbVal ? `${Number(totalMbVal).toFixed(1)} MB` : (modelObj?.download_size || '');
+  if (label) label.textContent = totalMbStr ? `0.0 / ${totalMbStr}` : '0%';
 
   try {
     const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000);

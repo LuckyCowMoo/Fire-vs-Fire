@@ -346,16 +346,18 @@ function buildRenderFingerprint() {
     .join('|');
 }
 
-async function loadOfficialModelsCatalog(force = false) {
-  if (!extensionConnected) {
-    await checkBridgeAndNativeStatus().catch(() => {});
-  }
+let isCatalogLoading = false;
 
-  if (extensionConnected) {
+async function loadOfficialModelsCatalog(force = false) {
+  if (isCatalogLoading) return;
+  isCatalogLoading = true;
+
+  try {
     try {
-      const res = await sendBridgeMessage('GET_OFFICIAL_CATALOG', { force }, 4000);
+      const res = await sendBridgeMessage('GET_OFFICIAL_CATALOG', { force }, 10000);
       if (res && res.ok && res.catalog && Array.isArray(res.catalog.models)) {
         officialCatalog = res.catalog;
+        extensionConnected = true;
         nativeHostConnected = Boolean(res.nativeConnected);
 
         // Auto-merge any newly dropped local classifiers discovered on disk
@@ -393,6 +395,8 @@ async function loadOfficialModelsCatalog(force = false) {
         officialCatalog.models.forEach((m) => {
           if (m.installed) {
             nextInstalled.add(m.id);
+          } else if (nextInstalled.has(m.id)) {
+            m.installed = true;
           }
         });
         installedModels.clear();
@@ -408,33 +412,35 @@ async function loadOfficialModelsCatalog(force = false) {
         return;
       }
     } catch (_) {}
-  }
 
-  try {
-    const resp = await fetch(`${RAW_GITHUB_CATALOG_URL}?_t=${Date.now()}`, { cache: 'no-store' });
-    if (resp && resp.ok) {
-      const data = await resp.json();
-      if (data && Array.isArray(data.models)) {
-        officialCatalog = data;
-        const fp = buildRenderFingerprint();
-        if (activeDownloads.size === 0 && fp !== lastRenderFingerprint) {
-          renderModalityQuadrants();
+    try {
+      const resp = await fetch(`${RAW_GITHUB_CATALOG_URL}?_t=${Date.now()}`, { cache: 'no-store' });
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        if (data && Array.isArray(data.models)) {
+          officialCatalog = data;
+          const fp = buildRenderFingerprint();
+          if (activeDownloads.size === 0 && fp !== lastRenderFingerprint) {
+            renderModalityQuadrants();
+          }
+          return;
         }
-        return;
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
 
-  try {
-    const resp = await fetch(`./official_models.json?_t=${Date.now()}`, { cache: 'no-store' });
-    if (resp && resp.ok) {
-      officialCatalog = await resp.json();
-    }
-  } catch (_) {}
+    try {
+      const resp = await fetch(`./official_models.json?_t=${Date.now()}`, { cache: 'no-store' });
+      if (resp && resp.ok) {
+        officialCatalog = await resp.json();
+      }
+    } catch (_) {}
 
-  const fp = buildRenderFingerprint();
-  if (activeDownloads.size === 0 && fp !== lastRenderFingerprint) {
-    renderModalityQuadrants();
+    const fp = buildRenderFingerprint();
+    if (activeDownloads.size === 0 && fp !== lastRenderFingerprint) {
+      renderModalityQuadrants();
+    }
+  } finally {
+    isCatalogLoading = false;
   }
 }
 
@@ -751,6 +757,12 @@ async function downloadSingleModel(modelId) {
 
     if (res && res.ok) {
       installedModels.add(modelId);
+      if (officialCatalog && Array.isArray(officialCatalog.models)) {
+        const target = officialCatalog.models.find((m) => m.id === modelId);
+        if (target) {
+          target.installed = true;
+        }
+      }
       if (fill) fill.style.width = '100%';
       if (pct) pct.textContent = '100%';
       if (label) label.textContent = 'Installed & Ready';
@@ -796,13 +808,31 @@ async function uninstallSingleModel(modelId) {
     btn.textContent = 'Uninstalling…';
   }
 
+  // Optimistically mark as uninstalled right away in the UI
+  installedModels.delete(modelId);
+  if (officialCatalog && Array.isArray(officialCatalog.models)) {
+    const target = officialCatalog.models.find((m) => m.id === modelId);
+    if (target) {
+      target.installed = false;
+    }
+  }
+  renderModalityQuadrants();
+  updateSelectedModelsSummary();
+
   try {
     const res = await sendBridgeMessage('UNINSTALL_OFFICIAL_MODEL', { modelId }, 30000);
     if (res && res.ok) {
       installedModels.delete(modelId);
       if (Array.isArray(res.installedModels)) {
         installedModels.clear();
-        res.installedModels.forEach((id) => installedModels.add(id));
+        res.installedModels.forEach((id) => {
+          if (id !== modelId) installedModels.add(id);
+        });
+      }
+      if (officialCatalog && Array.isArray(officialCatalog.models)) {
+        officialCatalog.models.forEach((m) => {
+          if (m.id === modelId) m.installed = false;
+        });
       }
 
       // Update auto categories
@@ -816,17 +846,22 @@ async function uninstallSingleModel(modelId) {
     } else {
       const errMsg = res?.error || 'Uninstall failed';
       alert(`Could not uninstall: ${errMsg}`);
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Uninstall';
+      // Revert optimistic update
+      installedModels.add(modelId);
+      if (officialCatalog && Array.isArray(officialCatalog.models)) {
+        const target = officialCatalog.models.find((m) => m.id === modelId);
+        if (target) target.installed = true;
       }
+      renderModalityQuadrants();
     }
   } catch (err) {
     alert(`Uninstall error: ${err?.message || err}`);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Uninstall';
+    installedModels.add(modelId);
+    if (officialCatalog && Array.isArray(officialCatalog.models)) {
+      const target = officialCatalog.models.find((m) => m.id === modelId);
+      if (target) target.installed = true;
     }
+    renderModalityQuadrants();
   }
 
   updateSelectedModelsSummary();
@@ -1087,11 +1122,9 @@ function init() {
     }
   });
 
-  // Background status verification: check bridge/native host before loading catalog
-  (async () => {
-    await checkBridgeAndNativeStatus().catch(() => {});
-    await loadOfficialModelsCatalog(true).catch(() => {});
-  })();
+  // Immediate check on startup: load catalog and verify host connection without delay
+  loadOfficialModelsCatalog(true).catch(() => {});
+  checkBridgeAndNativeStatus().catch(() => {});
 }
 
 // Immediate execution if DOM is ready, or on DOMContentLoaded

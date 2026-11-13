@@ -680,18 +680,23 @@ function handleDownloadProgressEvent(progress) {
   const pct = document.getElementById(`progress-pct-${modelId}`);
 
   if (wrap) wrap.hidden = false;
-  const p = Math.max(0, Math.min(100, Math.round(progress.percent || 0)));
+
+  const hasBytes = progress.bytesDownloaded != null && progress.totalBytes && progress.totalBytes > 0;
+  const rawPct = hasBytes
+    ? (progress.bytesDownloaded / progress.totalBytes) * 100
+    : (progress.percent || 0);
+  const p = Math.max(0, Math.min(100, Math.round(rawPct)));
+
   if (fill) fill.style.width = `${p}%`;
   if (pct) pct.textContent = `${p}%`;
 
   if (label) {
-    if (progress.bytesDownloaded != null && progress.totalBytes && progress.totalBytes > 0) {
+    if (hasBytes) {
       const mbDone = (progress.bytesDownloaded / (1024 * 1024)).toFixed(1);
       const mbTotal = (progress.totalBytes / (1024 * 1024)).toFixed(1);
-      const fileName = progress.file ? `${progress.file}: ` : '';
-      label.textContent = `${fileName}${mbDone} / ${mbTotal} MB`;
+      label.textContent = `${mbDone} / ${mbTotal} MB`;
     } else {
-      label.textContent = progress.status || 'Downloading…';
+      label.textContent = 'Downloading…';
     }
   }
 }
@@ -714,7 +719,7 @@ async function downloadSingleModel(modelId) {
   if (wrap) wrap.hidden = false;
   if (fill) fill.style.width = '0%';
   if (pct) pct.textContent = '0%';
-  if (label) label.textContent = 'Connecting to download stream…';
+  if (label) label.textContent = 'Preparing…';
 
   try {
     const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000);

@@ -14,6 +14,7 @@ Universal Hardware Support:
 """
 
 from __future__ import annotations
+import gc
 import math
 import sys
 from pathlib import Path
@@ -71,18 +72,23 @@ class FvfMimirClassifier(BaseClassifier):
         "stylo_comma_density", "stylo_punct_density", "stylo_pacing_std",
     )
 
-    def __init__(self, model_path: Optional[Path] = None):
+    def _find_checkpoint(self) -> Optional[Path]:
         classifiers_dir = Path(__file__).resolve().parent
-        candidate_paths = [
-            classifiers_dir / "fvf_mimir_head.joblib",
-            classifiers_dir.parent.parent / "models" / "fvf_mimir_head.joblib",
-        ]
-        resolved_path = None
-        for p in candidate_paths:
-            if p.is_file():
-                resolved_path = p
-                break
-        super().__init__(model_path=model_path or resolved_path or candidate_paths[0])
+        head_path = classifiers_dir / "fvf_mimir_head.joblib"
+        encoder_path = classifiers_dir / "fvf_mimir_encoder_int8.onnx"
+        if self.model_path is not None:
+            candidate = Path(self.model_path)
+            if candidate.is_file() and encoder_path.is_file():
+                return candidate
+            return None
+        if head_path.is_file() and encoder_path.is_file():
+            return head_path
+        return None
+
+    def __init__(self, model_path: Optional[Path] = None):
+        super().__init__(model_path=model_path)
+        resolved_path = self._find_checkpoint()
+        self.model_path = model_path if model_path is not None else resolved_path
         self._text_encoder: Optional[RuntimeTextEncoder] = None
         self._lm_scorer: Optional[RuntimeLMScorer] = None
         self._head_bundle: Optional[Any] = None
@@ -214,5 +220,7 @@ class FvfMimirClassifier(BaseClassifier):
     def unload_model(self) -> None:
         self._text_encoder = None
         self._lm_scorer = None
+        self._head_bundle = None
         self._classifier_head = None
         self._is_loaded = False
+        gc.collect()

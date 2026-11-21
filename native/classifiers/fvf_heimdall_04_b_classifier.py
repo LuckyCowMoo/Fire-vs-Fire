@@ -121,8 +121,6 @@ class FvfHeimdall04BClassifier(BaseClassifier):
             here / "fvf_heimdall_04_b_best.onnx",
             here / "fvf_heimdall_04_b_best.pt",
             repo_root / "checkpoints" / "fvf_heimdall_04_b" / "best_inference_fp16.pt",
-            repo_root / "checkpoints" / "fvf_heimdall_03" / "best_inference_fp16.pt",
-            here / "fvf_heimdall_04_best.pt",
         ]
         for p in candidates:
             if p.is_file():

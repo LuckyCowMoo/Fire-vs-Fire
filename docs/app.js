@@ -178,6 +178,7 @@ let nativeHostConnected = false;
 let officialCatalog = FALLBACK_CATALOG;
 let installedModels = new Set();
 let activeDownloads = new Set();
+let activeHolds = new Set();
 
 // ============================================================================
 // EXTENSION BRIDGE (Supports Direct Extension Context + GitHub Pages postMessage)
@@ -341,7 +342,7 @@ let lastRenderFingerprint = '';
 function buildRenderFingerprint() {
   const models = (officialCatalog && Array.isArray(officialCatalog.models)) ? officialCatalog.models : [];
   return models
-    .map((m) => `${m.id}:${m.status}:${installedModels.has(m.id) ? 1 : 0}`)
+    .map((m) => `${m.id}:${m.status}:${installedModels.has(m.id) ? 1 : 0}:${m.disk_size || ''}`)
     .sort()
     .join('|');
 }
@@ -360,11 +361,11 @@ async function loadOfficialModelsCatalog(force = false) {
         extensionConnected = true;
         nativeHostConnected = Boolean(res.nativeConnected);
 
-        // Auto-merge any newly dropped local classifiers discovered on disk
+        // Auto-merge any newly dropped local classifiers that have weights ready on disk
         if (Array.isArray(res.classifiers)) {
           const knownIds = new Set(officialCatalog.models.map((m) => m.id));
           res.classifiers.forEach((cls) => {
-            if (!knownIds.has(cls.id)) {
+            if (!knownIds.has(cls.id) && cls.weights_ready) {
               officialCatalog.models.push({
                 id: cls.id,
                 name: cls.name || cls.id,
@@ -379,11 +380,12 @@ async function loadOfficialModelsCatalog(force = false) {
                 default_color: cls.id.includes('heimdall') ? '#FF1744' : '#FF5722',
                 size_mb: cls.size_mb || 0,
                 download_size: cls.download_size || 'Local',
+                disk_size: cls.download_size && cls.download_size !== 'Local' ? cls.download_size : undefined,
                 ram_size: '1.5 GB VRAM / RAM',
                 architecture: cls.name || cls.id,
                 tagline: cls.doc ? cls.doc.split('\n')[0] : 'Locally discovered classifier in native/classifiers/',
                 description: cls.doc || `Locally discovered classifier: ${cls.name}. Automatically loaded from native/classifiers/.`,
-                installed: cls.weights_ready !== false
+                installed: true
               });
               knownIds.add(cls.id);
             }
@@ -406,7 +408,7 @@ async function loadOfficialModelsCatalog(force = false) {
         updateSelectedModelsSummary();
 
         const fp = buildRenderFingerprint();
-        if (activeDownloads.size === 0 && fp !== lastRenderFingerprint) {
+        if (activeDownloads.size === 0 && activeHolds.size === 0 && fp !== lastRenderFingerprint) {
           renderModalityQuadrants();
         }
         return;
@@ -420,7 +422,7 @@ async function loadOfficialModelsCatalog(force = false) {
         if (data && Array.isArray(data.models)) {
           officialCatalog = data;
           const fp = buildRenderFingerprint();
-          if (activeDownloads.size === 0 && fp !== lastRenderFingerprint) {
+          if (activeDownloads.size === 0 && activeHolds.size === 0 && fp !== lastRenderFingerprint) {
             renderModalityQuadrants();
           }
           return;
@@ -436,7 +438,7 @@ async function loadOfficialModelsCatalog(force = false) {
     } catch (_) {}
 
     const fp = buildRenderFingerprint();
-    if (activeDownloads.size === 0 && fp !== lastRenderFingerprint) {
+    if (activeDownloads.size === 0 && activeHolds.size === 0 && fp !== lastRenderFingerprint) {
       renderModalityQuadrants();
     }
   } finally {
@@ -522,6 +524,11 @@ function createModelTileElement(model) {
     stickersHtml += `<span class="sticker-upcoming">${badgeText}</span>`;
   }
 
+  const dlText = model.download_size || (model.size_mb ? `${model.size_mb} MB` : 'N/A');
+  const sizeText = (isInstalled && model.disk_size) ? model.disk_size : dlText;
+  const sizeLabel = isInstalled ? `Size on disk: ${sizeText}` : `Download: ${sizeText}`;
+  const ramText = model.ram_size || 'N/A';
+
   let footerActionHtml = '';
   if (!isAvailable) {
     const badgeText = model.status === 'coming_next' ? 'Coming Next' : 'Coming Soon';
@@ -533,19 +540,34 @@ function createModelTileElement(model) {
   } else if (isInstalled) {
     footerActionHtml = `
       <div class="model-tile-footer">
-        <button type="button" class="btn-tile-action btn-tile-uninstall" data-model-id="${model.id}" title="Remove downloaded weights for this model">Uninstall</button>
+        <button type="button" class="btn-tile-action btn-tile-uninstall category-delete-btn" data-model-id="${model.id}" aria-label="Hold for 3 seconds to uninstall ${model.name}" title="Hold for 3 seconds to remove downloaded weights for this model">
+          <div class="category-delete-fill"></div>
+          <span class="category-delete-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            <span class="delete-text">Hold to uninstall</span>
+          </span>
+        </button>
       </div>
     `;
   } else {
     footerActionHtml = `
       <div class="model-tile-footer">
-        <button type="button" class="btn-tile-action btn-tile-download" data-model-id="${model.id}" ${isDownloading ? 'disabled' : ''}>Install</button>
+        <button type="button" class="btn-tile-action btn-tile-download" data-model-id="${model.id}" ${isDownloading ? 'disabled hidden' : ''}>Install</button>
+        <div class="model-progress-wrap" id="progress-wrap-${model.id}" ${isDownloading ? '' : 'hidden'}>
+          <div class="model-progress-bar">
+            <div class="model-progress-fill" id="progress-fill-${model.id}" style="width: 0%;"></div>
+          </div>
+          <div class="model-progress-text">
+            <span id="progress-label-${model.id}" class="model-progress-label">0.0 / ${dlText}</span>
+            <span id="progress-pct-${model.id}" class="model-progress-pct">0%</span>
+          </div>
+        </div>
       </div>
     `;
   }
-
-  const dlText = model.download_size || (model.size_mb ? `${model.size_mb} MB` : 'N/A');
-  const ramText = model.ram_size || 'N/A';
 
   tile.innerHTML = `
     <div class="model-tile-body">
@@ -554,17 +576,8 @@ function createModelTileElement(model) {
         ${stickersHtml ? `<div class="model-stickers-wrap">${stickersHtml}</div>` : ''}
       </div>
       <div class="model-meta-middle">
-        <span class="model-arch-chip">Download: ${dlText}</span>
+        <span class="model-arch-chip">${sizeLabel}</span>
         <span class="model-arch-chip">RAM: ${ramText}</span>
-      </div>
-      <div class="model-progress-wrap" id="progress-wrap-${model.id}" ${isDownloading ? '' : 'hidden'}>
-        <div class="model-progress-bar">
-          <div class="model-progress-fill" id="progress-fill-${model.id}" style="width: 0%;"></div>
-        </div>
-        <div class="model-progress-text">
-          <span id="progress-label-${model.id}" class="model-progress-label">0.0 / ${dlText}</span>
-          <span id="progress-pct-${model.id}" class="model-progress-pct">0%</span>
-        </div>
       </div>
     </div>
     ${footerActionHtml}
@@ -580,10 +593,56 @@ function createModelTileElement(model) {
 
   const unBtn = tile.querySelector('.btn-tile-uninstall');
   if (unBtn) {
-    unBtn.addEventListener('click', (e) => {
+    const fillEl = unBtn.querySelector('.category-delete-fill');
+    const deleteText = unBtn.querySelector('.delete-text');
+    let holdTimeout = null;
+    let isHolding = false;
+    const HOLD_DURATION_MS = 3000;
+
+    const startHold = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
       e.stopPropagation();
-      uninstallSingleModel(model.id);
-    });
+      if (isHolding || unBtn.disabled) return;
+      isHolding = true;
+      activeHolds.add(model.id);
+
+      unBtn.classList.add('holding');
+      if (fillEl) {
+        fillEl.style.transition = `width ${HOLD_DURATION_MS}ms linear`;
+        fillEl.style.width = '100%';
+      }
+      if (deleteText) deleteText.textContent = 'Uninstalling...';
+
+      holdTimeout = setTimeout(() => {
+        isHolding = false;
+        activeHolds.delete(model.id);
+        unBtn.classList.remove('holding');
+        unBtn.classList.add('deleted');
+        uninstallSingleModel(model.id);
+      }, HOLD_DURATION_MS);
+    };
+
+    const cancelHold = () => {
+      if (!isHolding) return;
+      isHolding = false;
+      activeHolds.delete(model.id);
+      if (holdTimeout) {
+        clearTimeout(holdTimeout);
+        holdTimeout = null;
+      }
+      unBtn.classList.remove('holding');
+      if (fillEl) {
+        fillEl.style.transition = 'width 0.22s cubic-bezier(0.25, 1, 0.5, 1)';
+        fillEl.style.width = '0%';
+      }
+      if (deleteText) deleteText.textContent = 'Hold to uninstall';
+    };
+
+    unBtn.addEventListener('pointerdown', startHold);
+    unBtn.addEventListener('pointerup', cancelHold);
+    unBtn.addEventListener('pointercancel', cancelHold);
+    unBtn.addEventListener('pointerleave', cancelHold);
+    unBtn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   return tile;
@@ -680,11 +739,14 @@ function updateSelectedModelsSummary() {
 function handleDownloadProgressEvent(progress) {
   if (!progress || !progress.modelId) return;
   const modelId = progress.modelId;
+  const tile = document.querySelector(`.model-tile[data-model-id="${modelId}"]`);
+  const dlBtn = tile?.querySelector('.btn-tile-download');
   const wrap = document.getElementById(`progress-wrap-${modelId}`);
   const fill = document.getElementById(`progress-fill-${modelId}`);
   const label = document.getElementById(`progress-label-${modelId}`);
   const pct = document.getElementById(`progress-pct-${modelId}`);
 
+  if (dlBtn) dlBtn.hidden = true;
   if (wrap) wrap.hidden = false;
 
   const modelObj = (officialCatalog?.models || []).find((m) => m.id === modelId);
@@ -741,7 +803,9 @@ async function downloadSingleModel(modelId) {
 
   if (btn) {
     btn.disabled = true;
-    if (tile) tile.classList.add('downloading'); btn.textContent = 'Install';
+    btn.hidden = true;
+    if (tile) tile.classList.add('downloading');
+    btn.textContent = 'Install';
   }
   if (wrap) wrap.hidden = false;
   if (fill) fill.style.width = '0%';
@@ -780,20 +844,36 @@ async function downloadSingleModel(modelId) {
     } else {
       const errMsg = res?.error || 'Download failed';
       console.error(`[Download Error for ${modelId}]`, errMsg);
+      if (fill) fill.style.width = '0%';
+      if (pct) pct.textContent = '';
       if (label) label.textContent = `Failed: ${errMsg}`;
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Install';
-      }
+      setTimeout(() => {
+        if (tile) tile.classList.remove('downloading');
+        if (wrap) wrap.hidden = true;
+        if (btn) {
+          btn.disabled = false;
+          btn.hidden = false;
+          btn.textContent = 'Install';
+          btn.title = errMsg;
+        }
+      }, 2500);
     }
   } catch (err) {
     activeDownloads.delete(modelId);
     const errMsg = err?.message || String(err);
+    if (fill) fill.style.width = '0%';
+    if (pct) pct.textContent = '';
     if (label) label.textContent = errMsg;
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Install';
-    }
+    setTimeout(() => {
+      if (tile) tile.classList.remove('downloading');
+      if (wrap) wrap.hidden = true;
+      if (btn) {
+        btn.disabled = false;
+        btn.hidden = false;
+        btn.textContent = 'Install';
+        btn.title = errMsg;
+      }
+    }, 2500);
   }
 
   updateSelectedModelsSummary();
@@ -805,7 +885,12 @@ async function uninstallSingleModel(modelId) {
 
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Uninstalling…';
+    const deleteText = btn.querySelector('.delete-text');
+    if (deleteText) {
+      deleteText.textContent = 'Uninstalling…';
+    } else {
+      btn.textContent = 'Uninstalling…';
+    }
   }
 
   // Optimistically mark as uninstalled right away in the UI
@@ -814,6 +899,7 @@ async function uninstallSingleModel(modelId) {
     const target = officialCatalog.models.find((m) => m.id === modelId);
     if (target) {
       target.installed = false;
+      delete target.disk_size;
     }
   }
   renderModalityQuadrants();
@@ -831,7 +917,8 @@ async function uninstallSingleModel(modelId) {
       }
       if (officialCatalog && Array.isArray(officialCatalog.models)) {
         officialCatalog.models.forEach((m) => {
-          if (m.id === modelId) m.installed = false;
+          m.installed = installedModels.has(m.id);
+          if (!m.installed) delete m.disk_size;
         });
       }
 
@@ -905,7 +992,7 @@ function goToScreen(stepNumber) {
   });
 
   if (stepNumber === 2) {
-    if (buildRenderFingerprint() !== lastRenderFingerprint && activeDownloads.size === 0) {
+    if (buildRenderFingerprint() !== lastRenderFingerprint && activeDownloads.size === 0 && activeHolds.size === 0) {
       renderModalityQuadrants();
     }
     loadOfficialModelsCatalog(true).catch(() => {});

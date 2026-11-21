@@ -239,6 +239,18 @@ class ContentCache:
         ensemble_results = build_ensemble_results(ensembles, cached_per_clf, duration_ms=0, cached=True)
         return True, ensemble_results, set()
 
+    def clear_classifier(self, classifier_id: str) -> None:
+        if not classifier_id:
+            return
+        norm_target = classifier_id.replace("_", "")
+        with self._lock:
+            to_delete = [
+                k for k in self._by_hash.keys()
+                if k[1] == classifier_id or k[1].replace("_", "") == norm_target
+            ]
+            for k in to_delete:
+                self._by_hash.pop(k, None)
+
     def clear(self) -> None:
         with self._lock:
             self._by_hash.clear()
@@ -588,6 +600,11 @@ class ModelMemoryManager:
             self.touch_activity(clf_id)
             return classifier
 
+        # Check checkpoint availability BEFORE evicting warm models
+        find_ckpt = getattr(classifier, "_find_checkpoint", None)
+        if callable(find_ckpt) and find_ckpt() is None:
+            return None
+
         # Need to load `classifier`. Check if hardware memory requires evicting an older loaded model.
         needed_mb = classifier.get_estimated_memory_mb()
         mem_info = BaseClassifier.get_system_memory_info()
@@ -643,12 +660,16 @@ class ModelMemoryManager:
         return bool(inst and inst.is_loaded())
 
     def unload_classifier(self, clf_id: str) -> None:
+        norm_target = clf_id.replace("_", "") if clf_id else ""
         with self._lock:
-            self._active_lru.pop(clf_id, None)
+            keys_to_pop = [
+                k for k in self._active_lru.keys()
+                if k == clf_id or (norm_target and k.replace("_", "") == norm_target)
+            ]
+            for k in keys_to_pop:
+                self._active_lru.pop(k, None)
         try:
-            inst = self.registry.get_classifier(clf_id, lazy_load=True)
-            if inst and inst.is_loaded():
-                inst.unload_model()
+            self.registry.unload_classifier(clf_id)
             gc.collect()
         except Exception as exc:
             log(f"[MemoryManager] Error unloading {clf_id}: {exc}")
@@ -1632,7 +1653,7 @@ def classify_items(envelope: Dict[str, Any], job_id: Optional[str] = None, send_
 def list_models(request_id: Optional[str] = None) -> Dict[str, Any]:
     """List available classifiers from registry with fresh folder scan."""
     registry = get_registry()
-    available = registry.list_available_details(force_rescan=True)
+    available = [c for c in registry.list_available_details(force_rescan=True) if c.get("weights_ready")]
 
     repo_root = Path(__file__).parent.parent
     imm_dir = repo_root / 'Immage Models'
@@ -1661,6 +1682,7 @@ ALLOWED_GITHUB_PREFIXES = (
     "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/",
     "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/",
 )
+WEIGHT_EXTENSIONS = (".pt", ".onnx", ".joblib", ".bin", ".pth", ".safetensors")
 
 
 def _is_allowed_official_url(url: str) -> bool:
@@ -1730,28 +1752,41 @@ def _load_official_catalog(force_remote: bool = False) -> Dict[str, Any]:
     if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list):
         catalog = {"catalog_version": 2, "repository": "LuckyCowMoo/Fire-vs-Fire", "models": []}
 
-    installed_ids = []
-    for model in catalog.get("models", []):
-        files = model.get("files") or []
-        if model.get("status") != "available" or not files:
-            model["installed"] = False
-            continue
-        all_present = True
-        for f_entry in files:
-            if not f_entry.get("required", True):
-                continue
-            rel_path = f_entry.get("relative_path", "")
-            safe_path = _resolve_safe_repo_path(rel_path)
-            if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:
-                all_present = False
-                break
-        model["installed"] = all_present
-        if all_present:
-            installed_ids.append(model.get("id"))
+    return _sync_catalog_with_local_folder(catalog)
 
-    catalog["installed_models"] = installed_ids
-    catalog = _sync_catalog_with_local_folder(catalog)
-    return catalog
+
+def _evaluate_model_disk_status(model: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Return (is_installed, formatted_disk_size) for a catalog model entry."""
+    files = model.get("files") or []
+    if model.get("status") != "available" or not files:
+        return False, None
+
+    has_weight_entry = any(
+        Path(f_entry.get("relative_path", "")).suffix.lower() in WEIGHT_EXTENSIONS
+        for f_entry in files
+    )
+    if not has_weight_entry:
+        return False, None
+
+    for f_entry in files:
+        if not f_entry.get("required", True):
+            continue
+        rel_path = f_entry.get("relative_path", "")
+        safe_path = _resolve_safe_repo_path(rel_path)
+        if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:
+            return False, None
+
+    total_weight_bytes = 0
+    for f_entry in files:
+        rel_path = f_entry.get("relative_path", "")
+        if not rel_path or Path(rel_path).suffix.lower() not in WEIGHT_EXTENSIONS:
+            continue
+        safe_path = _resolve_safe_repo_path(rel_path)
+        if safe_path is not None and safe_path.is_file() and safe_path.stat().st_size > 0:
+            total_weight_bytes += safe_path.stat().st_size
+
+    disk_size = f"{round(total_weight_bytes / (1024 * 1024))} MB" if total_weight_bytes > 0 else None
+    return True, disk_size
 
 
 def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
@@ -1763,7 +1798,7 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
 
     for detail in details:
         cid = detail["id"]
-        weights_ready = detail.get("weights_ready", False)
+        weights_ready = bool(detail.get("weights_ready", False))
 
         matched_id = cid if cid in models_by_id else None
         if not matched_id:
@@ -1777,12 +1812,8 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
 
         if matched_id:
             m = models_by_id[matched_id]
-            m["installed"] = bool(weights_ready)
-            if detail.get("download_size") and detail["download_size"] != "Local":
-                m["download_size"] = detail["download_size"]
-            if detail.get("size_mb") and detail["size_mb"] > 0:
-                m["size_mb"] = detail["size_mb"]
-        else:
+            m["installed"] = weights_ready
+        elif weights_ready and detail.get("weight_path"):
             modality = (detail.get("modalities") or ["image"])[0]
             label = detail.get("label", "AI generated")
             is_ai = label.lower() not in ("spider", "object", "custom")
@@ -1796,16 +1827,15 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
                     "relative_path": detail["py_file"],
                     "required": True,
                 })
-            if detail.get("weight_path"):
-                try:
-                    rel_w = str(Path(detail["weight_path"]).resolve().relative_to(repo_root)).replace('\\', '/')
-                except Exception:
-                    rel_w = str(detail["weight_path"]).replace('\\', '/')
-                files_list.append({
-                    "type": "weights_pt" if rel_w.endswith(".pt") else "weights_onnx",
-                    "relative_path": rel_w,
-                    "required": True,
-                })
+            try:
+                rel_w = str(Path(detail["weight_path"]).resolve().relative_to(repo_root)).replace('\\', '/')
+            except Exception:
+                rel_w = str(detail["weight_path"]).replace('\\', '/')
+            files_list.append({
+                "type": "weights_pt" if rel_w.endswith(".pt") else "weights_onnx",
+                "relative_path": rel_w,
+                "required": True,
+            })
 
             new_model = {
                 "id": cid,
@@ -1826,7 +1856,7 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
                 "tagline": detail.get("doc", "").split("\n")[0] if detail.get("doc") else "Local folder auto-discovered classifier",
                 "description": detail.get("doc") or f"Locally discovered classifier: {name}. Automatically loaded from native/classifiers/.",
                 "files": files_list,
-                "installed": weights_ready,
+                "installed": True,
             }
 
             if is_recommended:
@@ -1837,23 +1867,14 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
 
     installed_ids = []
     for m in models:
-        files = m.get("files") or []
-        if m.get("status") == "available" and files:
-            all_present = True
-            for f_entry in files:
-                if not f_entry.get("required", True):
-                    continue
-                rel_path = f_entry.get("relative_path", "")
-                safe_path = _resolve_safe_repo_path(rel_path)
-                if safe_path is None or not safe_path.exists() or safe_path.stat().st_size == 0:
-                    all_present = False
-                    break
-            m["installed"] = all_present
-            if all_present:
-                installed_ids.append(m.get("id"))
+        all_present, disk_size = _evaluate_model_disk_status(m)
+        m["installed"] = all_present
+        if all_present:
+            if disk_size:
+                m["disk_size"] = disk_size
+            installed_ids.append(m.get("id"))
         else:
-            if m.get("installed") is True:
-                installed_ids.append(m.get("id"))
+            m.pop("disk_size", None)
 
     catalog["installed_models"] = sorted(list(set(installed_ids)))
     return catalog
@@ -1862,7 +1883,7 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
 def get_official_catalog_response(request_id: Optional[str] = None) -> Dict[str, Any]:
     catalog = _load_official_catalog()
     registry = get_registry()
-    classifiers = registry.list_available_details(force_rescan=False)
+    classifiers = [c for c in registry.list_available_details(force_rescan=False) if c.get("weights_ready")]
     resp = {
         "ok": True,
         "type": "officialCatalog",
@@ -2099,7 +2120,7 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
 
 
 def uninstall_official_model(model_id: str, request_id: Optional[str] = None) -> Dict[str, Any]:
-    """Uninstall a downloaded model by removing its local weight files and unloading it from registry."""
+    """Uninstall a downloaded model by unloading it from memory and removing its local weight files."""
     if not model_id or not isinstance(model_id, str):
         resp = {"ok": False, "error": "Invalid modelId"}
         if request_id:
@@ -2117,70 +2138,100 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
                 target_model = m
                 break
 
-    removed_files = []
-    repo_root = Path(__file__).resolve().parent.parent
+    canonical_id = target_model.get("id") if target_model else model_id
 
-    # Find candidate files to remove from the target model definition
-    files_to_check = []
-    if target_model and target_model.get("files"):
-        files_to_check.extend(target_model["files"])
-
-    # Also check other models to ensure we do not delete a file shared by another installed model
-    other_installed_files = set()
-    for m in models:
-        mid = m.get("id")
-        if mid != model_id and m.get("installed") is True:
-            for f in m.get("files", []):
-                rp = f.get("relative_path")
-                if rp:
-                    other_installed_files.add(rp.replace('\\', '/').lower())
-
-    for f_entry in files_to_check:
-        rel_path = f_entry.get("relative_path", "")
-        if not rel_path:
-            continue
-        normalized_rp = rel_path.replace('\\', '/').lower()
-        if normalized_rp in other_installed_files:
-            log(f"[Uninstaller] Preserving {rel_path} because it is shared with another installed model.")
-            continue
-
-        # Only delete weights and model data files (.pt, .onnx, .joblib, .bin, .pth, .safetensors, .part)
-        ext = Path(rel_path).suffix.lower()
-        if ext in (".pt", ".onnx", ".joblib", ".bin", ".pth", ".safetensors", ".part"):
-            dest_path = _resolve_safe_repo_path(rel_path)
-            if dest_path and dest_path.exists():
-                try:
-                    dest_path.unlink()
-                    removed_files.append(rel_path)
-                    log(f"[Uninstaller] Deleted weight file {dest_path}")
-                except Exception as exc:
-                    log(f"[Uninstaller] Error deleting {dest_path}: {exc}")
-
-    # Unload from ModelRegistry memory if currently active
+    # Step 1: Unload from memory_manager and registry BEFORE unlinking files so Windows file locks are released
     registry = get_registry()
     try:
+        memory_manager.unload_classifier(model_id)
+        if canonical_id and canonical_id != model_id:
+            memory_manager.unload_classifier(canonical_id)
         registry.unload_classifier(model_id)
+        if canonical_id and canonical_id != model_id:
+            registry.unload_classifier(canonical_id)
         if target_model and target_model.get("category_name"):
+            memory_manager.unload_classifier(target_model["category_name"])
             registry.unload_classifier(target_model["category_name"])
+        content_cache.clear_classifier(model_id)
+        if canonical_id and canonical_id != model_id:
+            content_cache.clear_classifier(canonical_id)
+        gc.collect()
     except Exception as exc:
         log(f"[Uninstaller] Note on unloading classifier: {exc}")
 
-    # Force rediscovery to update memory and disk caches
-    registry.discover_classifiers(force=True)
-    available = registry.list_available_details(force_rescan=True)
+    # Step 2: Collect all candidate weight files to remove (from catalog definition and local registry weight_path)
+    repo_root = Path(__file__).resolve().parent.parent
+    weight_exts = WEIGHT_EXTENSIONS + (".part",)
+    candidate_paths: Dict[str, Path] = {}
 
-    # Sync catalog installed flags
-    if target_model:
-        target_model["installed"] = False
+    if target_model and target_model.get("files"):
+        for f_entry in target_model["files"]:
+            rel_path = f_entry.get("relative_path", "")
+            if not rel_path or Path(rel_path).suffix.lower() not in weight_exts:
+                continue
+            dest_path = _resolve_safe_repo_path(rel_path)
+            if dest_path is not None:
+                candidate_paths[rel_path.replace("\\", "/").lower()] = dest_path
+
+    norm_target = model_id.replace("_", "")
+    for detail in registry.list_available_details(force_rescan=False):
+        cid = detail.get("id", "")
+        if cid == model_id or cid == canonical_id or cid.replace("_", "") == norm_target:
+            wpath = detail.get("weight_path")
+            if wpath:
+                wp = Path(wpath).resolve()
+                if wp.suffix.lower() in weight_exts:
+                    try:
+                        rel_w = str(wp.relative_to(repo_root)).replace("\\", "/").lower()
+                    except Exception:
+                        rel_w = str(wp).replace("\\", "/").lower()
+                    candidate_paths[rel_w] = wp
+
+    # Preserve files shared with another currently installed model
+    other_installed_files = set()
+    for m in models:
+        mid = m.get("id")
+        if mid not in (model_id, canonical_id) and m.get("installed") is True:
+            for f in m.get("files", []):
+                rp = f.get("relative_path")
+                if rp:
+                    other_installed_files.add(rp.replace("\\", "/").lower())
+
+    removed_files = []
+    failed_files = []
+    for norm_rp, dest_path in candidate_paths.items():
+        if norm_rp in other_installed_files:
+            log(f"[Uninstaller] Preserving {norm_rp} because it is shared with another installed model.")
+            continue
+        if not dest_path.exists():
+            continue
+        for attempt in range(2):
+            try:
+                dest_path.unlink()
+                removed_files.append(norm_rp)
+                log(f"[Uninstaller] Deleted weight file {dest_path}")
+                break
+            except PermissionError as exc:
+                if attempt == 0:
+                    gc.collect()
+                    time.sleep(0.15)
+                else:
+                    failed_files.append(f"{norm_rp}: {exc}")
+                    log(f"[Uninstaller] PermissionError deleting {dest_path}: {exc}")
+            except Exception as exc:
+                failed_files.append(f"{norm_rp}: {exc}")
+                log(f"[Uninstaller] Error deleting {dest_path}: {exc}")
+                break
+
+    # Step 3: Force rediscovery and sync catalog from actual disk state
+    registry.discover_classifiers(force=True)
+    available = [c for c in registry.list_available_details(force_rescan=True) if c.get("weights_ready")]
+
     updated_catalog = _sync_catalog_with_local_folder(catalog)
-    installed_ids = [
-        mid for mid in updated_catalog.get("installed_models", [])
-        if mid != model_id and mid != (target_model.get("id") if target_model else None)
-    ]
-    updated_catalog["installed_models"] = sorted(list(set(installed_ids)))
+    installed_ids = updated_catalog.get("installed_models", [])
 
     resp = {
-        "ok": True,
+        "ok": len(failed_files) == 0,
         "type": "uninstallComplete",
         "modelId": model_id,
         "removedFiles": removed_files,
@@ -2188,9 +2239,11 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
         "classifiers": available,
         "timestamp": int(time.time() * 1000),
     }
+    if failed_files:
+        resp["error"] = f"Failed to delete locked file(s): {'; '.join(failed_files)}"
     if request_id:
         resp["requestId"] = request_id
-    log(f"[Uninstaller] Successfully uninstalled '{model_id}' (removed {len(removed_files)} file(s))")
+    log(f"[Uninstaller] Uninstall '{model_id}' finished (removed {len(removed_files)} file(s), failed {len(failed_files)})")
     return resp
 
 

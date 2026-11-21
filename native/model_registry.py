@@ -204,11 +204,8 @@ class ModelRegistry:
                 find_ckpt = getattr(instance, '_find_checkpoint', None)
                 if callable(find_ckpt):
                     ckpt = find_ckpt()
-                    if ckpt and Path(ckpt).is_file():
-                        mpath = Path(ckpt)
-
-                # Fallback: look in classifiers_dir for matching weights
-                if (mpath is None or not Path(mpath).is_file()):
+                    mpath = Path(ckpt) if (ckpt and Path(ckpt).is_file()) else None
+                elif mpath is None or not Path(mpath).is_file():
                     for ext_pattern in (f"{classifier_id}*.pt", f"{classifier_id}*.onnx", f"*{classifier_id}*.pt"):
                         found = list(classifiers_dir.glob(ext_pattern))
                         if found:
@@ -240,6 +237,37 @@ class ModelRegistry:
 
         return details
 
+    _ALIASES: Dict[str, str] = {
+        "fvf_ares": "fvf_heimdall02",
+        "fvf_heimdall_02": "fvf_heimdall02",
+        "fvf_heimdall02": "fvf_heimdall_02",
+        "fvf_heimdall_03": "fvf_heimdall03",
+        "fvf_heimdall03": "fvf_heimdall_03",
+        "fvf_heimdall_04": "fvf_heimdall04",
+        "fvf_heimdall04": "fvf_heimdall_04",
+        "fvf_heimdall_04_b": "fvf_heimdall04_b",
+        "fvf_heimdall04_b": "fvf_heimdall_04_b",
+        "fvf_heimdall04b": "fvf_heimdall_04_b",
+        "fvf_heimdall_04b": "fvf_heimdall_04_b",
+        "fvf_mimir_02": "fvf_mimir",
+        "fvf_mimir02": "fvf_mimir",
+        "mimir": "fvf_mimir",
+        "text": "fvf_mimir",
+    }
+
+    def _resolve_classifier_id(self, classifier_id: str) -> Optional[str]:
+        """Resolve an explicit or aliased classifier ID against discovered classifiers."""
+        if classifier_id in self._classifiers:
+            return classifier_id
+        alias_target = self._ALIASES.get(classifier_id)
+        if alias_target and alias_target in self._classifiers:
+            return alias_target
+        normalized = classifier_id.replace("_", "")
+        for cid in self._classifiers:
+            if cid.replace("_", "") == normalized:
+                return cid
+        return None
+
     def get_classifier(self, classifier_id: str, model_path: Optional[Path] = None,
                        lazy_load: bool = True) -> Optional[BaseClassifier]:
         """
@@ -256,30 +284,11 @@ class ModelRegistry:
         if not self._discovered:
             self.discover_classifiers()
 
-        if classifier_id not in self._classifiers:
-            aliases = {
-                "fvf_ares": "fvf_heimdall02",
-                "fvf_heimdall_02": "fvf_heimdall02",
-                "fvf_heimdall02": "fvf_heimdall_02",
-                "fvf_heimdall_03": "fvf_heimdall03",
-                "fvf_heimdall03": "fvf_heimdall_03",
-                "fvf_heimdall_04": "fvf_heimdall04",
-                "fvf_heimdall04": "fvf_heimdall_04",
-                "fvf_heimdall_04_b": "fvf_heimdall04_b",
-                "fvf_heimdall04_b": "fvf_heimdall_04_b",
-                "fvf_heimdall04b": "fvf_heimdall_04_b",
-                "fvf_mimir_02": "fvf_mimir",
-                "fvf_mimir02": "fvf_mimir",
-                "mimir": "fvf_mimir",
-                "text": "fvf_mimir",
-                "fvf_heimdall_04b": "fvf_heimdall_04_b",
-            }
-            alias_target = aliases.get(classifier_id)
-            if alias_target and alias_target in self._classifiers:
-                classifier_id = alias_target
-            else:
-                print(f"[Registry] Unknown classifier: {classifier_id}", file=sys.stderr)
-                return None
+        resolved_id = self._resolve_classifier_id(classifier_id)
+        if resolved_id is None:
+            print(f"[Registry] Unknown classifier: {classifier_id}", file=sys.stderr)
+            return None
+        classifier_id = resolved_id
 
         # Return cached instance if available and lazy loading enabled
         cache_key = f"{classifier_id}:{model_path}"
@@ -311,15 +320,29 @@ class ModelRegistry:
             classifier_id: Classifier to unload
             model_path: Specific model path to unload (or None for all)
         """
+        candidate_ids = {classifier_id}
+        alias_target = self._ALIASES.get(classifier_id)
+        if alias_target:
+            candidate_ids.add(alias_target)
+        resolved = self._resolve_classifier_id(classifier_id)
+        if resolved:
+            candidate_ids.add(resolved)
+        norm_target = classifier_id.replace("_", "")
+        for k in list(self._loaded_instances.keys()):
+            cached_cid = k.split(":", 1)[0]
+            if cached_cid.replace("_", "") == norm_target:
+                candidate_ids.add(cached_cid)
+
         if model_path:
-            cache_key = f"{classifier_id}:{model_path}"
-            if cache_key in self._loaded_instances:
-                self._loaded_instances[cache_key].unload_model()
-                del self._loaded_instances[cache_key]
+            for cid in candidate_ids:
+                cache_key = f"{cid}:{model_path}"
+                if cache_key in self._loaded_instances:
+                    self._loaded_instances[cache_key].unload_model()
+                    del self._loaded_instances[cache_key]
         else:
-            # Unload all instances of this classifier
-            to_remove = [k for k in self._loaded_instances.keys()
-                        if k.startswith(f"{classifier_id}:")]
+            # Unload all instances of this classifier (including alias/normalized IDs)
+            prefixes = tuple(f"{cid}:" for cid in candidate_ids)
+            to_remove = [k for k in self._loaded_instances.keys() if k.startswith(prefixes)]
             for key in to_remove:
                 self._loaded_instances[key].unload_model()
                 del self._loaded_instances[key]

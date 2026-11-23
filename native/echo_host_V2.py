@@ -10,9 +10,10 @@ Dynamic Prioritisation & Single-Item Streaming Architecture:
 - Zero-Internet Native Host: Only decodes base64/data payloads; never fetches external URLs.
 - PacketAssembler: Reassembles chunked single items (>512 KB) under the 1 MB Native Messaging limit.
 - Dynamic Context & Priority Scheduling:
-  * P0: Active tab & in viewport (or boosted by scroll)
-  * P1: Active tab & offscreen
-  * P2: Background tab / inactive window
+  * P0: Hovered item under user pointer in active tab
+  * P1: Active tab & in viewport (or boosted by scroll)
+  * P2: Active tab & offscreen
+  * P3: Background tab / inactive window
   * Instant queue purge on `dropContext` (tab closed or navigated away).
 - Multi-Model Hardware Memory Manager: Keeps multiple simultaneous classifiers warm in RAM/VRAM
   when hardware permits, with automatic LRU eviction on low-memory systems and idle timeout unloading.
@@ -716,6 +717,9 @@ class PriorityClassificationEngine:
         # sourceId -> {"activeTabId": Any, "activeWindowId": Any, "activeTabsByWindow": Dict[Any, Any]}
         self._source_context: Dict[str, Dict[str, Any]] = {}
 
+        # Currently hovered pending item per sourceId -> {"tabId": Any, "pageId": Any, "itemId": Any}
+        self._hover_by_source: Dict[str, Dict[str, Any]] = {}
+
         # Pending tasks keyed by content_hash for automatic deduplication!
         # content_hash -> task_dict
         self._pending_by_hash: Dict[str, Dict[str, Any]] = {}
@@ -734,13 +738,16 @@ class PriorityClassificationEngine:
     def _compute_subscriber_priority(self, sub: Dict[str, Any]) -> int:
         """
         Compute priority tier for a subscriber:
-        - 0 (P0): Active Tab + inViewport
-        - 1 (P1): Active Tab + offscreen
-        - 2 (P2): Background Tab / Inactive Window
+        - 0 (P0): Hovered item in active tab
+        - 1 (P1): Active Tab + inViewport
+        - 2 (P2): Active Tab + offscreen
+        - 3 (P3): Background Tab / Inactive Window
         """
         source_id = sub.get("sourceId") or "local"
         tab_id = sub.get("tabId")
         win_id = sub.get("windowId")
+        page_id = sub.get("pageId")
+        item_id = sub.get("itemId")
         in_viewport = bool(sub.get("inViewport", False))
 
         ctx = self._source_context.get(source_id)
@@ -760,9 +767,27 @@ class PriorityClassificationEngine:
             else:
                 is_active_tab = False
 
+        hover = self._hover_by_source.get(source_id)
+        if (
+            is_active_tab
+            and hover
+            and hover.get("itemId") is not None
+            and item_id == hover["itemId"]
+        ):
+            hover_page = hover.get("pageId")
+            hover_tab = hover.get("tabId")
+            if hover_page:
+                if page_id == hover_page:
+                    return 0
+            elif hover_tab is not None:
+                if tab_id == hover_tab:
+                    return 0
+            else:
+                return 0
+
         if is_active_tab:
-            return 0 if in_viewport else 1
-        return 2
+            return 1 if in_viewport else 2
+        return 3
 
     def _recompute_task_priority_unlocked(self, task: Dict[str, Any]) -> None:
         subs = task.get("subscribers") or []
@@ -817,6 +842,34 @@ class PriorityClassificationEngine:
 
         log(f"[PriorityEngine] Updated tab context for source={source_id}: activeTab={active_tab_id}, window={window_id}")
 
+    def set_hover_item(self, msg: Dict[str, Any]) -> None:
+        source_id = msg.get("sourceId") or "local"
+        item_id = msg.get("itemId")
+        tab_id = msg.get("tabId")
+        page_id = msg.get("pageId")
+
+        got_p0 = False
+        with self._cond:
+            if not item_id:
+                self._hover_by_source.pop(source_id, None)
+            else:
+                self._hover_by_source[source_id] = {
+                    "tabId": tab_id,
+                    "pageId": page_id,
+                    "itemId": item_id,
+                }
+
+            for task in self._pending_by_hash.values():
+                self._recompute_task_priority_unlocked(task)
+                if item_id and task.get("priority") == 0:
+                    if any(s.get("itemId") == item_id for s in (task.get("subscribers") or [])):
+                        got_p0 = True
+
+            self._cond.notify_all()
+
+        if item_id and got_p0:
+            log(f"[PriorityEngine] Hover boost (P0) for item={str(item_id)[:65]} tab={tab_id}")
+
     def boost_items(self, msg: Dict[str, Any]) -> None:
         source_id = msg.get("sourceId") or "local"
         tab_id = msg.get("tabId")
@@ -842,7 +895,7 @@ class PriorityClassificationEngine:
                 self._cond.notify_all()
 
         if boosted > 0:
-            log(f"[PriorityEngine] Boosted {boosted} item(s) into viewport priority (P0) for tab={tab_id}")
+            log(f"[PriorityEngine] Boosted {boosted} item(s) into viewport priority (P1) for tab={tab_id}")
 
     def drop_context(self, msg: Dict[str, Any]) -> int:
         source_id = msg.get("sourceId")
@@ -893,6 +946,15 @@ class PriorityClassificationEngine:
                     else:
                         kept.append(sub)
                 self._in_flight_task["subscribers"] = kept
+
+            for sid in list(self._hover_by_source.keys()):
+                if source_id and sid != source_id:
+                    continue
+                hover = self._hover_by_source[sid]
+                match_page = bool(page_id and hover.get("pageId") == page_id)
+                match_tab = bool(tab_id is not None and hover.get("tabId") == tab_id and not page_id)
+                if match_page or match_tab:
+                    self._hover_by_source.pop(sid, None)
 
             self._cond.notify_all()
 
@@ -1060,7 +1122,7 @@ class PriorityClassificationEngine:
                     "classifier_ids": self._collect_classifier_ids(ensembles),
                     "lazy_load": lazy_load,
                     "seq": self._seq_counter,
-                    "priority": 1,
+                    "priority": 2,
                     "created_at": time.time(),
                 }
                 self._recompute_task_priority_unlocked(task)
@@ -2439,6 +2501,10 @@ def main() -> None:
 
             elif mtype == 'boostItems':
                 priority_engine.boost_items(msg)
+                continue
+
+            elif mtype == 'hoverItem':
+                priority_engine.set_hover_item(msg)
                 continue
 
             elif mtype == 'dropContext':

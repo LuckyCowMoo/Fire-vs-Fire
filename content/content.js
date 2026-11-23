@@ -46,18 +46,27 @@ let elementMap = new Map();      // Maps itemId to DOM elements
 let elementToItemId = new WeakMap(); // Reverse lookup: DOM element -> itemId
 let hoverHandlerAttached = false; // Tracks whether a global hover handler is active already
 let currentHoverEl = null;       // Tracks the current hovered AI-detected element
-let hoverRafPending = false;     // Throttle pointermove hover updates to one per frame
-let lastPointerEvent = null;
+let hoverRafPending = false;     // Throttle pointermove/scroll hover updates to one per frame
+let lastPointerState = null;     // Last observed { clientX, clientY, target }
+let lastHitTestCoords = null;    // Last evaluated { clientX, clientY, target }
+let hoverDirty = false;          // Re-hit-test after scroll even if cursor is stationary
+let hoverPriorityItemId = null;  // Pending itemId currently hovered (before/after dwell)
+let hoverPrioritySentId = null;  // Pending itemId currently boosted on Native Host
+let hoverPriorityTimer = null;   // Dwell timer before elevating hovered item to P0
+const HOVER_PRIORITY_DWELL_MS = 120;
 let scanPaused = false;            // Pause periodic scans while tab is hidden
 let processedImages = new WeakSet(); // WeakSet: elements automatically GC'd when removed from DOM
 let activeJobIds = new Set();    // Legacy job ID tracking
 let itemResults = new Map();     // itemId -> { modality, ensembles: { ensembleId: { score, label, displayLabel } } }
+let pendingItemIds = new Set();  // Item IDs queued for classification (awaiting result)
 let lastEnsembleSignature = null;
 let lastEnsembleStyleSignature = null;
 let ensembleByIdCache = null;
 let seenTextContent = new Set();
 let activeJobTimeouts = new Map();
 let hoverPointerHandler = null;
+let hoverScrollHandler = null;
+let hoverMouseLeaveHandler = null;
 let aiDetectedImageCount = 0;
 let lastContextMenuState = null;
 const JOB_TRACKING_MS = 5 * 60 * 1000;
@@ -66,7 +75,7 @@ const JOB_TRACKING_MS = 5 * 60 * 1000;
  * OBSERVERS - Monitor page for dynamic content & viewport visibility
  */
 let mutationObserver = null;     // Watches for new page updates
-let intersectionObserver = null; // Watches for images entering viewport (lazy load + P0 priority boost)
+let intersectionObserver = null; // Watches for images entering viewport (lazy load + P1 viewport priority boost)
 let pendingClassification = [];   // Legacy queue
 let pendingTextSections = [];    // Legacy queue
 let classificationTimeout = null;
@@ -311,111 +320,240 @@ function cleanupStaleEntries() {
   pruneItemResults();
 }
 
-function findAiDetectedUnderPointer(evt) {
-  const x = evt.clientX;
-  const y = evt.clientY;
-  if (typeof x !== 'number' || typeof y !== 'number') return null;
+function sendHoverPriorityMessage(itemId) {
+  if (itemId && settings.verboseLogs) {
+    console.log(`[AI Detector] Hover priority (P0):`, String(itemId).substring(0, 80));
+  }
+  try {
+    ext.runtime.sendMessage({
+      type: 'HOVER_ITEM',
+      pageId: currentPageId,
+      itemId: itemId || null
+    }).catch(() => {});
+  } catch (_) {}
+}
 
-  // 1. Check direct target or closest ancestor (instant, zero reflow cost)
-  if (evt.target instanceof Element) {
-    const direct = evt.target.closest('.ai-detected');
-    if (direct) return direct;
+function clearHoverPriority() {
+  if (hoverPriorityTimer) {
+    clearTimeout(hoverPriorityTimer);
+    hoverPriorityTimer = null;
+  }
+  hoverPriorityItemId = null;
+  if (hoverPrioritySentId !== null) {
+    hoverPrioritySentId = null;
+    sendHoverPriorityMessage(null);
+  }
+}
+
+function updateHoverPriority(el) {
+  const rawId = el ? elementToItemId.get(el) : null;
+  const id = (rawId && pendingItemIds.has(rawId)) ? rawId : null;
+  if (id === hoverPriorityItemId) return;
+
+  hoverPriorityItemId = id;
+  if (hoverPriorityTimer) {
+    clearTimeout(hoverPriorityTimer);
+    hoverPriorityTimer = null;
   }
 
-  // Only hit-test if there are active AI detected images on this page
-  if (aiDetectedImageCount <= 0) return null;
+  if (id) {
+    hoverPriorityTimer = setTimeout(() => {
+      hoverPriorityTimer = null;
+      if (hoverPriorityItemId === id && id !== hoverPrioritySentId && pendingItemIds.has(id)) {
+        hoverPrioritySentId = id;
+        sendHoverPriorityMessage(id);
+      }
+    }, HOVER_PRIORITY_DWELL_MS);
+  } else if (hoverPrioritySentId !== null) {
+    hoverPrioritySentId = null;
+    sendHoverPriorityMessage(null);
+  }
+}
 
-  // 2. Penetrate transparent overlay divs/elements using document.elementsFromPoint(x, y)
+function clearVisualHover() {
+  if (!currentHoverEl) return;
+  currentHoverEl.classList.remove('fvf-hover-active');
+  if (hasResultsForElement(currentHoverEl)) {
+    if (currentHoverEl.dataset.aiImageStyle) {
+      VE.applyImageInteractionState(currentHoverEl, 'rest', settings);
+    } else {
+      const blurAmount = parseFloat(currentHoverEl.dataset.aiBlur || settings.blurAmount || 0);
+      VE.hideImageAi(currentHoverEl, blurAmount);
+    }
+  }
+  currentHoverEl = null;
+}
+
+function hitTestPointer(x, y, target) {
+  const needVisual = aiDetectedImageCount > 0;
+  const needPriority = pendingItemIds.size > 0;
+  let visualEl = null;
+  let priorityEl = null;
+
+  if ((!needVisual && !needPriority) || typeof x !== 'number' || typeof y !== 'number') {
+    return { visualEl: null, priorityEl: null };
+  }
+
+  // 1. Check direct target and ancestors (instant, zero hit-test cost)
+  if (target instanceof Element) {
+    if (needVisual && typeof target.closest === 'function') {
+      visualEl = target.closest('.ai-detected');
+    }
+    if (needPriority) {
+      let cur = target;
+      while (cur && cur !== document.body && cur !== document.documentElement) {
+        const itemId = elementToItemId.get(cur);
+        if (itemId && pendingItemIds.has(itemId)) {
+          priorityEl = cur;
+          break;
+        }
+        cur = cur.parentElement;
+      }
+    }
+    if ((!needVisual || visualEl) && (!needPriority || priorityEl)) {
+      return { visualEl, priorityEl };
+    }
+  }
+
+  // 2. Penetrate transparent overlay divs/elements using a single elementsFromPoint(x, y) call
   if (typeof document.elementsFromPoint === 'function') {
     try {
       const elements = document.elementsFromPoint(x, y);
       if (elements && elements.length) {
         for (let i = 0; i < elements.length; i++) {
           const el = elements[i];
-          if (el && el.classList && el.classList.contains('ai-detected')) {
-            return el;
+          if (!el) continue;
+          if (needVisual && !visualEl) {
+            if (el.classList && el.classList.contains('ai-detected')) {
+              visualEl = el;
+            } else if (typeof el.closest === 'function') {
+              const parent = el.closest('.ai-detected');
+              if (parent) visualEl = parent;
+            }
           }
-          const parent = el && el.closest && el.closest('.ai-detected');
-          if (parent) {
-            return parent;
+          if (needPriority && !priorityEl) {
+            const itemId = elementToItemId.get(el);
+            if (itemId && pendingItemIds.has(itemId)) {
+              priorityEl = el;
+            }
+          }
+          if ((!needVisual || visualEl) && (!needPriority || priorityEl)) {
+            break;
           }
         }
       }
     } catch (_) {}
   }
 
-  // 3. Fallback: Check bounding rects ONLY of actual .ai-detected images (NOT all images)
-  try {
-    const detectedImgs = document.querySelectorAll('img.ai-detected');
-    for (let i = 0; i < detectedImgs.length; i++) {
-      const img = detectedImgs[i];
-      if (img && img.isConnected) {
-        const rect = img.getBoundingClientRect();
-        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-          return img;
-        }
-      }
-    }
-  } catch (_) {}
-
-  return null;
+  return { visualEl, priorityEl };
 }
 
-function handlePointerMoveHover(evt) {
-  const candidate = findAiDetectedUnderPointer(evt);
+function handlePointerMoveHover(x, y, target) {
+  const { visualEl, priorityEl } = hitTestPointer(x, y, target);
 
-  if (candidate === currentHoverEl) return;
-  if (currentHoverEl && currentHoverEl !== candidate) {
-    currentHoverEl.classList.remove('fvf-hover-active');
-    if (hasResultsForElement(currentHoverEl)) {
+  if (visualEl !== currentHoverEl) {
+    clearVisualHover();
+    currentHoverEl = visualEl;
+    if (currentHoverEl && hasResultsForElement(currentHoverEl)) {
+      currentHoverEl.classList.add('fvf-hover-active');
       if (currentHoverEl.dataset.aiImageStyle) {
-        VE.applyImageInteractionState(currentHoverEl, 'rest', settings);
+        VE.applyImageInteractionState(currentHoverEl, 'hover', settings);
       } else {
-        const blurAmount = parseFloat(currentHoverEl.dataset.aiBlur || settings.blurAmount || 0);
-        VE.hideImageAi(currentHoverEl, blurAmount);
+        VE.showImageAi(currentHoverEl);
       }
     }
   }
-  currentHoverEl = candidate;
-  if (currentHoverEl && hasResultsForElement(currentHoverEl)) {
-    currentHoverEl.classList.add('fvf-hover-active');
-    if (currentHoverEl.dataset.aiImageStyle) {
-      VE.applyImageInteractionState(currentHoverEl, 'hover', settings);
-    } else {
-      VE.showImageAi(currentHoverEl);
+
+  updateHoverPriority(priorityEl);
+}
+
+function scheduleHoverEvaluation() {
+  if (hoverRafPending) return;
+  hoverRafPending = true;
+  requestAnimationFrame(() => {
+    hoverRafPending = false;
+    if (!hoverHandlerAttached || !lastPointerState) return;
+    const { clientX, clientY, target } = lastPointerState;
+    const fromScroll = hoverDirty;
+    hoverDirty = false;
+
+    if (!fromScroll && lastHitTestCoords) {
+      const dx = clientX - lastHitTestCoords.clientX;
+      const dy = clientY - lastHitTestCoords.clientY;
+      if ((dx * dx + dy * dy) < 9 && target === lastHitTestCoords.target) {
+        return;
+      }
     }
-  }
+
+    const effectiveTarget = fromScroll ? null : target;
+    lastHitTestCoords = { clientX, clientY, target: effectiveTarget };
+    handlePointerMoveHover(clientX, clientY, effectiveTarget);
+  });
 }
 
 function detachGlobalHoverHandler() {
-  if (!hoverHandlerAttached || !hoverPointerHandler) return;
-  document.removeEventListener('pointermove', hoverPointerHandler, true);
+  if (!hoverHandlerAttached) return;
+  if (hoverPointerHandler) {
+    document.removeEventListener('pointermove', hoverPointerHandler, { capture: true });
+  }
+  if (hoverScrollHandler) {
+    window.removeEventListener('scroll', hoverScrollHandler, { capture: true });
+  }
+  if (hoverMouseLeaveHandler && document.documentElement) {
+    document.documentElement.removeEventListener('mouseleave', hoverMouseLeaveHandler);
+  }
   hoverHandlerAttached = false;
   hoverPointerHandler = null;
-  currentHoverEl = null;
+  hoverScrollHandler = null;
+  hoverMouseLeaveHandler = null;
+  hoverRafPending = false;
+  hoverDirty = false;
+  lastPointerState = null;
+  lastHitTestCoords = null;
+  clearVisualHover();
+  clearHoverPriority();
 }
 
 function updateHoverHandlerAttachment() {
-  if (aiDetectedImageCount > 0 && !hoverHandlerAttached) {
+  const shouldAttach = Boolean(
+    settings.enabled &&
+    !document.hidden &&
+    (aiDetectedImageCount > 0 || pendingItemIds.size > 0)
+  );
+  if (shouldAttach && !hoverHandlerAttached) {
     attachGlobalHoverHandler();
-  } else if (aiDetectedImageCount <= 0 && hoverHandlerAttached) {
+  } else if (!shouldAttach && hoverHandlerAttached) {
     detachGlobalHoverHandler();
   }
 }
 
 function attachGlobalHoverHandler() {
-  if (hoverHandlerAttached) return;
+  if (hoverHandlerAttached || document.hidden || !settings.enabled) return;
   hoverHandlerAttached = true;
   hoverPointerHandler = (evt) => {
-    lastPointerEvent = evt;
-    if (hoverRafPending) return;
-    hoverRafPending = true;
-    requestAnimationFrame(() => {
-      hoverRafPending = false;
-      if (lastPointerEvent) handlePointerMoveHover(lastPointerEvent);
-    });
+    lastPointerState = {
+      clientX: evt.clientX,
+      clientY: evt.clientY,
+      target: evt.target instanceof Element ? evt.target : null
+    };
+    scheduleHoverEvaluation();
   };
-  document.addEventListener('pointermove', hoverPointerHandler, true);
+  hoverScrollHandler = () => {
+    if (!lastPointerState) return;
+    hoverDirty = true;
+    scheduleHoverEvaluation();
+  };
+  hoverMouseLeaveHandler = () => {
+    lastPointerState = null;
+    lastHitTestCoords = null;
+    clearVisualHover();
+    clearHoverPriority();
+  };
+  document.addEventListener('pointermove', hoverPointerHandler, { capture: true, passive: true });
+  window.addEventListener('scroll', hoverScrollHandler, { capture: true, passive: true });
+  if (document.documentElement) {
+    document.documentElement.addEventListener('mouseleave', hoverMouseLeaveHandler);
+  }
 }
 
 // ============================================================================
@@ -463,10 +601,12 @@ function dispatchSingleImageItem(imgObj, modelConfig) {
   if (!imgObj || !imgObj.element) return;
   const itemId = imgObj.src || ('img-unknown-' + Math.random());
   trackElement(itemId, imgObj.element);
+  pendingItemIds.add(itemId);
+  updateHoverHandlerAttachment();
 
   const inViewport = Boolean(imgObj.inViewport ?? isElementInViewport(imgObj.element));
 
-  // If offscreen, keep observing so IntersectionObserver can boost its priority to P0 if user scrolls to it!
+  // If offscreen, keep observing so IntersectionObserver can boost its priority to P1 if user scrolls to it!
   if (!inViewport) {
     observeImage(imgObj.element);
   }
@@ -478,7 +618,7 @@ function dispatchSingleImageItem(imgObj, modelConfig) {
 
   if (settings.verboseLogs) {
     console.log(
-      `[AI Detector] Streaming image (${inViewport ? 'P0 viewport' : 'P1 offscreen'}, ${base64Data ? 'canvas-b64' : 'bg-cors-fetch'}):`,
+      `[AI Detector] Streaming image (${inViewport ? 'P1 viewport' : 'P2 offscreen'}, ${base64Data ? 'canvas-b64' : 'bg-cors-fetch'}):`,
       itemId.substring(0, 80)
     );
   }
@@ -506,6 +646,8 @@ function dispatchSingleTextItem(section, modelConfig) {
   if (!section || !section.text) return;
   const itemId = section.text.substring(0, 500);
   trackElement(itemId, section.element);
+  pendingItemIds.add(itemId);
+  updateHoverHandlerAttachment();
 
   const inViewport = isElementInViewport(section.element);
 
@@ -530,7 +672,7 @@ function dispatchSingleTextItem(section, modelConfig) {
 function scheduleClassification(images) {
   /**
    * Streams discovered images individually to Native Host,
-   * sending in-viewport (P0) images first, yielding to the browser event loop
+   * sending in-viewport (P1) images first, yielding to the browser event loop
    * so main thread rendering is never blocked.
    */
   if (!settings.enabled || !images || !images.length) return;
@@ -595,6 +737,7 @@ function processMutationBatch(mutations) {
           elementMap.delete(oldItemId);
           itemResults.delete(oldItemId);
           seenImageUrls.delete(oldItemId);
+          pendingItemIds.delete(oldItemId);
         }
         processedImages.delete(el);
         const img = processImageElement(el);
@@ -680,7 +823,7 @@ function initMutationObserver() {
   });
 }
 
-// Detect lazy-loaded images entering viewport AND boost already-queued offscreen images to P0
+// Detect lazy-loaded images entering viewport AND boost already-queued offscreen images to P1
 function initIntersectionObserver() {
   if (intersectionObserver) return;
 
@@ -692,7 +835,7 @@ function initIntersectionObserver() {
       if (!entry.isIntersecting) return;
       const el = entry.target;
       if (el.tagName && el.tagName.toLowerCase() === 'img') {
-        // Case 1: Image was already queued offscreen (P1) and just scrolled into view -> boost to P0!
+        // Case 1: Image was already queued offscreen (P2) and just scrolled into view -> boost to P1!
         if (processedImages.has(el)) {
           const trackedId = elementToItemId.get(el) || el.src;
           if (trackedId && !itemResults.has(trackedId)) {
@@ -702,7 +845,7 @@ function initIntersectionObserver() {
           return;
         }
 
-        // Case 2: Lazy-loaded image now has dimensions in viewport -> process & dispatch as P0
+        // Case 2: Lazy-loaded image now has dimensions in viewport -> process & dispatch as P1
         if (el.naturalWidth > 0 && el.naturalHeight > 0) {
           const img = processImageElement(el);
           if (img) {
@@ -1166,6 +1309,17 @@ function applyResultChunk(response) {
       classifiers: finalResult.classifiers || {}
     };
     itemResults.set(result.id, entry);
+    pendingItemIds.delete(result.id);
+    if (hoverPriorityItemId === result.id) {
+      if (hoverPriorityTimer) {
+        clearTimeout(hoverPriorityTimer);
+        hoverPriorityTimer = null;
+      }
+      hoverPriorityItemId = null;
+    }
+    if (hoverPrioritySentId === result.id) {
+      hoverPrioritySentId = null;
+    }
 
     // Unobserve once classified
     getElementsForItem(result.id).forEach((el) => unobserveImage(el));
@@ -1175,6 +1329,8 @@ function applyResultChunk(response) {
       applyStylesForItem(result.id);
     }
   });
+
+  updateHoverHandlerAttachment();
 
   try {
     queueClassifierTimings(response.results);
@@ -1258,6 +1414,7 @@ async function loadSettings() {
     }
     if (res && Array.isArray(res.ensembleConfigsV2)) settings.ensembles = res.ensembleConfigsV2;
     updateEnsembleSignatures();
+    updateHoverHandlerAttachment();
   } catch (e) {
     console.warn('[Extension] Error loading settings:', e);
   }
@@ -1310,6 +1467,7 @@ function startDynamicDetection() {
         mutationFlushTimer = null;
         pendingMutations = [];
       }
+      updateHoverHandlerAttachment();
     });
   }
 
@@ -1427,6 +1585,7 @@ function getTextLabelFromElement(element, fallback = 'AI text') {
 
 function applyManualBlurStyles(itemId, element, manualEnsemble) {
   trackElement(itemId, element);
+  pendingItemIds.delete(itemId);
   itemResults.set(itemId, {
     modality: manualEnsemble.modality,
     ensembles: {
@@ -1445,6 +1604,7 @@ function applyManualBlurStyles(itemId, element, manualEnsemble) {
   }
 
   applyStylesForItem(itemId);
+  updateHoverHandlerAttachment();
 
   if (!hasManualEnsemble) {
     settings.ensembles = currentEnsembles;
@@ -1553,6 +1713,9 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
         clearTimeout(classificationTimeout);
         classificationTimeout = null;
       }
+      pendingItemIds.clear();
+      clearHoverPriority();
+      updateHoverHandlerAttachment();
 
       ext.runtime.sendMessage({
         type: 'CANCEL_ALL'
@@ -1725,6 +1888,7 @@ function resetObservers() {
 }
 
 function resetState() {
+  clearHoverPriority();
   // Drop any queued items on the Native Host for the previous page state before rescanning
   try {
     ext.runtime.sendMessage({
@@ -1750,6 +1914,7 @@ function resetState() {
   activeJobTimeouts.clear();
   activeJobIds.clear();
   itemResults.clear();
+  pendingItemIds.clear();
   aiDetectedImageCount = 0;
   currentHoverEl = null;
   lastContextMenuState = null;
@@ -1757,6 +1922,7 @@ function resetState() {
     clearTimeout(classificationTimeout);
     classificationTimeout = null;
   }
+  updateHoverHandlerAttachment();
 }
 
 async function reloadSettingsAndRescan() {

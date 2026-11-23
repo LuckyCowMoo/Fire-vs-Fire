@@ -1039,6 +1039,24 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // Hover priority (P0): content script reports the pending item under the mouse
+  if (message && message.type === 'HOVER_ITEM') {
+    const tabId = sender && sender.tab ? sender.tab.id : (message.tabId ?? null);
+    const windowId = sender && sender.tab ? sender.tab.windowId : (message.windowId ?? null);
+    sendToNativeFireAndForget({
+      version: 2,
+      type: 'hoverItem',
+      sourceId: SOURCE_ID,
+      windowId,
+      tabId,
+      pageId: message.pageId || null,
+      itemId: message.itemId || null,
+      timestamp: Date.now()
+    });
+    sendResponse({ ok: true });
+    return false;
+  }
+
   // Drop pending items from a page that unloaded or navigated away
   if (message && message.type === 'DROP_PAGE_CONTEXT') {
     const tabId = sender && sender.tab ? sender.tab.id : (message.tabId ?? null);

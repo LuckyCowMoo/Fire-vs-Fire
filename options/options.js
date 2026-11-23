@@ -771,6 +771,16 @@ function formatModalityLabel(modality) {
   }
 }
 
+function getModalityIconSrc(modality) {
+  const mod = String(modality || 'image').toLowerCase();
+  if (typeof ext !== 'undefined' && ext.runtime && typeof ext.runtime.getURL === 'function') {
+    try {
+      return ext.runtime.getURL(`docs/assets/modality-${mod}.png`);
+    } catch (_) {}
+  }
+  return `../docs/assets/modality-${mod}.png`;
+}
+
 function getCompatibleClassifiers(modality) {
   const supported = modality || 'image';
   return availableClassifiers.filter((model) => {
@@ -1156,12 +1166,7 @@ function renderModalityPicker(classifierNamesById) {
     renderEnsembles();
   });
 
-  const stepTag = document.createElement('span');
-  stepTag.className = 'wizard-step-tag';
-  stepTag.textContent = 'Step 1 of 2';
-
   topBar.appendChild(cancelBtn);
-  topBar.appendChild(stepTag);
   header.appendChild(topBar);
 
   const title = document.createElement('h3');
@@ -1184,26 +1189,22 @@ function renderModalityPicker(classifierNamesById) {
     {
       key: 'image',
       name: 'Images',
-      desc: 'Detect synthetic photos, digital artwork, and imagery',
-      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`
+      desc: 'Detect synthetic photos, digital artwork, and imagery'
     },
     {
       key: 'text',
       name: 'Text',
-      desc: 'Detect AI-generated articles, reviews, and written content',
-      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`
+      desc: 'Detect AI-generated articles, reviews, and written content'
     },
     {
       key: 'video',
       name: 'Video',
-      desc: 'Detect synthetic video footage, animations, and deepfakes',
-      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`
+      desc: 'Detect synthetic video footage, animations, and deepfakes'
     },
     {
       key: 'audio',
       name: 'Audio',
-      desc: 'Detect synthetic voice, speech clones, and generated music',
-      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`
+      desc: 'Detect synthetic voice, speech clones, and generated music'
     }
   ];
 
@@ -1214,15 +1215,34 @@ function renderModalityPicker(classifierNamesById) {
 
     const count = getCompatibleClassifiers(mod.key).length;
     const countLabel = count === 1 ? '1 model available' : `${count} models available`;
+    const iconUrl = getModalityIconSrc(mod.key);
 
-    card.innerHTML = `
-      <div class="modality-card-icon">${mod.icon}</div>
-      <div class="modality-card-info">
-        <span class="modality-card-title">${mod.name}</span>
-        <span class="modality-card-desc">${mod.desc}</span>
-      </div>
-      <span class="modality-card-count">${countLabel}</span>
-    `;
+    const iconWrap = document.createElement('div');
+    iconWrap.className = 'modality-card-icon';
+    const img = document.createElement('img');
+    img.src = iconUrl;
+    img.alt = mod.name;
+    img.className = 'modality-card-img';
+    iconWrap.appendChild(img);
+
+    const info = document.createElement('div');
+    info.className = 'modality-card-info';
+    const titleEl = document.createElement('span');
+    titleEl.className = 'modality-card-title';
+    titleEl.textContent = mod.name;
+    const descEl = document.createElement('span');
+    descEl.className = 'modality-card-desc';
+    descEl.textContent = mod.desc;
+    info.appendChild(titleEl);
+    info.appendChild(descEl);
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'modality-card-count';
+    countSpan.textContent = countLabel;
+
+    card.appendChild(iconWrap);
+    card.appendChild(info);
+    card.appendChild(countSpan);
 
     card.addEventListener('click', () => {
       categoryPanelState.draftModality = mod.key;
@@ -1258,26 +1278,20 @@ function renderClassifierPicker(classifierNamesById) {
   const backBtn = document.createElement('button');
   backBtn.type = 'button';
   backBtn.className = 'wizard-back-btn';
+  backBtn.innerHTML = `
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 18 9 12 15 6"></polyline>
+    </svg>
+    <span>Back</span>
+  `;
 
   if (isCreate) {
-    backBtn.innerHTML = `
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"></polyline>
-      </svg>
-      <span>Back to Modalities</span>
-    `;
     backBtn.addEventListener('click', () => {
       categoryPanelState.mode = CATEGORY_PANEL_MODE.PICK_MODALITY;
       animateCategoryPanelEntrance();
       renderCategoryPanel(selectedCategoryIndex, classifierNamesById);
     });
   } else {
-    backBtn.innerHTML = `
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"></polyline>
-      </svg>
-      <span>Back to Category</span>
-    `;
     backBtn.addEventListener('click', () => {
       categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
       categoryPanelState.context = 'edit';
@@ -1289,39 +1303,6 @@ function renderClassifierPicker(classifierNamesById) {
   }
 
   topBar.appendChild(backBtn);
-
-  if (isCreate) {
-    const rightActions = document.createElement('div');
-    rightActions.style.display = 'flex';
-    rightActions.style.alignItems = 'center';
-    rightActions.style.gap = '8px';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'wizard-cancel-btn';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', () => {
-      categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
-      categoryPanelState.context = 'edit';
-      categoryPanelState.draftModality = null;
-      categoryPanelState.targetEnsembleIndex = null;
-      if (categoryPanelState.previousIndex >= 0 && categoryPanelState.previousIndex < ensembleConfigs.length) {
-        selectedCategoryIndex = categoryPanelState.previousIndex;
-      } else {
-        normalizeSelectedIndex();
-      }
-      renderEnsembles();
-    });
-
-    const stepTag = document.createElement('span');
-    stepTag.className = 'wizard-step-tag';
-    stepTag.textContent = 'Step 2 of 2';
-
-    rightActions.appendChild(cancelBtn);
-    rightActions.appendChild(stepTag);
-    topBar.appendChild(rightActions);
-  }
-
   header.appendChild(topBar);
 
   const titleRow = document.createElement('div');
@@ -1341,12 +1322,7 @@ function renderClassifierPicker(classifierNamesById) {
     ? 'Select Initial Classifier'
     : `Add Classifier to ${targetName}`;
 
-  const modalityBadge = document.createElement('span');
-  modalityBadge.className = 'category-modality-badge';
-  modalityBadge.textContent = modalityLabel;
-
   titleRow.appendChild(title);
-  titleRow.appendChild(modalityBadge);
   header.appendChild(titleRow);
 
   const subtitle = document.createElement('p');

@@ -1356,17 +1356,25 @@ h1, h2, h3, strong {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 68, 0, 0.1);
-  color: var(--accent);
-  border: 1px solid rgba(255, 68, 0, 0.2);
-  transition: transform 0.2s ease;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 98, 24, 0.22), rgba(243, 65, 66, 0.12));
+  border: 1px solid rgba(255, 140, 80, 0.35);
+  box-shadow: 0 0 16px rgba(255, 98, 24, 0.22);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .modality-pick-card:hover .modality-card-icon {
   transform: scale(1.08);
+  box-shadow: 0 0 22px rgba(255, 98, 24, 0.4);
+}
+
+.modality-card-img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  display: block;
 }
 
 .modality-card-info {

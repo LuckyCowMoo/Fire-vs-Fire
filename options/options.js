@@ -310,6 +310,20 @@ function animateCategoryPanelEntrance() {
   categoryPanelEl.classList.add('category-panel--drop-in');
 }
 
+const CATEGORY_PANEL_MODE = {
+  DETAIL: 'detail',
+  PICK_MODALITY: 'pick_modality',
+  PICK_CLASSIFIER: 'pick_classifier'
+};
+
+let categoryPanelState = {
+  mode: CATEGORY_PANEL_MODE.DETAIL,
+  context: 'edit',
+  draftModality: null,
+  targetEnsembleIndex: null,
+  previousIndex: 0
+};
+
 let availableClassifiers = [];
 let ensembleConfigs = [];
 let runStateTimer = null;
@@ -488,11 +502,18 @@ function updateSliderBackground(slider) {
 }
 
 function getEnsembleAccentColor(ensemble) {
-  if ((ensemble.modality || 'image') === 'image') {
-    return ensemble.styles?.image?.borderColor || '#FF0064';
+  const mod = ensemble.modality || 'image';
+  if (mod === 'image' || mod === 'video') {
+    return ensemble.styles?.image?.borderColor || ensemble.styles?.video?.borderColor || '#FF0064';
   }
-  const text = ensemble.styles?.text || {};
-  return text.strikethroughColor || text.underlineColor || text.highlightColor || '#FF0064';
+  if (mod === 'text') {
+    const text = ensemble.styles?.text || {};
+    return text.strikethroughColor || text.underlineColor || text.highlightColor || '#FF0064';
+  }
+  if (mod === 'audio') {
+    return ensemble.styles?.audio?.badgeColor || '#FF0064';
+  }
+  return '#FF0064';
 }
 
 function createIconModeControl(labelText, value, onChange) {
@@ -735,19 +756,45 @@ function createSwitch(checked, onChange) {
 }
 
 function generateEnsembleId(modality) {
-  const prefix = modality === 'text' ? 'text' : 'image';
+  const prefix = modality || 'cat';
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function formatModalityLabel(modality) {
+  if (!modality) return 'Images';
+  switch (String(modality).toLowerCase()) {
+    case 'image': return 'Images';
+    case 'text': return 'Text';
+    case 'video': return 'Video';
+    case 'audio': return 'Audio';
+    default: return String(modality).charAt(0).toUpperCase() + String(modality).slice(1);
+  }
+}
+
+function getCompatibleClassifiers(modality) {
+  const supported = modality || 'image';
+  return availableClassifiers.filter((model) => {
+    const modalities = Array.isArray(model.modalities)
+      ? model.modalities
+      : (model.modality ? [model.modality] : []);
+    return modalities.length === 0 || modalities.includes(supported);
+  });
 }
 
 function formatClassifierRate(classifierId, modalities) {
   const t = classifierTimings && classifierTimings[classifierId];
   if (!t || !t.avgMs || t.avgMs <= 0) return '—';
   const perSec = 1000 / t.avgMs;
-  const unit = modalities && modalities.includes && modalities.includes('image')
+  const mods = Array.isArray(modalities) ? modalities : (modalities ? [modalities] : []);
+  const unit = mods.includes('image')
     ? 'img/s'
-    : modalities && modalities.includes && modalities.includes('text')
+    : mods.includes('text')
       ? 'txt/s'
-      : '/s';
+      : mods.includes('video')
+        ? 'vid/s'
+        : mods.includes('audio')
+          ? 'aud/s'
+          : '/s';
   return perSec >= 1 ? `${Math.round(perSec)} ${unit}` : `${perSec.toFixed(2)} ${unit}`;
 }
 
@@ -955,7 +1002,7 @@ function renderCategoryStrip(classifierNamesById) {
     const color = getEnsembleAccentColor(ensemble);
     const name = getCategoryDisplayName(ensemble, index, classifierNamesById);
     const isEnabled = ensemble.enabled !== false;
-    const isSelected = index === selectedCategoryIndex;
+    const isSelected = categoryPanelState.mode === CATEGORY_PANEL_MODE.DETAIL && index === selectedCategoryIndex;
 
     // Card Container (Holds Indented Tile & Attached Delete Button Beneath)
     const card = document.createElement('div');
@@ -982,6 +1029,10 @@ function renderCategoryStrip(classifierNamesById) {
     tile.appendChild(statusEl);
 
     tile.addEventListener('click', () => {
+      categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
+      categoryPanelState.context = 'edit';
+      categoryPanelState.draftModality = null;
+      categoryPanelState.targetEnsembleIndex = null;
       selectedCategoryIndex = index;
       renderEnsembles({ scrollStripToSelection: true });
     });
@@ -1069,8 +1120,378 @@ function renderCategoryStrip(classifierNamesById) {
   });
 }
 
+function renderModalityPicker(classifierNamesById) {
+  categoryPanelEl.innerHTML = '';
+
+  const container = document.createElement('div');
+  container.className = 'wizard-container';
+
+  // Top header with Back/Cancel button and step indicator
+  const header = document.createElement('div');
+  header.className = 'wizard-header';
+
+  const topBar = document.createElement('div');
+  topBar.className = 'wizard-top-bar';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'wizard-cancel-btn';
+  cancelBtn.innerHTML = `
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+    <span>Cancel</span>
+  `;
+  cancelBtn.addEventListener('click', () => {
+    categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
+    categoryPanelState.context = 'edit';
+    categoryPanelState.draftModality = null;
+    categoryPanelState.targetEnsembleIndex = null;
+    if (categoryPanelState.previousIndex >= 0 && categoryPanelState.previousIndex < ensembleConfigs.length) {
+      selectedCategoryIndex = categoryPanelState.previousIndex;
+    } else {
+      normalizeSelectedIndex();
+    }
+    renderEnsembles();
+  });
+
+  const stepTag = document.createElement('span');
+  stepTag.className = 'wizard-step-tag';
+  stepTag.textContent = 'Step 1 of 2';
+
+  topBar.appendChild(cancelBtn);
+  topBar.appendChild(stepTag);
+  header.appendChild(topBar);
+
+  const title = document.createElement('h3');
+  title.className = 'wizard-title';
+  title.textContent = 'Choose Category Modality';
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'wizard-subtitle';
+  subtitle.textContent = 'Select what type of content this category will inspect and classify.';
+
+  header.appendChild(title);
+  header.appendChild(subtitle);
+  container.appendChild(header);
+
+  // Modality Grid (2x2)
+  const grid = document.createElement('div');
+  grid.className = 'modality-picker-grid';
+
+  const modalities = [
+    {
+      key: 'image',
+      name: 'Images',
+      desc: 'Detect synthetic photos, digital artwork, and imagery',
+      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`
+    },
+    {
+      key: 'text',
+      name: 'Text',
+      desc: 'Detect AI-generated articles, reviews, and written content',
+      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`
+    },
+    {
+      key: 'video',
+      name: 'Video',
+      desc: 'Detect synthetic video footage, animations, and deepfakes',
+      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`
+    },
+    {
+      key: 'audio',
+      name: 'Audio',
+      desc: 'Detect synthetic voice, speech clones, and generated music',
+      icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`
+    }
+  ];
+
+  modalities.forEach((mod) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'modality-pick-card';
+
+    const count = getCompatibleClassifiers(mod.key).length;
+    const countLabel = count === 1 ? '1 model available' : `${count} models available`;
+
+    card.innerHTML = `
+      <div class="modality-card-icon">${mod.icon}</div>
+      <div class="modality-card-info">
+        <span class="modality-card-title">${mod.name}</span>
+        <span class="modality-card-desc">${mod.desc}</span>
+      </div>
+      <span class="modality-card-count">${countLabel}</span>
+    `;
+
+    card.addEventListener('click', () => {
+      categoryPanelState.draftModality = mod.key;
+      categoryPanelState.mode = CATEGORY_PANEL_MODE.PICK_CLASSIFIER;
+      animateCategoryPanelEntrance();
+      renderCategoryPanel(selectedCategoryIndex, classifierNamesById);
+    });
+
+    grid.appendChild(card);
+  });
+
+  container.appendChild(grid);
+  categoryPanelEl.appendChild(container);
+}
+
+function renderClassifierPicker(classifierNamesById) {
+  categoryPanelEl.innerHTML = '';
+
+  const isCreate = categoryPanelState.context === 'create';
+  const modality = categoryPanelState.draftModality || 'image';
+  const modalityLabel = formatModalityLabel(modality);
+
+  const container = document.createElement('div');
+  container.className = 'wizard-container';
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'wizard-header';
+
+  const topBar = document.createElement('div');
+  topBar.className = 'wizard-top-bar';
+
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'wizard-back-btn';
+
+  if (isCreate) {
+    backBtn.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+      <span>Back to Modalities</span>
+    `;
+    backBtn.addEventListener('click', () => {
+      categoryPanelState.mode = CATEGORY_PANEL_MODE.PICK_MODALITY;
+      animateCategoryPanelEntrance();
+      renderCategoryPanel(selectedCategoryIndex, classifierNamesById);
+    });
+  } else {
+    backBtn.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+      <span>Back to Category</span>
+    `;
+    backBtn.addEventListener('click', () => {
+      categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
+      categoryPanelState.context = 'edit';
+      categoryPanelState.draftModality = null;
+      categoryPanelState.targetEnsembleIndex = null;
+      animateCategoryPanelEntrance();
+      renderCategoryPanel(selectedCategoryIndex, classifierNamesById);
+    });
+  }
+
+  topBar.appendChild(backBtn);
+
+  if (isCreate) {
+    const rightActions = document.createElement('div');
+    rightActions.style.display = 'flex';
+    rightActions.style.alignItems = 'center';
+    rightActions.style.gap = '8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'wizard-cancel-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
+      categoryPanelState.context = 'edit';
+      categoryPanelState.draftModality = null;
+      categoryPanelState.targetEnsembleIndex = null;
+      if (categoryPanelState.previousIndex >= 0 && categoryPanelState.previousIndex < ensembleConfigs.length) {
+        selectedCategoryIndex = categoryPanelState.previousIndex;
+      } else {
+        normalizeSelectedIndex();
+      }
+      renderEnsembles();
+    });
+
+    const stepTag = document.createElement('span');
+    stepTag.className = 'wizard-step-tag';
+    stepTag.textContent = 'Step 2 of 2';
+
+    rightActions.appendChild(cancelBtn);
+    rightActions.appendChild(stepTag);
+    topBar.appendChild(rightActions);
+  }
+
+  header.appendChild(topBar);
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'wizard-title-row';
+
+  const title = document.createElement('h3');
+  title.className = 'wizard-title';
+
+  const targetEnsemble = !isCreate && categoryPanelState.targetEnsembleIndex != null
+    ? ensembleConfigs[categoryPanelState.targetEnsembleIndex]
+    : null;
+  const targetName = targetEnsemble
+    ? getCategoryDisplayName(targetEnsemble, categoryPanelState.targetEnsembleIndex, classifierNamesById)
+    : '';
+
+  title.textContent = isCreate
+    ? 'Select Initial Classifier'
+    : `Add Classifier to ${targetName}`;
+
+  const modalityBadge = document.createElement('span');
+  modalityBadge.className = 'category-modality-badge';
+  modalityBadge.textContent = modalityLabel;
+
+  titleRow.appendChild(title);
+  titleRow.appendChild(modalityBadge);
+  header.appendChild(titleRow);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'wizard-subtitle';
+  subtitle.textContent = isCreate
+    ? `Pick the primary classifier model for your ${modalityLabel.toLowerCase()} category.`
+    : `Choose a compatible ${modalityLabel.toLowerCase()} model to add to this ensemble category.`;
+  header.appendChild(subtitle);
+
+  container.appendChild(header);
+
+  // List of classifiers
+  const list = document.createElement('div');
+  list.className = 'classifier-picker-list';
+
+  const compatible = getCompatibleClassifiers(modality);
+  const activeClassifierIds = targetEnsemble && Array.isArray(targetEnsemble.classifiers)
+    ? targetEnsemble.classifiers
+    : [];
+
+  if (compatible.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'classifier-picker-empty';
+    empty.innerHTML = `
+      <div class="picker-empty-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </div>
+      <h4>No ${modalityLabel} Classifiers Installed</h4>
+      <p>Download ${modalityLabel.toLowerCase()} classifiers from the Classifiers page to create and run categories for this media type.</p>
+    `;
+
+    const openHubBtn = document.createElement('button');
+    openHubBtn.type = 'button';
+    openHubBtn.className = 'btn btn-outline';
+    openHubBtn.textContent = 'Download Classifiers';
+    openHubBtn.addEventListener('click', () => {
+      const msgType = isHostConnected ? 'OPEN_MODELS_HUB' : 'OPEN_ONBOARDING';
+      ext.runtime.sendMessage({ type: msgType }).catch(() => {});
+    });
+
+    empty.appendChild(openHubBtn);
+    list.appendChild(empty);
+  } else {
+    compatible.forEach((model) => {
+      const isAlreadyActive = !isCreate && activeClassifierIds.includes(model.id);
+
+      const card = document.createElement('div');
+      card.className = `classifier-pick-card ${isAlreadyActive ? 'is-active' : ''}`;
+
+      const main = document.createElement('div');
+      main.className = 'classifier-pick-card-main';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'classifier-pick-name';
+      nameEl.textContent = model.name || model.id;
+
+      const meta = document.createElement('div');
+      meta.className = 'classifier-pick-meta';
+
+      const rateEl = document.createElement('span');
+      rateEl.className = 'classifier-rate';
+      rateEl.textContent = formatClassifierRate(model.id, model.modalities || (model.modality ? [model.modality] : []));
+
+      meta.appendChild(rateEl);
+      if (model.description) {
+        const descEl = document.createElement('span');
+        descEl.className = 'classifier-rate';
+        descEl.textContent = `• ${model.description}`;
+        meta.appendChild(descEl);
+      }
+
+      main.appendChild(nameEl);
+      main.appendChild(meta);
+      card.appendChild(main);
+
+      const selectBtn = document.createElement('button');
+      selectBtn.type = 'button';
+      selectBtn.className = `btn-pick-classifier ${isAlreadyActive ? 'is-active' : ''}`;
+      selectBtn.disabled = isAlreadyActive;
+      selectBtn.textContent = isAlreadyActive
+        ? 'Active ✓'
+        : (isCreate ? 'Select Classifier' : '+ Add Classifier');
+
+      const handleSelect = async () => {
+        if (isAlreadyActive) return;
+
+        if (isCreate) {
+          const newEnsemble = createNewEnsemble(modality);
+          newEnsemble.classifiers = [model.id];
+          newEnsemble.name = model.name || model.id;
+          ensembleConfigs.push(newEnsemble);
+          selectedCategoryIndex = ensembleConfigs.length - 1;
+          await saveEnsembles();
+          categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
+          categoryPanelState.context = 'edit';
+          categoryPanelState.draftModality = null;
+          categoryPanelState.targetEnsembleIndex = null;
+          renderEnsembles({ scrollStripToSelection: true });
+        } else if (targetEnsemble) {
+          const nextClassifiers = [...activeClassifierIds, model.id];
+          updateEnsembleClassifiers(targetEnsemble, nextClassifiers);
+          await saveEnsembles();
+          categoryPanelState.mode = CATEGORY_PANEL_MODE.DETAIL;
+          categoryPanelState.context = 'edit';
+          categoryPanelState.draftModality = null;
+          categoryPanelState.targetEnsembleIndex = null;
+          renderEnsembles();
+        }
+      };
+
+      selectBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleSelect();
+      });
+
+      if (!isAlreadyActive) {
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', handleSelect);
+      }
+
+      card.appendChild(selectBtn);
+      list.appendChild(card);
+    });
+  }
+
+  container.appendChild(list);
+  categoryPanelEl.appendChild(container);
+}
+
 function renderCategoryPanel(index, classifierNamesById) {
   if (!categoryPanelEl) return;
+
+  if (categoryPanelState.mode === CATEGORY_PANEL_MODE.PICK_MODALITY) {
+    renderModalityPicker(classifierNamesById);
+    return;
+  }
+
+  if (categoryPanelState.mode === CATEGORY_PANEL_MODE.PICK_CLASSIFIER) {
+    renderClassifierPicker(classifierNamesById);
+    return;
+  }
 
   const ensemble = ensembleConfigs[index];
   if (!ensemble) {
@@ -1089,7 +1510,7 @@ function renderCategoryPanel(index, classifierNamesById) {
   const selectedClassifiers = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
   const categoryLabel = getCategoryLabelForSelection(selectedClassifiers, classifierNamesById, index);
 
-  if (selectedClassifiers.length >= 2) {
+  if (selectedClassifiers.length !== 1) {
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.className = 'input-text';
@@ -1112,21 +1533,11 @@ function renderCategoryPanel(index, classifierNamesById) {
     header.appendChild(nameSpan);
   }
 
-  const modalitySelect = document.createElement('select');
-  modalitySelect.className = 'select-styled';
-  ['image', 'text'].forEach((mod) => {
-    const opt = document.createElement('option');
-    opt.value = mod;
-    opt.textContent = mod === 'image' ? 'Images' : 'Text';
-    modalitySelect.appendChild(opt);
-  });
-  modalitySelect.value = ensemble.modality || 'image';
-  modalitySelect.addEventListener('change', () => {
-    ensemble.modality = modalitySelect.value;
-    renderEnsembles();
-    saveEnsembles();
-  });
-  header.appendChild(modalitySelect);
+  // Modality display badge (display only, not dropdown)
+  const modalityBadge = document.createElement('span');
+  modalityBadge.className = 'category-modality-badge';
+  modalityBadge.textContent = formatModalityLabel(ensemble.modality);
+  header.appendChild(modalityBadge);
 
   const enabledWrap = document.createElement('div');
   enabledWrap.className = 'toggle-row';
@@ -1173,66 +1584,109 @@ function renderCategoryPanel(index, classifierNamesById) {
   thresholdBlock.appendChild(thresholdInput);
   categoryPanelEl.appendChild(thresholdBlock);
 
+  // Active Classifiers section
+  const classifiersLabelRow = document.createElement('div');
+  classifiersLabelRow.style.display = 'flex';
+  classifiersLabelRow.style.alignItems = 'center';
+  classifiersLabelRow.style.justifyContent = 'space-between';
+  classifiersLabelRow.style.marginBottom = '6px';
+
   const classifiersLabel = document.createElement('div');
   classifiersLabel.className = 'section-label';
+  classifiersLabel.style.margin = '0';
   classifiersLabel.textContent = 'Classifiers';
-  categoryPanelEl.appendChild(classifiersLabel);
 
-  const supported = ensemble.modality || 'image';
-  const compatible = availableClassifiers.filter((model) => {
-    const modalities = model.modalities || [];
-    return modalities.length === 0 || modalities.includes(supported);
-  });
+  const currentSelected = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
+  const countTag = document.createElement('span');
+  countTag.className = 'classifier-rate';
+  countTag.textContent = `${currentSelected.length} active`;
 
-  const toggleList = document.createElement('div');
-  toggleList.className = 'classifier-toggles';
+  classifiersLabelRow.appendChild(classifiersLabel);
+  classifiersLabelRow.appendChild(countTag);
+  categoryPanelEl.appendChild(classifiersLabelRow);
 
-  if (!compatible.length) {
+  const activeList = document.createElement('div');
+  activeList.className = 'active-classifier-list';
+
+  if (!currentSelected.length) {
     const empty = document.createElement('div');
-    empty.className = 'classifier-empty';
-    empty.textContent = 'No compatible classifiers — try Refresh classifiers';
-    toggleList.appendChild(empty);
+    empty.className = 'active-classifier-empty';
+    empty.textContent = 'No active classifiers in this category. Add at least one classifier to enable scanning.';
+    activeList.appendChild(empty);
   } else {
-    compatible.forEach((model) => {
+    currentSelected.forEach((classifierId) => {
+      const model = availableClassifiers.find((m) => m.id === classifierId) || { id: classifierId, name: classifierNamesById?.get(classifierId) || classifierId };
+
       const row = document.createElement('div');
-      row.className = 'classifier-toggle-row';
-      row.dataset.classifierId = model.id;
+      row.className = 'active-classifier-row';
+      row.dataset.classifierId = classifierId;
 
       const info = document.createElement('div');
       info.className = 'classifier-toggle-info';
 
       const nameEl = document.createElement('span');
       nameEl.className = 'classifier-toggle-name';
-      nameEl.textContent = model.name || model.id;
+      nameEl.textContent = model.name || model.id || classifierId;
 
       const rateEl = document.createElement('span');
       rateEl.className = 'classifier-rate';
-      rateEl.textContent = formatClassifierRate(model.id, model.modalities || []);
+      rateEl.textContent = formatClassifierRate(classifierId, model.modalities || (model.modality ? [model.modality] : []));
 
       info.appendChild(nameEl);
       info.appendChild(rateEl);
 
-      const isSelected =
-        Array.isArray(ensemble.classifiers) && ensemble.classifiers.includes(model.id);
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'classifier-remove-btn';
+      removeBtn.setAttribute('aria-label', `Remove classifier ${nameEl.textContent}`);
+      removeBtn.innerHTML = `
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+        <span>Remove</span>
+      `;
 
-      const toggle = createSwitch(isSelected, (checked) => {
-        const currentClassifiers = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
-        const nextClassifiers = currentClassifiers.filter((id) => id !== model.id);
-        if (checked) nextClassifiers.push(model.id);
+      removeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const nextClassifiers = (ensemble.classifiers || []).filter((id) => id !== classifierId);
         updateEnsembleClassifiers(ensemble, nextClassifiers);
+        await saveEnsembles();
         renderEnsembles();
-        saveEnsembles();
       });
 
       row.appendChild(info);
-      row.appendChild(toggle);
-      toggleList.appendChild(row);
+      row.appendChild(removeBtn);
+      activeList.appendChild(row);
     });
   }
 
-  categoryPanelEl.appendChild(toggleList);
+  categoryPanelEl.appendChild(activeList);
 
-  const currentSelected = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
+  const addClassifierBtn = document.createElement('button');
+  addClassifierBtn.type = 'button';
+  addClassifierBtn.className = 'btn-add-classifier';
+  addClassifierBtn.id = 'btn-add-ensemble-classifier';
+  addClassifierBtn.innerHTML = `
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"></line>
+      <line x1="5" y1="12" x2="19" y2="12"></line>
+    </svg>
+    <span>+ Add Classifier</span>
+  `;
+  addClassifierBtn.addEventListener('click', () => {
+    categoryPanelState = {
+      mode: CATEGORY_PANEL_MODE.PICK_CLASSIFIER,
+      context: 'add_classifier',
+      draftModality: ensemble.modality || 'image',
+      targetEnsembleIndex: index,
+      previousIndex: index
+    };
+    animateCategoryPanelEntrance();
+    renderCategoryPanel(index, classifierNamesById);
+  });
+  categoryPanelEl.appendChild(addClassifierBtn);
+
   if (currentSelected.length > 1) {
     categoryPanelEl.appendChild(renderWeightsEditor(ensemble, currentSelected, classifierNamesById));
   }
@@ -1454,24 +1908,29 @@ function renderEnsembles(options = {}) {
   normalizeSelectedIndex();
 
   const hasCategories = ensembleConfigs.length > 0;
+  const isWizardMode = categoryPanelState.mode !== CATEGORY_PANEL_MODE.DETAIL;
 
   if (categoryStripWrapEl) {
     categoryStripWrapEl.hidden = !hasCategories;
   }
   if (categoryPanelEl) {
-    categoryPanelEl.hidden = !hasCategories;
+    categoryPanelEl.hidden = !hasCategories && !isWizardMode;
   }
 
   if (hasCategories) {
     renderCategoryStrip(classifierNamesById);
+  } else if (categoryStripEl) {
+    categoryStripEl.innerHTML = '';
+  }
+
+  if (hasCategories || isWizardMode) {
     renderCategoryPanel(selectedCategoryIndex, classifierNamesById);
 
-    if (scrollStripToSelection) {
+    if (scrollStripToSelection && hasCategories) {
       scrollCategoryStripToSelected();
       animateCategoryPanelEntrance();
     }
-  } else if (categoryStripEl) {
-    categoryStripEl.innerHTML = '';
+  } else if (categoryPanelEl) {
     categoryPanelEl.innerHTML = '';
   }
 
@@ -1502,6 +1961,48 @@ function createNewEnsemble(modality = 'image') {
           blurMode: 'hover',
           borderMode: 'off',
           badgeMode: 'always'
+        }
+      }
+    };
+  }
+
+  if (modality === 'video') {
+    return {
+      id,
+      modality,
+      enabled: true,
+      threshold: 0.75,
+      classifiers: [],
+      weights: null,
+      styles: {
+        video: {
+          applyBlur: true,
+          blurAmount: 3,
+          applyBorder: false,
+          borderMultiplier: 1,
+          borderColor: '#7C4DFF',
+          applyBadge: true,
+          blurMode: 'hover',
+          borderMode: 'off',
+          badgeMode: 'always'
+        }
+      }
+    };
+  }
+
+  if (modality === 'audio') {
+    return {
+      id,
+      modality,
+      enabled: true,
+      threshold: 0.75,
+      classifiers: [],
+      weights: null,
+      styles: {
+        audio: {
+          applyBadge: true,
+          badgeMode: 'always',
+          badgeColor: '#7C4DFF'
         }
       }
     };
@@ -1766,11 +2267,21 @@ window.addEventListener('beforeunload', () => {
 });
 
 if (addEnsembleBtn) {
-  addEnsembleBtn.addEventListener('click', async () => {
-    ensembleConfigs.push(createNewEnsemble('image'));
-    selectedCategoryIndex = ensembleConfigs.length - 1;
-    renderEnsembles({ scrollStripToSelection: true });
-    await saveEnsembles();
+  addEnsembleBtn.addEventListener('click', () => {
+    categoryPanelState = {
+      mode: CATEGORY_PANEL_MODE.PICK_MODALITY,
+      context: 'create',
+      draftModality: null,
+      targetEnsembleIndex: null,
+      previousIndex: selectedCategoryIndex
+    };
+    if (categoryPanelEl) {
+      categoryPanelEl.hidden = false;
+    }
+    renderEnsembles();
+    if (categoryPanelEl) {
+      categoryPanelEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   });
 }
 

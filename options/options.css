@@ -1120,6 +1120,408 @@ h1, h2, h3, strong {
   border-radius: var(--radius-sm);
 }
 
+/* ── Category Modality Badge (Static Display in Detail Mode) ── */
+.category-modality-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid rgba(255, 68, 0, 0.28);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+/* ── Active Classifiers List & Remove Button (Detail Mode) ──── */
+.active-classifier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.active-classifier-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.active-classifier-row:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.classifier-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 75, 75, 0.08);
+  border: 1px solid rgba(255, 75, 75, 0.22);
+  color: #ff6b6b;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.classifier-remove-btn:hover {
+  background: rgba(255, 75, 75, 0.18);
+  border-color: rgba(255, 75, 75, 0.6);
+  color: #ff9999;
+  transform: translateY(-1px);
+}
+
+.active-classifier-empty {
+  padding: 14px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+
+.btn-add-classifier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 68, 0, 0.07);
+  border: 1px dashed rgba(255, 68, 0, 0.35);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 12px;
+}
+
+.btn-add-classifier:hover {
+  background: rgba(255, 68, 0, 0.14);
+  border-color: var(--accent);
+  border-style: solid;
+  transform: translateY(-1px);
+}
+
+/* ── Category Wizard (Modality & Classifier Picker Modes) ────── */
+.wizard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.wizard-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wizard-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.wizard-back-btn,
+.wizard-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wizard-back-btn:hover,
+.wizard-cancel-btn:hover {
+  background: var(--surface);
+  border-color: rgba(255, 68, 0, 0.4);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.wizard-step-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.wizard-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wizard-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.wizard-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* Modality Picker Grid (2x2) */
+.modality-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 4px;
+}
+
+@media (max-width: 480px) {
+  .modality-picker-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.modality-pick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 8px;
+  padding: 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.modality-pick-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(255, 68, 0, 0.12), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.modality-pick-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 68, 0, 0.5);
+  box-shadow: 0 6px 18px rgba(255, 68, 0, 0.12);
+}
+
+.modality-pick-card:hover::before {
+  opacity: 1;
+}
+
+.modality-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 68, 0, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(255, 68, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.modality-pick-card:hover .modality-card-icon {
+  transform: scale(1.08);
+}
+
+.modality-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.modality-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.modality-card-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.modality-card-count {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  margin-top: 4px;
+}
+
+/* Classifier Picker Mode */
+.classifier-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.classifier-pick-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.classifier-pick-card:hover:not(.is-active) {
+  border-color: rgba(255, 68, 0, 0.45);
+  background: var(--surface);
+}
+
+.classifier-pick-card.is-active {
+  opacity: 0.75;
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.classifier-pick-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.classifier-pick-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.classifier-pick-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-pick-classifier {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.btn-pick-classifier:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(255, 68, 0, 0.35);
+}
+
+.btn-pick-classifier:disabled,
+.btn-pick-classifier.is-active {
+  background: var(--input-bg);
+  border-color: var(--border);
+  color: var(--text-muted);
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.classifier-picker-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 28px 20px;
+  background: var(--input-bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  gap: 10px;
+}
+
+.picker-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.classifier-picker-empty h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.classifier-picker-empty p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+  line-height: 1.4;
+}
+
 .style-row {
   display: grid;
   grid-template-columns: 1fr;

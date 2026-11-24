@@ -1,7 +1,7 @@
 (function initShowcase() {
   'use strict';
 
-  const TOTAL_SLIDES = 9;
+  const TOTAL_SLIDES = 10;
   const SLIDE_W = 1920;
   const SLIDE_H = 1080;
 
@@ -12,9 +12,6 @@
 
   const scroller = document.getElementById('viewport-scroller');
   const track = document.getElementById('panorama-track');
-  const hudButtons = Array.from(document.querySelectorAll('.hud-step-btn'));
-  const prevBtn = document.getElementById('hud-prev');
-  const nextBtn = document.getElementById('hud-next');
 
   let currentScale = 1;
 
@@ -62,23 +59,26 @@
       left: (clamped - 1) * SLIDE_W * scale,
       behavior: 'smooth'
     });
-    updateHud(clamped);
-  }
-
-  function updateHud(activeNum) {
-    hudButtons.forEach((btn) => {
-      const s = Number(btn.dataset.slide);
-      btn.classList.toggle('active', s === activeNum);
-    });
   }
 
   function bindNavigation() {
     if (isExport || !scroller) return;
 
-    // Translate vertical mouse wheel into smooth horizontal panning
+    // Translate vertical mouse wheel into smooth horizontal panning unless hovering an inner scrollable list
     scroller.addEventListener(
       'wheel',
       (e) => {
+        const innerScroll = e.target.closest('.grab-scroll-list');
+        if (innerScroll && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+          const atTop = innerScroll.scrollTop <= 0 && e.deltaY < 0;
+          const atBottom =
+            innerScroll.scrollTop + innerScroll.clientHeight >= innerScroll.scrollHeight - 1 &&
+            e.deltaY > 0;
+          if (!atTop && !atBottom) {
+            return; // Let the native vertical scrollbar inside the extracted list handle it
+          }
+        }
+
         if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
           e.preventDefault();
           scroller.scrollLeft += e.deltaY * 1.15;
@@ -86,32 +86,6 @@
       },
       { passive: false }
     );
-
-    scroller.addEventListener(
-      'scroll',
-      () => {
-        updateHud(getActiveSlideIndex());
-      },
-      { passive: true }
-    );
-
-    hudButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        scrollToSlide(Number(btn.dataset.slide));
-      });
-    });
-
-    if (prevBtn) {
-      prevBtn.addEventListener('click', () => {
-        scrollToSlide(getActiveSlideIndex() - 1);
-      });
-    }
-
-    if (nextBtn) {
-      nextBtn.addEventListener('click', () => {
-        scrollToSlide(getActiveSlideIndex() + 1);
-      });
-    }
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowRight') {
@@ -128,7 +102,6 @@
     if (initialSlide >= 1 && initialSlide <= TOTAL_SLIDES) {
       const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--slide-scale')) || 1;
       scroller.scrollLeft = (initialSlide - 1) * SLIDE_W * scale;
-      updateHud(initialSlide);
     }
   }
 

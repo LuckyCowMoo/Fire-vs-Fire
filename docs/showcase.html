@@ -11,34 +11,10 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Roboto:wght@100;300;400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./showcase.css?v=1.0" />
+    <link rel="stylesheet" href="./showcase.css?v=1.2" />
   </head>
   <body>
     <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
-
-    <!-- Floating Horizontal Navigation HUD (Hidden in ?export=1 Screenshot Mode) -->
-    <nav class="floating-hud" aria-label="Slide Navigation">
-      <div class="hud-brand">
-        <img src="./assets/icon.svg" alt="" />
-        <span>Fire vs Fire</span>
-      </div>
-      <div class="hud-dots" id="hud-dots">
-        <button type="button" class="hud-step-btn active" data-slide="1">01 Hero</button>
-        <button type="button" class="hud-step-btn" data-slide="2">02 Feed</button>
-        <button type="button" class="hud-step-btn" data-slide="3">03 Grab</button>
-        <button type="button" class="hud-step-btn" data-slide="4">04 Queue</button>
-        <button type="button" class="hud-step-btn" data-slide="5">05 Heimdall I</button>
-        <button type="button" class="hud-step-btn" data-slide="6">06 Heimdall II</button>
-        <button type="button" class="hud-step-btn" data-slide="7">07 Mímir I</button>
-        <button type="button" class="hud-step-btn" data-slide="8">08 Mímir II</button>
-        <button type="button" class="hud-step-btn" data-slide="9">09 Result</button>
-      </div>
-      <div class="hud-actions">
-        <button type="button" class="hud-arrow-btn" id="hud-prev" title="Previous Slide (Left Arrow)">←</button>
-        <button type="button" class="hud-arrow-btn" id="hud-next" title="Next Slide (Right Arrow)">→</button>
-        <a href="./index.html" class="hud-link-btn" title="Setup &amp; Classifiers">Setup ↗</a>
-      </div>
-    </nav>
 
     <div class="viewport-scroller" id="viewport-scroller">
       <div class="panorama-sizer" id="panorama-sizer">
@@ -60,37 +36,35 @@
                 </div>
 
                 <p class="hero-lead">
-                  Automatically detect <strong>AI-generated images</strong> and <strong>AI-written text</strong> as you browse — running 100% locally on your own hardware.
+                  Automatically detect <strong>AI-generated content</strong> and <strong>unwanted media</strong> as you browse — running 100% locally on your own hardware.
                 </p>
 
                 <div class="hero-pillars">
                   <div class="fvf-panel-ember pillar-card">
-                    <div class="pillar-index">01</div>
-                    <div>
-                      <div class="pillar-title">On-Device Native Inference — Zero Telemetry</div>
-                      <div class="pillar-desc">
-                        Executes directly on your GPU, NPU, or CPU via CUDA, DirectML, Apple MPS, and INT8 ONNX. No browsing data or images ever leave your computer.
-                      </div>
+                    <div class="pillar-title">On-Device Hardware Inference — Zero Telemetry</div>
+                    <div class="pillar-desc">
+                      Runs directly on your own hardware for fast, private classification. No browsing data or media ever leaves your computer.
                     </div>
                   </div>
 
                   <div class="fvf-panel pillar-card">
-                    <div class="pillar-index">02</div>
-                    <div>
-                      <div class="pillar-title">Multi-Modal Forensics: Heimdall 04 B &amp; Mímir 02 B</div>
-                      <div class="pillar-desc">
-                        Combines 24-channel spatial/FFT image forensics with dual-ONNX perplexity curvature and stylometric text analysis, calibrated against false positives.
-                      </div>
+                    <div class="pillar-title">Customizable Multi-Modal Detection</div>
+                    <div class="pillar-desc">
+                      In-house classification pipelines provided — 24ch Heimdall 04 B for images and Mímir 02 B for text.
                     </div>
                   </div>
 
                   <div class="fvf-panel pillar-card">
-                    <div class="pillar-index">03</div>
-                    <div>
-                      <div class="pillar-title">Real-Time Hover Priority &amp; Custom Overlays</div>
-                      <div class="pillar-desc">
-                        Prioritizes whatever is under your cursor first, flags detections with blur, borders, badges, or strikethrough, and reveals cleanly on hover.
-                      </div>
+                    <div class="pillar-title">Real-Time, Dynamic, Hands-Free Classification</div>
+                    <div class="pillar-desc">
+                      Automatically detects and scans all content, requiring no user input.
+                    </div>
+                  </div>
+
+                  <div class="fvf-panel pillar-card">
+                    <div class="pillar-title">Configurable In-Page Overlays</div>
+                    <div class="pillar-desc">
+                      Automatically apply customizable effects to detected content.
                     </div>
                   </div>
                 </div>
@@ -180,9 +154,21 @@
                SLIDE 2: UNFILTERED COMMUNITY FEED (feed.html)
                ================================================================ -->
           <section class="slide-frame slide-feed-frame" id="slide-2" data-slide="2">
-            <div class="seam-conduit in-from-left" style="top: 540px; width: 40px;">
+            <div class="seam-conduit in-from-left" style="top: 540px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span>Universal DOM Integration</span>
+                </div>
+                <h2 class="slide-title">Works in Every Interface</h2>
+              </div>
+              <p class="slide-subtitle">
+                Operates transparently across live feeds, galleries, and articles without disrupting layouts.
+              </p>
+            </header>
 
             <div class="embedded-feed-window">
               <aside class="ef-nav-rail">
@@ -391,7 +377,7 @@
             </div>
 
             <!-- Right Seam Conduit -> Slide 3 -->
-            <div class="seam-conduit out-to-right" style="top: 540px; width: 40px;">
+            <div class="seam-conduit out-to-right" style="top: 540px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
@@ -409,13 +395,12 @@
             <header class="slide-header">
               <div>
                 <div class="slide-kicker">
-                  <span class="slide-kicker-num">STEP 01</span>
                   <span>DOM Interception &amp; Content Filtering</span>
                 </div>
                 <h2 class="slide-title">Grab All Content</h2>
               </div>
               <p class="slide-subtitle">
-                Watches live page mutations to collect eligible images and text blocks while skipping small UI icons (&lt; 80px) and short labels (&lt; 250 chars).
+                Watches live page mutations to collect eligible content.
               </p>
             </header>
 
@@ -424,15 +409,14 @@
               <div class="fvf-panel grab-column">
                 <div class="col-header">
                   <h3 class="col-title">Images Extracted</h3>
-                  <span class="mono-tag ember">6 candidates • ≥ 80×80px</span>
+                  <span class="mono-tag ember">6 candidates</span>
                 </div>
 
-                <div class="grab-images-stack">
+                <div class="grab-images-stack grab-scroll-list">
                   <div class="grab-img-row primary">
                     <img src="./assets/balenciaga-pope.jpg" alt="" class="grab-thumb pope" />
                     <div class="grab-img-meta">
                       <div class="grab-meta-title">balenciaga-pope.jpg</div>
-                      <div class="grab-meta-alt">alt: "Pope Francis in an oversized white Balenciaga style designer puffer jacket..."</div>
                       <div><span class="mono-tag ember">700 × 858 px</span></div>
                     </div>
                   </div>
@@ -441,7 +425,6 @@
                     <img src="./assets/polar-bear-nima-sarikhani.jpg" alt="" class="grab-thumb" />
                     <div class="grab-img-meta">
                       <div class="grab-meta-title">polar-bear-nima-sarikhani.jpg</div>
-                      <div class="grab-meta-alt">alt: "Young polar bear sleeping peacefully atop a carved iceberg in Svalbard"</div>
                       <div><span class="mono-tag">976 × 651 px</span></div>
                     </div>
                   </div>
@@ -450,7 +433,6 @@
                     <img src="./assets/turtle-tzahi-finkelstein.jpg" alt="" class="grab-thumb" />
                     <div class="grab-img-meta">
                       <div class="grab-meta-title">turtle-tzahi-finkelstein.jpg</div>
-                      <div class="grab-meta-alt">alt: "Balkan pond turtle emerging from pond water as a dragonfly rests on its nose"</div>
                       <div><span class="mono-tag">976 × 651 px</span></div>
                     </div>
                   </div>
@@ -459,15 +441,29 @@
                     <img src="./assets/football-team-celebration.jpg" alt="" class="grab-thumb" />
                     <div class="grab-img-meta">
                       <div class="grab-meta-title">football-team-celebration.jpg</div>
-                      <div class="grab-meta-alt">alt: "Championship football team celebrating victory surrounded by golden confetti"</div>
                       <div><span class="mono-tag">1280 × 823 px</span></div>
+                    </div>
+                  </div>
+
+                  <div class="grab-img-row">
+                    <img src="./assets/sagrada-familia-finished.jpg" alt="" class="grab-thumb" />
+                    <div class="grab-img-meta">
+                      <div class="grab-meta-title">sagrada-familia-finished.jpg</div>
+                      <div><span class="mono-tag">1024 × 1024 px</span></div>
+                    </div>
+                  </div>
+
+                  <div class="grab-img-row">
+                    <img src="./assets/theatre-dopera-spatial.jpg" alt="" class="grab-thumb" />
+                    <div class="grab-img-meta">
+                      <div class="grab-meta-title">theatre-dopera-spatial.jpg</div>
+                      <div><span class="mono-tag">1024 × 682 px</span></div>
                     </div>
                   </div>
                 </div>
 
                 <div class="filter-footer-bar">
                   <span>SKIPPED: 7 avatars (38px), 24 SVG UI icons</span>
-                  <span>FILTER: altTextOnly = true</span>
                 </div>
               </div>
 
@@ -475,14 +471,14 @@
               <div class="fvf-panel grab-column">
                 <div class="col-header">
                   <h3 class="col-title">Text Segments Extracted</h3>
-                  <span class="mono-tag ember">6 blocks • ≥ 250 chars</span>
+                  <span class="mono-tag ember">6 blocks</span>
                 </div>
 
-                <div class="grab-text-list">
+                <div class="grab-text-list grab-scroll-list">
                   <div class="grab-text-card highlight">
                     <div class="grab-text-top">
                       <span class="grab-author">@pitchside_hq — Post Caption</span>
-                      <span class="mono-tag ember">321 chars</span>
+                      <span class="mono-tag ember">327 chars</span>
                     </div>
                     <p class="grab-quote">
                       "Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline, and relentless determination boiling down to this iconic moment of glory. Absolute football history! ⚽🔥 #Football #Champions #WorldCup #Victory #Trophy"
@@ -505,20 +501,49 @@
                       <span class="mono-tag">381 chars</span>
                     </div>
                     <p class="grab-quote">
-                      "Still completely mesmerized by Nima Sarikhani’s award-winning photograph 'Ice Bed'. Captured in the Svalbard archipelago after three days searching through thick fog, he watched this young polar bear carve out a resting spot on a small iceberg and drift off to sleep..."
+                      "Still completely mesmerized by Nima Sarikhani’s award-winning photograph 'Ice Bed'. Captured in the Svalbard archipelago after three days searching through thick fog, he watched this young polar bear carve out a resting spot on a small iceberg and drift off to sleep. An unforgettable, poignant glimpse of Arctic wildlife. ❄️🐻‍❄️📸 #WildlifePhotography #WPY #PolarBear #Conservation"
+                    </p>
+                  </div>
+
+                  <div class="grab-text-card">
+                    <div class="grab-text-top">
+                      <span class="grab-author">@digital_curator — Post Caption</span>
+                      <span class="mono-tag">442 chars</span>
+                    </div>
+                    <p class="grab-quote">
+                      "Revisiting the watershed moment for generative AI: Jason M. Allen's 'Théâtre D’opéra Spatial'. Generated using Midjourney v3 and upscaled with Gigapixel AI, this piece shocked the art world when it took 1st place in the digital arts category at the 2022 Colorado State Fair. 🎨🤖✨ #Midjourney #TheatreDopera #DigitalSynthesis"
+                    </p>
+                  </div>
+
+                  <div class="grab-text-card">
+                    <div class="grab-text-top">
+                      <span class="grab-author">@arch_wonders — Post Caption</span>
+                      <span class="mono-tag">357 chars</span>
+                    </div>
+                    <p class="grab-quote">
+                      "Over 140 years in the making! 🏗️✨ Breathtaking golden hour view of Antoni Gaudí’s masterwork, the Basílica de la Sagrada Família, with the central spires and the Tower of Jesus Christ nearing final completion across Barcelona's skyline. 🏛️🇪🇸 #SagradaFamilia #Barcelona #Masterpiece"
+                    </p>
+                  </div>
+
+                  <div class="grab-text-card">
+                    <div class="grab-text-top">
+                      <span class="grab-author">@macro_chronicles — Post Caption</span>
+                      <span class="mono-tag">361 chars</span>
+                    </div>
+                    <p class="grab-quote">
+                      "Timing is everything in nature photography! 📸 Israeli photographer Tzahi Finkelstein was watching birds in the Jezreel Valley when he spotted this Balkan pond turtle swimming. Out of nowhere, a dragonfly landed right on its nose, and the turtle looked utterly amazed. 🐢🪰✨ #WildlifePhotography #MacroNature #NatureLovers"
                     </p>
                   </div>
                 </div>
 
                 <div class="filter-footer-bar">
                   <span>SKIPPED: nav labels, timestamps, view counters</span>
-                  <span>MIN LENGTH: 250 chars</span>
                 </div>
               </div>
             </div>
 
             <!-- Right Seam Conduit -> Slide 4 Queue Rail -->
-            <div class="seam-conduit out-to-right" style="top: 760px; width: 72px;">
+            <div class="seam-conduit out-to-right" style="top: 760px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-label" style="right: 12px; left: auto;">Stream</span>
               <span class="seam-chevron" style="right: 8px;">›</span>
@@ -529,58 +554,82 @@
                SLIDE 4: PRIORITISE CONTENT + NATIVE HOST SEAM DOCK
                ================================================================ -->
           <section class="slide-frame" id="slide-4" data-slide="4">
-            <div class="seam-conduit in-from-left" style="top: 760px; width: 72px;">
+            <div class="seam-conduit in-from-left" style="top: 760px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
 
             <header class="slide-header">
               <div>
                 <div class="slide-kicker">
-                  <span class="slide-kicker-num">STEP 02</span>
                   <span>Dynamic Prioritization &amp; Native IPC</span>
                 </div>
                 <h2 class="slide-title">Prioritise Content</h2>
               </div>
-              <p class="slide-subtitle">
-                Items don't wait behind static batches. Whatever sits under your mouse cursor jumps straight to the front of the local inference pipe.
-              </p>
             </header>
 
             <div class="priority-layout">
               <div class="priority-left">
-                <!-- Priority Tiers Schedule -->
-                <div class="fvf-panel priority-tiers-panel">
-                  <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <span style="font-size: 18px; font-weight: 400; color: #ffffff;">4-Tier Live Scheduling</span>
-                    <span class="mono-tag ember">120ms hover dwell boost • In-RAM LRU cache</span>
+                <!-- Top Row: Live Dynamic Prioritisation List + Negative-Space Architecture Notes -->
+                <div class="priority-top-row">
+                  <div class="fvf-panel priority-tiers-panel">
+                    <div style="font-size: 18px; font-weight: 400; color: #ffffff;">Live Dynamic Prioritisation</div>
+                    <div class="priority-tiers-list">
+                      <div class="tier-row p0">
+                        <span class="tier-badge p0">Priority 0</span>
+                        <div>
+                          <div class="tier-title">Content currently under mouse</div>
+                          <div class="tier-desc">Pre-empts the active queue immediately on hover</div>
+                        </div>
+                      </div>
+                      <div class="tier-row p1">
+                        <span class="tier-badge p1">Priority 1</span>
+                        <div>
+                          <div class="tier-title">Content currently on screen</div>
+                          <div class="tier-desc">Visible viewport items tracked automatically as you scroll</div>
+                        </div>
+                      </div>
+                      <div class="tier-row">
+                        <span class="tier-badge p2">Priority 2</span>
+                        <div>
+                          <div class="tier-title">Content on current tab</div>
+                          <div class="tier-desc">Offscreen media queued ahead of your scroll position</div>
+                        </div>
+                      </div>
+                      <div class="tier-row">
+                        <span class="tier-badge p3">Priority 3</span>
+                        <div>
+                          <div class="tier-title">Content on other tabs</div>
+                          <div class="tier-desc">Background tabs processed after active window items</div>
+                        </div>
+                      </div>
+                      <div class="tier-row dropped">
+                        <span class="tier-badge dropped">Removed</span>
+                        <div>
+                          <div class="tier-title">Closed or navigated tabs</div>
+                          <div class="tier-desc">Pending items are dropped immediately from the queue on tab close</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="priority-tiers-grid">
-                    <div class="tier-row p0">
-                      <span class="tier-badge p0">Priority 0</span>
-                      <div>
-                        <div class="tier-title">Content currently under mouse</div>
-                        <div class="tier-desc">Pre-empts queue immediately after 120ms hover dwell</div>
+
+                  <!-- Open Negative-Space Notes next to Native Host -->
+                  <div class="native-host-notes">
+                    <div class="host-note-item">
+                      <div class="host-note-title">Direct Hardware Speed</div>
+                      <div class="host-note-desc">
+                        Browsers restrict heavy compute; running native inference directly on your hardware keeps detection fast enough to keep up with live browsing.
                       </div>
                     </div>
-                    <div class="tier-row p1">
-                      <span class="tier-badge p1">Priority 1</span>
-                      <div>
-                        <div class="tier-title">Content currently on screen</div>
-                        <div class="tier-desc">Active viewport items tracked by IntersectionObserver</div>
+                    <div class="host-note-item">
+                      <div class="host-note-title">Air-Gapped Packet Messaging</div>
+                      <div class="host-note-desc">
+                        Content is sliced into packets using your browser's own external messaging protocol, leaving the local inference server completely air-gapped with zero network sockets.
                       </div>
                     </div>
-                    <div class="tier-row">
-                      <span class="tier-badge p2">Priority 2</span>
-                      <div>
-                        <div class="tier-title">Content on current tab</div>
-                        <div class="tier-desc">Below-the-fold media queued ahead of scrolling</div>
-                      </div>
-                    </div>
-                    <div class="tier-row">
-                      <span class="tier-badge p3">Priority 3</span>
-                      <div>
-                        <div class="tier-title">Content on other tabs</div>
-                        <div class="tier-desc">Background tabs; stale jobs auto-purge on navigation</div>
+                    <div class="host-note-item">
+                      <div class="host-note-title">Open &amp; Customizable</div>
+                      <div class="host-note-desc">
+                        Built to be modular — you are encouraged to slot in your own classification models alongside or in place of ours.
                       </div>
                     </div>
                   </div>
@@ -654,38 +703,180 @@
                 <div>
                   <img src="./assets/icon.svg" alt="Fire vs Fire Native Host" class="dock-logo" />
                   <div class="dock-title">Native Inference Host</div>
-                  <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.45;">
-                    Local hardware-accelerated Python engine outside the browser sandbox.
+                  <div style="font-size: 13.5px; color: var(--text-secondary); line-height: 1.48;">
+                    Local hardware-accelerated Python engine running outside the browser environment.
                   </div>
-                </div>
-
-                <div class="dock-specs">
-                  <div class="dock-spec-row">IPC: stdin / stdout JSON</div>
-                  <div class="dock-spec-row">Backends: CUDA · DirectML · MPS</div>
-                  <div class="dock-spec-row">Network Sockets: 0 (Air-Gapped)</div>
                 </div>
               </aside>
             </div>
 
-            <!-- Right Seam Conduit -> Slide 5 -->
-            <div class="seam-conduit out-to-right" style="top: 560px; width: 42px;">
-              <span class="seam-chevron" style="right: 6px;">›</span>
+            <!-- Right Seam Conduit -> Slide 5 (Models Ecosystem) -->
+            <div class="seam-conduit out-to-right" style="top: 560px; width: 96px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
           </section>
 
           <!-- ================================================================
-               SLIDE 5: IMAGE ANALYSIS I — HEIMDALL 04 B (3-BRANCH SPLIT)
+               SLIDE 5 (NEW): MULTI-MODAL MODEL ECOSYSTEM HERO
                ================================================================ -->
           <section class="slide-frame" id="slide-5" data-slide="5">
-            <div class="seam-conduit in-from-left" style="top: 560px; width: 72px;">
+            <div class="seam-conduit in-from-left" style="top: 560px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
 
             <header class="slide-header">
               <div>
                 <div class="slide-kicker">
-                  <span class="slide-kicker-num">STEP 03</span>
-                  <span>Image Classification • FvF Heimdall 04 B</span>
+                  <span>Modular Classification Pipelines</span>
+                </div>
+                <h2 class="slide-title">My Detection Models</h2>
+              </div>
+            </header>
+
+            <div class="models-hero-layout">
+              <!-- Top Row: Heimdall & Mímir -->
+              <div class="models-row-top">
+                <!-- Heimdall -->
+                <article class="fvf-panel-ember model-hero-card available">
+                  <div class="model-svg-wrap">
+                    <svg viewBox="0 0 120 120" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="modImgSun" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stop-color="#ffb14d" />
+                          <stop offset="100%" stop-color="#ff6d1f" />
+                        </linearGradient>
+                        <linearGradient id="modImgGlass" x1="20%" y1="0%" x2="80%" y2="100%">
+                          <stop offset="0%" stop-color="#fff4e6" stop-opacity="0.72" />
+                          <stop offset="100%" stop-color="#ffb673" stop-opacity="0.16" />
+                        </linearGradient>
+                      </defs>
+                      <circle cx="78" cy="40" r="30" fill="url(#modImgSun)" />
+                      <path d="M8 94 C16 62, 34 40, 44 40 C54 40, 62 66, 70 66 C78 66, 86 50, 95 50 C104 50, 112 72, 114 94 C115 102, 108 106, 98 106 L22 106 C12 106, 6 102, 8 94 Z" fill="url(#modImgGlass)" stroke="rgba(255,244,230,0.45)" stroke-width="1.5" />
+                    </svg>
+                  </div>
+                  <div class="model-text-col">
+                    <span class="model-modality-label">Image</span>
+                    <h3 class="model-name">Heimdall</h3>
+                    <p class="model-desc">
+                      My flagship image model, forensic 24-channel extraction across 3 parallel backbones, designed to be informed by image genre.
+                    </p>
+                  </div>
+                </article>
+
+                <!-- Mímir -->
+                <article class="fvf-panel-ember model-hero-card available">
+                  <div class="model-svg-wrap">
+                    <svg viewBox="0 0 120 120" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="modTxtDoc" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stop-color="#ffb14d" />
+                          <stop offset="100%" stop-color="#ff6d1f" />
+                        </linearGradient>
+                        <linearGradient id="modTxtGlass" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stop-color="#fff4e6" stop-opacity="0.75" />
+                          <stop offset="100%" stop-color="#ffb673" stop-opacity="0.12" />
+                        </linearGradient>
+                      </defs>
+                      <rect x="14" y="10" width="64" height="100" rx="14" fill="url(#modTxtDoc)" />
+                      <rect x="38" y="26" width="68" height="15" rx="7.5" fill="url(#modTxtGlass)" stroke="rgba(255,244,230,0.42)" stroke-width="1.2" />
+                      <rect x="38" y="53" width="68" height="15" rx="7.5" fill="url(#modTxtGlass)" stroke="rgba(255,244,230,0.42)" stroke-width="1.2" />
+                      <rect x="38" y="80" width="48" height="15" rx="7.5" fill="url(#modTxtGlass)" stroke="rgba(255,244,230,0.42)" stroke-width="1.2" />
+                    </svg>
+                  </div>
+                  <div class="model-text-col">
+                    <span class="model-modality-label">Text</span>
+                    <h3 class="model-name">Mímir</h3>
+                    <p class="model-desc">
+                      My flagship language analysis model, informed by deterministic text extractions, semantic discourse understanding, and real-time perplexity generation.
+                    </p>
+                  </div>
+                </article>
+              </div>
+
+              <!-- Bottom Row: 3 Tiles (Huginn, Bragi, Build Your Own) -->
+              <div class="models-row-bottom">
+                <!-- Huginn -->
+                <article class="fvf-panel model-hero-card model-hero-card--compact upcoming">
+                  <div class="model-svg-wrap">
+                    <svg viewBox="0 0 120 120" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="modVidBody" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stop-color="#ffb14d" />
+                          <stop offset="100%" stop-color="#ff6d1f" />
+                        </linearGradient>
+                        <linearGradient id="modVidGlass" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stop-color="#fff4e6" stop-opacity="0.72" />
+                          <stop offset="100%" stop-color="#ffb673" stop-opacity="0.14" />
+                        </linearGradient>
+                      </defs>
+                      <rect x="10" y="24" width="68" height="72" rx="16" fill="url(#modVidBody)" />
+                      <path d="M72 44 L106 27 C110 25, 114 28, 114 33 L114 87 C114 92, 110 95, 106 93 L72 76 C69 74, 67 71, 67 67 L67 53 C67 49, 69 46, 72 44 Z" fill="url(#modVidGlass)" stroke="rgba(255,244,230,0.45)" stroke-width="1.5" />
+                    </svg>
+                  </div>
+                  <div class="model-text-col">
+                    <span class="model-modality-label">Video</span>
+                    <h3 class="model-name">Huginn</h3>
+                    <p class="model-desc">In development</p>
+                  </div>
+                </article>
+
+                <!-- Bragi -->
+                <article class="fvf-panel model-hero-card model-hero-card--compact upcoming">
+                  <div class="model-svg-wrap">
+                    <svg viewBox="0 0 120 120" aria-hidden="true">
+                      <defs>
+                        <linearGradient id="modAudBack" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stop-color="#ffb14d" />
+                          <stop offset="100%" stop-color="#ff6d1f" />
+                        </linearGradient>
+                        <linearGradient id="modAudGlass" x1="15%" y1="0%" x2="85%" y2="100%">
+                          <stop offset="0%" stop-color="#fff4e6" stop-opacity="0.78" />
+                          <stop offset="100%" stop-color="#ffb673" stop-opacity="0.18" />
+                        </linearGradient>
+                      </defs>
+                      <circle cx="40" cy="80" r="28" fill="url(#modAudBack)" />
+                      <circle cx="88" cy="64" r="22" fill="url(#modAudBack)" />
+                      <path d="M58 14 L100 8 C103 7.5, 105 9.5, 105 12.5 L105 26 C105 28.5, 103 30.5, 100 31 L66 36 L66 79 C66 93, 55 104, 41 104 C27 104, 16 93, 16 79 C16 65, 27 54, 41 54 C45.5 54, 49.5 55.2, 53 57.3 L53 19 C53 16.5, 55 14.5, 58 14 Z" fill="url(#modAudGlass)" stroke="rgba(255,244,230,0.45)" stroke-width="1.5" />
+                    </svg>
+                  </div>
+                  <div class="model-text-col">
+                    <span class="model-modality-label">Audio</span>
+                    <h3 class="model-name">Bragi</h3>
+                    <p class="model-desc">In development</p>
+                  </div>
+                </article>
+
+                <!-- Build Your Own -->
+                <article class="fvf-panel models-custom-tile">
+                  <span class="model-modality-label">Custom Pipelines</span>
+                  <h3 class="models-custom-title">Build Your Own Classifiers</h3>
+                  <p class="models-custom-desc">
+                    You are strongly encouraged to try building and running your own classifiers alongside mine. Using the open Python <code>BaseClassifier</code> interface, drop any image, text, or custom detector straight into the live browser pipeline with independent categories, thresholds, and inline overlay styles.
+                  </p>
+                </article>
+              </div>
+            </div>
+
+            <!-- Right Seam Conduit -> Slide 6 (Heimdall) -->
+            <div class="seam-conduit out-to-right" style="top: 560px; width: 96px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 6: IMAGE ANALYSIS I — HEIMDALL 04 B (3-BRANCH SPLIT)
+               ================================================================ -->
+          <section class="slide-frame" id="slide-6" data-slide="6">
+            <div class="seam-conduit in-from-left" style="top: 560px; width: 96px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span>Image Classification • Heimdall 04 B</span>
                 </div>
                 <h2 class="slide-title">3-Branch Visual Decomposition</h2>
               </div>
@@ -746,7 +937,7 @@
                 <!-- Branch 2: Global 256x256 -->
                 <div class="fvf-panel branch-lane">
                   <div>
-                    <div class="branch-tag">Branch 02 • Global Semantic Backbone (ConvNeXt-V2 Base)</div>
+                    <div class="branch-tag">Branch 02 • Global Semantic Branch</div>
                     <h3 class="branch-name">Downsampled 256×256 Full Image</h3>
                     <p class="branch-desc">
                       Resizes the full image via bicubic interpolation to evaluate global lighting, proportions, reflections, and overall scene coherence across 768 semantic dimensions.
@@ -763,10 +954,10 @@
                 <!-- Branch 3: Genre Context Branch -->
                 <div class="fvf-panel branch-lane">
                   <div>
-                    <div class="branch-tag">Branch 03 • Intrinsic Genre &amp; Medium Context (RGB+Y CNN)</div>
+                    <div class="branch-tag">Branch 03 • Intrinsic Genre &amp; Medium Context</div>
                     <h3 class="branch-name">128×128 RGB + Luminance (Y) Genre Detector</h3>
                     <p class="branch-desc">
-                      Identifies whether the image is a photograph, poster, illustration, or diagram—calibrating the final decision head to eliminate false positives on graphic art and memes.
+                      Identifies the underlying medium and visual style of an image — calibrating the final decision head to eliminate false positives across diverse non-photographic artwork and graphics.
                     </p>
                   </div>
                   <div class="global-pair">
@@ -781,7 +972,7 @@
                         <span>94%</span>
                       </div>
                       <div class="genre-row">
-                        <span>Poster / Meme</span>
+                        <span>Poster Art</span>
                         <div class="genre-track"><div class="genre-fill muted" style="width: 3%;"></div></div>
                         <span>3%</span>
                       </div>
@@ -791,7 +982,7 @@
                         <span>2%</span>
                       </div>
                       <div class="genre-row">
-                        <span>Diagram / UI</span>
+                        <span>3D / Digital UI</span>
                         <div class="genre-track"><div class="genre-fill muted" style="width: 1%;"></div></div>
                         <span>1%</span>
                       </div>
@@ -801,78 +992,83 @@
               </div>
             </div>
 
-            <!-- Right Seam Conduits matching exact row centers -> Slide 6 -->
-            <div class="seam-conduit out-to-right" style="top: 309px; width: 72px;">
+            <!-- Right Seam Conduits matching exact row centers -> Slide 7 -->
+            <div class="seam-conduit out-to-right" style="top: 300px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
-            <div class="seam-conduit out-to-right" style="top: 599px; width: 72px;">
+            <div class="seam-conduit out-to-right" style="top: 585px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
-            <div class="seam-conduit out-to-right" style="top: 889px; width: 72px;">
+            <div class="seam-conduit out-to-right" style="top: 870px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
           </section>
 
           <!-- ================================================================
-               SLIDE 6: IMAGE ANALYSIS II — 24-CH FORENSIC GRID & VERDICT
+               SLIDE 7: IMAGE ANALYSIS II — 24-CH FORENSIC GRID & VERDICT
                ================================================================ -->
-          <section class="slide-frame" id="slide-6" data-slide="6">
-            <div class="seam-conduit in-from-left" style="top: 309px; width: 72px;">
+          <section class="slide-frame" id="slide-7" data-slide="7">
+            <div class="seam-conduit in-from-left" style="top: 300px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
-            <div class="seam-conduit in-from-left" style="top: 599px; width: 72px;">
+            <div class="seam-conduit in-from-left" style="top: 585px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
-            <div class="seam-conduit in-from-left" style="top: 889px; width: 72px;">
+            <div class="seam-conduit in-from-left" style="top: 870px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
 
             <header class="slide-header">
               <div>
                 <div class="slide-kicker">
-                  <span class="slide-kicker-num">STEP 04</span>
                   <span>Forensic Extraction &amp; Gated Fusion</span>
                 </div>
                 <h2 class="slide-title">24-Channel Forensics &amp; Verdict</h2>
               </div>
               <p class="slide-subtitle">
-                Branch 1 extracts 24 mathematical channels per 1:1 crop (9 distinct channels shown below) before fusing with Semantic &amp; Genre embeddings.
+                Branch 1 extracts 24 mathematical channels per 1:1 crop before fusing with Semantic &amp; Genre embeddings.
               </p>
             </header>
 
-            <div class="forensic-layout">
-              <!-- 3x3 Grid of 9 Most Distinct Forensic Extractions -->
-              <div class="forensic-grid-3x3">
+            <div class="forensic-layout forensic-layout--wide">
+              <!-- 4x3 Grid of 12 Forensic Extractions -->
+              <div class="forensic-grid-4x3">
                 <div class="fx-tile">
                   <div class="fx-img-wrap">
                     <img src="./assets/forensics/dct8_axial_hf_energy.png" alt="DCT8 Axial HF Energy" />
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">8×8 DCT Axial Energy</span>
-                    <span class="fx-code">dct8_axial_hf</span>
                   </div>
                 </div>
 
                 <div class="fx-tile">
-                  <div class="fx-img-wrap spectrum">
+                  <div class="fx-img-wrap fft-crop">
                     <img src="./assets/forensics/fft_residual_highpass.png" alt="2D FFT Residual Highpass" />
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">2D FFT High-Pass</span>
-                    <span class="fx-code">fft_res_highpass</span>
                   </div>
                 </div>
 
                 <div class="fx-tile">
-                  <div class="fx-img-wrap spectrum">
+                  <div class="fx-img-wrap fft-crop">
                     <img src="./assets/forensics/fft_chroma_diff.png" alt="2D FFT Chroma Diff" />
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">2D FFT Chroma Diff</span>
-                    <span class="fx-code">fft_chroma_diff</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/ai_dct8_diag_checker_energy.png" alt="8x8 DCT Diagonal Checkerboard" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">8×8 DCT Diagonal Energy</span>
                   </div>
                 </div>
 
@@ -882,7 +1078,6 @@
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">LBP Microtexture</span>
-                    <span class="fx-code">lbp_8neighbor</span>
                   </div>
                 </div>
 
@@ -892,7 +1087,6 @@
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">Sobel-X Residual</span>
-                    <span class="fx-code">res_half_sobel_x</span>
                   </div>
                 </div>
 
@@ -902,7 +1096,15 @@
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">Sobel-Y Residual</span>
-                    <span class="fx-code">res_half_sobel_y</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap boost-contrast">
+                    <img src="./assets/forensics/ai_res_native_srm_kv.png" alt="SRM KV Steganalysis Filter" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">SRM KV Residual</span>
                   </div>
                 </div>
 
@@ -912,7 +1114,6 @@
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">Laplacian Residual</span>
-                    <span class="fx-code">res_half_laplacian</span>
                   </div>
                 </div>
 
@@ -922,7 +1123,6 @@
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">Wavelet db4 (HL)</span>
-                    <span class="fx-code">wavelet_db4_HL</span>
                   </div>
                 </div>
 
@@ -932,7 +1132,15 @@
                   </div>
                   <div class="fx-tile-footer">
                     <span class="fx-name">Chrominance (Cr)</span>
-                    <span class="fx-code">ycbcr_Cr</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap boost-contrast">
+                    <img src="./assets/forensics/ai_prnu_noise_residual.png" alt="PRNU Sensor Noise Residual" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">PRNU Noise Residual</span>
                   </div>
                 </div>
               </div>
@@ -941,17 +1149,17 @@
               <aside class="fvf-panel-ember fusion-col">
                 <div>
                   <div class="branch-tag">Gated Cross-Stream Head</div>
-                  <h3 style="font-size: 23px; font-weight: 400; color: #ffffff;">Heimdall 04 B Fusion</h3>
+                  <h3 style="font-size: 22px; font-weight: 400; color: #ffffff;">Heimdall Fusion</h3>
 
                   <div class="fusion-inputs-list">
                     <div class="fusion-input-item active">
-                      <div class="fusion-input-label">Branch 01 • ForensicNeXt-24</div>
+                      <div class="fusion-input-label">Branch 01 • Local Forensics</div>
                       <div class="fusion-input-val">768-d Crop Moment Pool</div>
                       <div class="fusion-input-sub">Mean / Std / Max across 1:1 crops + center-vs-edge diff</div>
                     </div>
 
                     <div class="fusion-input-item">
-                      <div class="fusion-input-label">Branch 02 • ConvNeXt-V2 Base</div>
+                      <div class="fusion-input-label">Branch 02 • Global Semantics</div>
                       <div class="fusion-input-val">1024-d Semantic Modulation</div>
                       <div class="fusion-input-sub">Gated interaction with global RGB scene structure</div>
                     </div>
@@ -959,16 +1167,15 @@
                     <div class="fusion-input-item">
                       <div class="fusion-input-label">Branch 03 • Genre Context</div>
                       <div class="fusion-input-val">24-d Genre Conditioning</div>
-                      <div class="fusion-input-sub">8 genre logits + 16 latent features (Anti-FP barrier)</div>
+                      <div class="fusion-input-sub">8 genre logits + 16 latent features</div>
                     </div>
                   </div>
                 </div>
 
                 <div class="verdict-box">
                   <div class="verdict-label-row">
-                    <span class="verdict-badge-preview">AI generated 99%</span>
+                    <span class="verdict-badge-preview">AI generated 99% certainty</span>
                   </div>
-                  <div class="verdict-score-sub">Threshold: 75% • Calibrated with AFPL</div>
                 </div>
               </aside>
             </div>
@@ -979,8 +1186,8 @@
               <span>Global RGB (1024-d) + Genre Context (24-d) → Gated Fusion Head</span>
             </div>
 
-            <!-- Right Seam Conduit -> Slide 7 (Text Pipeline) -->
-            <div class="seam-conduit out-to-right" style="top: 560px; width: 72px;">
+            <!-- Right Seam Conduit -> Slide 8 (Text Pipeline) -->
+            <div class="seam-conduit out-to-right" style="top: 560px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-label" style="left: 14px;">Text</span>
               <span class="seam-chevron" style="right: 8px;">›</span>
@@ -988,39 +1195,38 @@
           </section>
 
           <!-- ================================================================
-               SLIDE 7: TEXT ANALYSIS I — MIMIR 02 B (3-STREAM DECOMPOSITION)
+               SLIDE 8: TEXT ANALYSIS I — MIMIR 02 B (3-STREAM DECOMPOSITION)
                ================================================================ -->
-          <section class="slide-frame" id="slide-7" data-slide="7">
-            <div class="seam-conduit in-from-left" style="top: 560px; width: 72px;">
+          <section class="slide-frame" id="slide-8" data-slide="8">
+            <div class="seam-conduit in-from-left" style="top: 560px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
 
             <header class="slide-header">
               <div>
                 <div class="slide-kicker">
-                  <span class="slide-kicker-num">STEP 05</span>
-                  <span>Text Classification • FvF Mímir 02 B</span>
+                  <span>Text Classification • Mímir 02 B</span>
                 </div>
                 <h2 class="slide-title">3-Stream Text Decomposition</h2>
               </div>
               <p class="slide-subtitle">
-                Queued text is sanitized and evaluated across three independent forensic streams: discourse semantics, token-rank curvature, and stylometry.
+                Queued text is sanitized and evaluated across three independent forensic streams: local LLM next-word prediction, discourse semantics, and deterministic extractions.
               </p>
             </header>
 
             <div class="decomp-layout">
-              <svg class="decomp-wiring" viewBox="0 0 56 850" preserveAspectRatio="none" aria-hidden="true">
-                <path d="M 0 425 L 26 425 L 26 135 L 56 135" fill="none" stroke="rgba(255,68,0,0.7)" stroke-width="2" />
-                <path d="M 0 425 L 56 425" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
-                <path d="M 26 425 L 26 715 L 56 715" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
-                <circle cx="26" cy="425" r="4" fill="#ff4400" />
+              <svg class="decomp-wiring" viewBox="0 0 52 850" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M 0 425 L 24 425 L 24 204 L 52 204" fill="none" stroke="rgba(255,68,0,0.75)" stroke-width="2" />
+                <path d="M 0 425 L 24 425 L 24 527 L 52 527" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
+                <path d="M 24 527 L 24 747 L 52 747" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
+                <circle cx="24" cy="425" r="4" fill="#ff4400" />
               </svg>
               <!-- Incoming Text Input -->
               <div class="decomp-input-col">
                 <div class="fvf-panel-ember decomp-source-card">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span class="mono-tag ember">P1 TEXT PAYLOAD</span>
-                    <span class="mono-tag">321 chars</span>
+                    <span class="mono-tag">327 chars</span>
                   </div>
                   <div class="decomp-source-text">
                     "Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline, and relentless determination boiling down to this iconic moment of glory. Absolute football history! ⚽🔥 #Football #Champions #WorldCup #Victory #Trophy"
@@ -1032,131 +1238,133 @@
                 </div>
               </div>
 
-              <!-- 3 Parallel Text Streams -->
-              <div class="decomp-lanes">
-                <!-- Stream 1: Discourse Encoder -->
-                <div class="fvf-panel-ember branch-lane primary">
+              <!-- 3 Parallel Text Streams (50% Perplexity / 25% Encoder / 25% Stylometrics) -->
+              <div class="decomp-lanes--mimir">
+                <!-- Stream 1 (50% Height): Local LLM Perplexity & Next-Word Comparison -->
+                <div class="fvf-panel-ember branch-lane branch-lane--perplexity primary">
                   <div>
-                    <div class="branch-tag">Stream 01 • Semantic &amp; Discourse Encoder</div>
-                    <h3 class="branch-name">DistilRoBERTa-AFPL INT8 (384-Token Window)</h3>
+                    <div class="branch-tag">Stream 01 • On-Device Small LLM Next-Word Prediction</div>
+                    <h3 class="branch-name">Perplexity &amp; Predicted-Word Comparison</h3>
                     <p class="branch-desc">
-                      Inspects phrasing symmetries, rhetorical cadence, and synthetic discourse patterns across the full sanitized sequence, outputting calibrated encoder logit and probability signals.
+                      We run a lightweight language model directly on your device. Reading forward from the opening half of the passage, it predicts a ranked list of the exact next words it would write next. We then compare the author's actual next words against those predictions — AI writing routinely falls near the top of the model's expected choices with low surprise.
                     </p>
                   </div>
-                  <div style="width: 340px; display: flex; flex-direction: column; gap: 10px;">
-                    <div class="stylo-chip" style="width: 100%;">
+                  <div class="perplexity-visual-col">
+                    <div>
+                      <div class="token-legend">
+                        <span><i style="background: rgba(255, 68, 0, 0.7);"></i>Top-1 Predicted</span>
+                        <span><i style="background: rgba(255, 138, 61, 0.55);"></i>Top-5 Predicted</span>
+                        <span><i style="background: rgba(46, 204, 113, 0.6);"></i>Unexpected Tail &gt;100</span>
+                      </div>
+                      <div class="token-rank-strip">
+                        <span class="tok top1">Pure</span>
+                        <span class="tok top5">elation</span>
+                        <span class="tok top1">as</span>
+                        <span class="tok top1">the</span>
+                        <span class="tok top5">squad</span>
+                        <span class="tok tail">hoists</span>
+                        <span class="tok top1">the</span>
+                        <span class="tok top1">championship</span>
+                        <span class="tok top1">trophy</span>
+                        <span class="tok top5">amid</span>
+                        <span class="tok top1">a</span>
+                        <span class="tok top5">blizzard</span>
+                        <span class="tok top1">of</span>
+                        <span class="tok top1">golden</span>
+                        <span class="tok top1">confetti!</span>
+                        <span class="tok top1">tactical</span>
+                        <span class="tok top1">discipline</span>
+                        <span class="tok top1">relentless</span>
+                        <span class="tok top1">determination</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Stream 2 (25% Height, Shorter): Discourse Encoder -->
+                <div class="fvf-panel branch-lane branch-lane--compact">
+                  <div>
+                    <div class="branch-tag">Stream 02 • Semantic &amp; Discourse Encoder</div>
+                    <h3 class="branch-name" style="font-size: 20px; margin-bottom: 4px;">DistilRoBERTa-AFPL INT8 (384-Token Window)</h3>
+                    <p class="branch-desc">
+                      Reads full-sequence phrasing symmetries, rhetorical cadence, and synthetic discourse patterns in one pass.
+                    </p>
+                  </div>
+                  <div style="width: 310px; display: flex; flex-direction: column; gap: 5px;">
+                    <div class="stylo-chip" style="padding: 6px 10px;">
                       <span>tokenizer</span>
                       <span>mimir_tokenizer (BPE)</span>
                     </div>
-                    <div class="stylo-chip" style="width: 100%;">
+                    <div class="stylo-chip" style="padding: 6px 10px;">
                       <span>window_tokens</span>
                       <span>68 / 384 active</span>
                     </div>
-                    <div class="stylo-chip" style="width: 100%; border-color: var(--border-ember);">
+                    <div class="stylo-chip" style="padding: 6px 10px; border-color: var(--border-ember);">
                       <span>runtime</span>
                       <span>ONNX INT8 Quantized</span>
                     </div>
                   </div>
                 </div>
 
-                <!-- Stream 2A: Causal LM Perplexity & Curvature -->
-                <div class="fvf-panel branch-lane">
+                <!-- Stream 3 (25% Height, Shorter): Deterministic Text Extractions -->
+                <div class="fvf-panel branch-lane branch-lane--compact">
                   <div>
-                    <div class="branch-tag">Stream 02A • Causal LM Perplexity &amp; Curvature (DistilGPT-2 INT8)</div>
-                    <h3 class="branch-name">Token-Rank Predictability Strip</h3>
+                    <div class="branch-tag">Stream 03 • Deterministic Stylometric Extractions</div>
+                    <h3 class="branch-name" style="font-size: 20px; margin-bottom: 4px;">Lexical Diversity, Readability &amp; Pacing</h3>
                     <p class="branch-desc">
-                      Measures how consistently each next word sits in the model's highest-probability ranks (Top-1 / Top-5) and compares negative log-likelihood against token entropy.
+                      Computes 19 exact mathematical text statistics directly without neural inference — spanning richness, readability, POS density, and punctuation cadence.
                     </p>
                   </div>
-                  <div>
-                    <div class="token-legend">
-                      <span><i style="background: rgba(255, 68, 0, 0.7);"></i>Top-1 Rank</span>
-                      <span><i style="background: rgba(255, 138, 61, 0.55);"></i>Top-5 Rank</span>
-                      <span><i style="background: rgba(46, 204, 113, 0.6);"></i>Tail &gt;100</span>
-                    </div>
-                    <div class="token-rank-strip">
-                      <span class="tok top1">Pure</span>
-                      <span class="tok top5">elation</span>
-                      <span class="tok top1">as</span>
-                      <span class="tok top1">the</span>
-                      <span class="tok top5">squad</span>
-                      <span class="tok tail">hoists</span>
-                      <span class="tok top1">the</span>
-                      <span class="tok top1">championship</span>
-                      <span class="tok top1">trophy</span>
-                      <span class="tok top5">amid</span>
-                      <span class="tok top1">a</span>
-                      <span class="tok top5">blizzard</span>
-                      <span class="tok top1">of</span>
-                      <span class="tok top1">golden</span>
-                      <span class="tok top1">confetti!</span>
-                      <span class="tok top1">tactical</span>
-                      <span class="tok top1">discipline</span>
-                      <span class="tok top1">relentless</span>
-                      <span class="tok top1">determination</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Stream 2B: Mindner Stylometrics -->
-                <div class="fvf-panel branch-lane">
-                  <div>
-                    <div class="branch-tag">Stream 02B • Length-Normalized Mindner Stylometrics (19 Features)</div>
-                    <h3 class="branch-name">Lexical Diversity, Readability &amp; Clause Pacing</h3>
-                    <p class="branch-desc">
-                      Extracts length-normalized ratios (no raw length bias) covering vocabulary richness, Flesch-Kincaid grade, part-of-speech densities, and punctuation pacing variance.
-                    </p>
-                  </div>
-                  <div class="stylo-chips">
-                    <div class="stylo-chip"><span>word_count</span><span>46 words</span></div>
-                    <div class="stylo-chip"><span>sentences</span><span>4 sents</span></div>
+                  <div class="stylo-chips stylo-chips--wide">
+                    <div class="stylo-chip"><span>words</span><span>46</span></div>
+                    <div class="stylo-chip"><span>sents</span><span>4</span></div>
                     <div class="stylo-chip"><span>ttr_ratio</span><span>0.870</span></div>
-                    <div class="stylo-chip"><span>syll / word</span><span>1.89</span></div>
+                    <div class="stylo-chip"><span>syll/word</span><span>1.89</span></div>
+                    <div class="stylo-chip"><span>fk_grade</span><span>11.21</span></div>
+                    <div class="stylo-chip"><span>flesch</span><span>35.16</span></div>
+                    <div class="stylo-chip"><span>punct</span><span>4.35%</span></div>
+                    <div class="stylo-chip"><span>1st_pron</span><span>0.0%</span></div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Right Seam Conduits matching exact row centers -> Slide 8 -->
-            <div class="seam-conduit out-to-right" style="top: 309px; width: 72px;">
+            <!-- Right Seam Conduits matching exact row centers -> Slide 9 -->
+            <div class="seam-conduit out-to-right" style="top: 372px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
-            <div class="seam-conduit out-to-right" style="top: 599px; width: 72px;">
+            <div class="seam-conduit out-to-right" style="top: 695px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
-            <div class="seam-conduit out-to-right" style="top: 889px; width: 72px;">
+            <div class="seam-conduit out-to-right" style="top: 918px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-chevron" style="right: 10px;">›</span>
             </div>
           </section>
 
           <!-- ================================================================
-               SLIDE 8: TEXT ANALYSIS II — 38-FEATURE EXTRACTION & VERDICT
+               SLIDE 9: TEXT ANALYSIS II — 38-FEATURE EXTRACTION & VERDICT
                ================================================================ -->
-          <section class="slide-frame" id="slide-8" data-slide="8">
-            <div class="seam-conduit in-from-left" style="top: 309px; width: 72px;">
+          <section class="slide-frame" id="slide-9" data-slide="9">
+            <div class="seam-conduit in-from-left" style="top: 372px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
-            <div class="seam-conduit in-from-left" style="top: 599px; width: 72px;">
+            <div class="seam-conduit in-from-left" style="top: 695px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
-            <div class="seam-conduit in-from-left" style="top: 889px; width: 72px;">
+            <div class="seam-conduit in-from-left" style="top: 918px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
 
             <header class="slide-header">
               <div>
                 <div class="slide-kicker">
-                  <span class="slide-kicker-num">STEP 06</span>
-                  <span>Text Forensics &amp; Calibrated Fusion</span>
+                  <span>Text Forensics &amp; LightGBM Fusion</span>
                 </div>
                 <h2 class="slide-title">38-Feature Signals &amp; Text Verdict</h2>
               </div>
-              <p class="slide-subtitle">
-                Mímir's 9 forensic feature groups combine encoder logits, LM curvature, and real computed Mindner stylometrics into a calibrated LightGBM verdict.
-              </p>
             </header>
 
             <div class="forensic-layout">
@@ -1294,38 +1502,33 @@
               <aside class="fvf-panel-ember fusion-col">
                 <div>
                   <div class="branch-tag">38-Feature Fusion Head</div>
-                  <h3 style="font-size: 23px; font-weight: 400; color: #ffffff;">Mímir 02 B Verdict</h3>
+                  <h3 style="font-size: 23px; font-weight: 400; color: #ffffff;">Mímir Verdict</h3>
 
                   <div class="fusion-inputs-list">
                     <div class="fusion-input-item active">
-                      <div class="fusion-input-label">Stream 01 • Encoder</div>
+                      <div class="fusion-input-label">Stream 01 • Local LLM Perplexity</div>
+                      <div class="fusion-input-val">17 Curvature Features</div>
+                      <div class="fusion-input-sub">Next-word rank concentration + burstiness flatness</div>
+                    </div>
+
+                    <div class="fusion-input-item">
+                      <div class="fusion-input-label">Stream 02 • Discourse Encoder</div>
                       <div class="fusion-input-val">2 Forensic Features</div>
                       <div class="fusion-input-sub">enc_logit (+3.29) &amp; enc_prob (0.964)</div>
                     </div>
 
                     <div class="fusion-input-item">
-                      <div class="fusion-input-label">Stream 02A • Perplexity</div>
-                      <div class="fusion-input-val">17 Curvature Features</div>
-                      <div class="fusion-input-sub">Rank concentration + burstiness flatness</div>
-                    </div>
-
-                    <div class="fusion-input-item">
-                      <div class="fusion-input-label">Stream 02B • Mindner</div>
+                      <div class="fusion-input-label">Stream 03 • Deterministic Features</div>
                       <div class="fusion-input-val">19 Stylometric Features</div>
-                      <div class="fusion-input-sub">Computed live via extract_stylometric_features()</div>
+                      <div class="fusion-input-sub">Computed mathematically directly from text</div>
                     </div>
-                  </div>
-
-                  <div class="text-preview-box">
-                    <span class="flagged-sample">Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy...</span>
                   </div>
                 </div>
 
                 <div class="verdict-box" style="background: rgba(255, 0, 100, 0.08); border-color: rgba(255, 0, 100, 0.45);">
                   <div class="verdict-label-row">
-                    <span class="verdict-badge-preview text-mode">AI text 96%</span>
+                    <span class="verdict-badge-preview text-mode">AI text 96% certainty</span>
                   </div>
-                  <div class="verdict-score-sub">Threshold: 75% • Blur + #FF0064 Strike</div>
                 </div>
               </aside>
             </div>
@@ -1333,11 +1536,11 @@
             <div class="forensic-bypass-bar">
               <span>FUSION VECTOR</span>
               <span class="bypass-pipe"></span>
-              <span>[2 Encoder + 17 LM Curvature + 19 Stylometrics] → Calibrated LightGBM Head</span>
+              <span>[17 LM Curvature + 2 Encoder + 19 Stylometrics] → LightGBM Fusion Head</span>
             </div>
 
-            <!-- Right Seam Conduit -> Slide 9 -->
-            <div class="seam-conduit out-to-right" style="top: 540px; width: 72px;">
+            <!-- Right Seam Conduit -> Slide 10 -->
+            <div class="seam-conduit out-to-right" style="top: 540px; width: 96px;">
               <div class="seam-node" style="left: 0;"></div>
               <span class="seam-label" style="left: 14px;">Tags</span>
               <span class="seam-chevron" style="right: 8px;">›</span>
@@ -1345,10 +1548,10 @@
           </section>
 
           <!-- ================================================================
-               SLIDE 9: CLASSIFIED COMMUNITY FEED (FINAL RESULT)
+               SLIDE 10: CLASSIFIED COMMUNITY FEED (FINAL RESULT)
                ================================================================ -->
-          <section class="slide-frame slide-feed-frame slide-classified" id="slide-9" data-slide="9">
-            <div class="seam-conduit in-from-left" style="top: 540px; width: 40px;">
+          <section class="slide-frame slide-feed-frame slide-classified" id="slide-10" data-slide="10">
+            <div class="seam-conduit in-from-left" style="top: 540px; width: 96px;">
               <div class="seam-node" style="right: 0;"></div>
             </div>
 
@@ -1379,10 +1582,6 @@
                     </div>
                   </div>
                   <div class="ef-controls">
-                    <div class="ef-fvf-status-pill">
-                      <img src="./assets/icon.svg" alt="" />
-                      <span>Fire vs Fire Active • 2 AI Images, 1 AI Text Flagged (Hover to reveal)</span>
-                    </div>
                     <div class="ef-view-switch">
                       <span class="ef-view-btn active">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
@@ -1570,6 +1769,6 @@
       </div>
     </div>
 
-    <script src="./showcase.js?v=1.0"></script>
+    <script src="./showcase.js?v=1.2"></script>
   </body>
 </html>

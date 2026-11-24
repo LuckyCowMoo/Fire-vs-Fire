@@ -1,0 +1,1575 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fire vs Fire — How Local AI Detection Works</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Roboto:wght@100;300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./showcase.css?v=1.0" />
+  </head>
+  <body>
+    <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
+
+    <!-- Floating Horizontal Navigation HUD (Hidden in ?export=1 Screenshot Mode) -->
+    <nav class="floating-hud" aria-label="Slide Navigation">
+      <div class="hud-brand">
+        <img src="./assets/icon.svg" alt="" />
+        <span>Fire vs Fire</span>
+      </div>
+      <div class="hud-dots" id="hud-dots">
+        <button type="button" class="hud-step-btn active" data-slide="1">01 Hero</button>
+        <button type="button" class="hud-step-btn" data-slide="2">02 Feed</button>
+        <button type="button" class="hud-step-btn" data-slide="3">03 Grab</button>
+        <button type="button" class="hud-step-btn" data-slide="4">04 Queue</button>
+        <button type="button" class="hud-step-btn" data-slide="5">05 Heimdall I</button>
+        <button type="button" class="hud-step-btn" data-slide="6">06 Heimdall II</button>
+        <button type="button" class="hud-step-btn" data-slide="7">07 Mímir I</button>
+        <button type="button" class="hud-step-btn" data-slide="8">08 Mímir II</button>
+        <button type="button" class="hud-step-btn" data-slide="9">09 Result</button>
+      </div>
+      <div class="hud-actions">
+        <button type="button" class="hud-arrow-btn" id="hud-prev" title="Previous Slide (Left Arrow)">←</button>
+        <button type="button" class="hud-arrow-btn" id="hud-next" title="Next Slide (Right Arrow)">→</button>
+        <a href="./index.html" class="hud-link-btn" title="Setup &amp; Classifiers">Setup ↗</a>
+      </div>
+    </nav>
+
+    <div class="viewport-scroller" id="viewport-scroller">
+      <div class="panorama-sizer" id="panorama-sizer">
+        <main class="panorama-track" id="panorama-track">
+
+          <!-- ================================================================
+               SLIDE 1: HERO & AUTHENTIC OPTIONS UI
+               ================================================================ -->
+          <section class="slide-frame" id="slide-1" data-slide="1">
+            <div class="slide-1-grid">
+              <!-- Left: Brand Identity & Architecture Pillars -->
+              <div>
+                <div class="hero-brand-row">
+                  <img src="./assets/icon.svg" alt="Fire vs Fire Flame Emblem" class="hero-logo" />
+                  <div>
+                    <div class="hero-kicker">Open-Source Browser Extension &amp; Local Native Host</div>
+                    <h1 class="hero-title">Fire vs Fire</h1>
+                  </div>
+                </div>
+
+                <p class="hero-lead">
+                  Automatically detect <strong>AI-generated images</strong> and <strong>AI-written text</strong> as you browse — running 100% locally on your own hardware.
+                </p>
+
+                <div class="hero-pillars">
+                  <div class="fvf-panel-ember pillar-card">
+                    <div class="pillar-index">01</div>
+                    <div>
+                      <div class="pillar-title">On-Device Native Inference — Zero Telemetry</div>
+                      <div class="pillar-desc">
+                        Executes directly on your GPU, NPU, or CPU via CUDA, DirectML, Apple MPS, and INT8 ONNX. No browsing data or images ever leave your computer.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="fvf-panel pillar-card">
+                    <div class="pillar-index">02</div>
+                    <div>
+                      <div class="pillar-title">Multi-Modal Forensics: Heimdall 04 B &amp; Mímir 02 B</div>
+                      <div class="pillar-desc">
+                        Combines 24-channel spatial/FFT image forensics with dual-ONNX perplexity curvature and stylometric text analysis, calibrated against false positives.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="fvf-panel pillar-card">
+                    <div class="pillar-index">03</div>
+                    <div>
+                      <div class="pillar-title">Real-Time Hover Priority &amp; Custom Overlays</div>
+                      <div class="pillar-desc">
+                        Prioritizes whatever is under your cursor first, flags detections with blur, borders, badges, or strikethrough, and reveals cleanly on hover.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right: Pixel-Faithful Options Popup Window -->
+              <div class="options-showcase-wrap">
+                <div class="options-replica">
+                  <div class="opt-header">
+                    <img src="./assets/icon.svg" alt="" class="opt-logo" />
+                    <div class="opt-title">Fire Vs Fire</div>
+                    <div class="opt-run-state" id="demo-run-state">
+                      <span class="dot"></span>
+                      <span id="demo-run-text">Connected — Idle</span>
+                    </div>
+                  </div>
+
+                  <div class="opt-quick-nav">
+                    <div class="opt-nav-pill">Full Page</div>
+                    <div class="opt-nav-pill">FvF Classifiers</div>
+                    <div class="opt-nav-pill">How to Use</div>
+                  </div>
+
+                  <div class="opt-panel">
+                    <div class="opt-master-row">
+                      <div>
+                        <span class="opt-master-title">Enable detection</span>
+                        <span class="opt-master-desc">Classify content as you browse</span>
+                      </div>
+                      <label class="opt-capsule-switch" title="Interactive demo toggle">
+                        <input type="checkbox" id="demo-master-toggle" checked />
+                        <span class="opt-capsule-track">
+                          <span class="opt-capsule-label off">OFF</span>
+                          <span class="opt-capsule-label on">ON</span>
+                          <span class="opt-capsule-thumb"><i></i><i></i><i></i></span>
+                        </span>
+                      </label>
+                    </div>
+                    <div class="opt-power-row">
+                      <div class="opt-power-col">
+                        <span class="opt-power-label">Only when plugged in</span>
+                        <span class="opt-sm-switch"></span>
+                      </div>
+                      <div class="opt-power-col">
+                        <span class="opt-power-label">Pause below threshold</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <span class="opt-sm-switch"></span>
+                          <span class="opt-select-pill">20% ▾</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="opt-panel">
+                    <div class="opt-filters-bar">
+                      <span>▸ Filters</span>
+                      <span class="mono-tag" style="font-size: 10.5px;">≥ 80px • ≥ 250 chars</span>
+                    </div>
+                  </div>
+
+                  <div class="opt-panel" style="margin-bottom: 0;">
+                    <div style="font-size: 14px; color: #ffffff; margin-bottom: 4px;">Categories</div>
+                    <div class="opt-category-row">
+                      <div class="opt-cat-tile">
+                        <div class="opt-cat-name">FvF Heimdall 04 B</div>
+                        <div class="opt-cat-meta">Image • Blur + Badge</div>
+                      </div>
+                      <div class="opt-cat-tile mimir">
+                        <div class="opt-cat-name">Mimir 02 B</div>
+                        <div class="opt-cat-meta">Text • Blur + Strike</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Seam Conduit -> Slide 2 -->
+            <div class="seam-conduit out-to-right" style="top: 540px; width: 170px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-label" style="left: 18px;">Active Scan</span>
+              <span class="seam-chevron" style="right: 12px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 2: UNFILTERED COMMUNITY FEED (feed.html)
+               ================================================================ -->
+          <section class="slide-frame slide-feed-frame" id="slide-2" data-slide="2">
+            <div class="seam-conduit in-from-left" style="top: 540px; width: 40px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <div class="embedded-feed-window">
+              <aside class="ef-nav-rail">
+                <div class="ef-nav-top">
+                  <div class="ef-app-logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                  </div>
+                  <ul class="ef-nav-icons">
+                    <li class="ef-nav-icon active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></li>
+                    <li class="ef-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg></li>
+                    <li class="ef-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></li>
+                    <li class="ef-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></li>
+                  </ul>
+                </div>
+                <img src="./assets/avatar-user.svg" alt="" class="ef-rail-avatar" />
+              </aside>
+
+              <div class="ef-main">
+                <div class="ef-top-bar">
+                  <div class="ef-title-group">
+                    <div class="ef-title">Community Feed</div>
+                    <div class="ef-tabs">
+                      <span class="ef-tab active">Trending</span>
+                      <span class="ef-tab">Latest</span>
+                      <span class="ef-tab">Photos</span>
+                    </div>
+                  </div>
+                  <div class="ef-controls">
+                    <div class="ef-view-switch">
+                      <span class="ef-view-btn active">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+                        <span>Grid (3×2)</span>
+                      </span>
+                      <span class="ef-view-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line></svg>
+                        <span>Timeline</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ef-posts-grid">
+                  <!-- Post 1: Pope -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-streetwear.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Streetwear Archive <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@streetwear_daily · 2h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Honestly cannot get over this fit 🥶 Pope Francis stepping out in the custom oversized puffer jacket is pure high fashion drip. The Vatican's stylist went absolutely crazy for winter fashion week! Nobody can rock pure white down like this. Absolutely iconic 🔥🤍 <span class="ef-hashtag">#PopeDrip</span></p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/balenciaga-pope.jpg" alt="" class="ef-post-img" style="object-position: center 16%;" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>4.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>28.4K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>142.8K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>1.8M</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 2: Polar Bear -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-wildlife.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Wildlife &amp; Conservation Lens <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@wildlife_frame · 6h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Still completely mesmerized by Nima Sarikhani’s award-winning photograph 'Ice Bed'. Captured in the Svalbard archipelago after three days searching through thick fog, he watched this young polar bear carve out a resting spot on a small iceberg and drift off to sleep.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/polar-bear-nima-sarikhani.jpg" alt="" class="ef-post-img" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>1.1K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>14.1K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>89.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>740K</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 3: Turtle -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-nature.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Macro Nature Chronicles <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@macro_chronicles · 12h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Timing is everything in nature photography! 📸 Israeli photographer Tzahi Finkelstein was watching birds in the Jezreel Valley when he spotted this Balkan pond turtle swimming. Out of nowhere, a dragonfly landed right on its nose, and the turtle looked utterly amazed.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/turtle-tzahi-finkelstein.jpg" alt="" class="ef-post-img" style="object-position: center 35%;" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>856</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>8.9K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>64.7K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>510K</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 4: Football -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-sports.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Pitchside Football <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@pitchside_hq · 14h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline, and relentless determination boiling down to this iconic moment of glory. <span class="ef-hashtag">#Football</span></p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/football-team-celebration.jpg" alt="" class="ef-post-img" style="object-position: center 25%;" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>3.4K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>19.7K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>118.4K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>1.4M</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 5: Sagrada Familia -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-architecture.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Architectural Heritage <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@arch_wonders · 18h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Over 140 years in the making! 🏗️✨ Breathtaking golden hour view of Antoni Gaudí’s masterwork, the Basílica de la Sagrada Família, with the central spires and the Tower of Jesus Christ nearing final completion across Barcelona's skyline.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/sagrada-familia-finished.jpg" alt="" class="ef-post-img" style="object-position: center 38%;" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>2.1K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>16.3K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>94.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>980K</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 6: Theatre D'opera Spatial -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-ai-art.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Digital Art &amp; Synth <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@digital_curator · 1d ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Revisiting the watershed moment for generative AI: Jason M. Allen's 'Théâtre D’opéra Spatial'. Generated using Midjourney v3 and upscaled with Gigapixel AI, this piece shocked the art world when it took 1st place in the digital arts category.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/theatre-dopera-spatial.jpg" alt="" class="ef-post-img" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>5.8K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>31.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>168.5K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>2.3M</span></span>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Seam Conduit -> Slide 3 -->
+            <div class="seam-conduit out-to-right" style="top: 540px; width: 40px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 3: GRAB ALL CONTENT
+               ================================================================ -->
+          <section class="slide-frame" id="slide-3" data-slide="3">
+            <!-- Left Seam Splitter -->
+            <div class="seam-conduit in-from-left" style="top: 540px; width: 96px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span class="slide-kicker-num">STEP 01</span>
+                  <span>DOM Interception &amp; Content Filtering</span>
+                </div>
+                <h2 class="slide-title">Grab All Content</h2>
+              </div>
+              <p class="slide-subtitle">
+                Watches live page mutations to collect eligible images and text blocks while skipping small UI icons (&lt; 80px) and short labels (&lt; 250 chars).
+              </p>
+            </header>
+
+            <div class="grab-grid">
+              <!-- Images Column -->
+              <div class="fvf-panel grab-column">
+                <div class="col-header">
+                  <h3 class="col-title">Images Extracted</h3>
+                  <span class="mono-tag ember">6 candidates • ≥ 80×80px</span>
+                </div>
+
+                <div class="grab-images-stack">
+                  <div class="grab-img-row primary">
+                    <img src="./assets/balenciaga-pope.jpg" alt="" class="grab-thumb pope" />
+                    <div class="grab-img-meta">
+                      <div class="grab-meta-title">balenciaga-pope.jpg</div>
+                      <div class="grab-meta-alt">alt: "Pope Francis in an oversized white Balenciaga style designer puffer jacket..."</div>
+                      <div><span class="mono-tag ember">700 × 858 px</span></div>
+                    </div>
+                  </div>
+
+                  <div class="grab-img-row">
+                    <img src="./assets/polar-bear-nima-sarikhani.jpg" alt="" class="grab-thumb" />
+                    <div class="grab-img-meta">
+                      <div class="grab-meta-title">polar-bear-nima-sarikhani.jpg</div>
+                      <div class="grab-meta-alt">alt: "Young polar bear sleeping peacefully atop a carved iceberg in Svalbard"</div>
+                      <div><span class="mono-tag">976 × 651 px</span></div>
+                    </div>
+                  </div>
+
+                  <div class="grab-img-row">
+                    <img src="./assets/turtle-tzahi-finkelstein.jpg" alt="" class="grab-thumb" />
+                    <div class="grab-img-meta">
+                      <div class="grab-meta-title">turtle-tzahi-finkelstein.jpg</div>
+                      <div class="grab-meta-alt">alt: "Balkan pond turtle emerging from pond water as a dragonfly rests on its nose"</div>
+                      <div><span class="mono-tag">976 × 651 px</span></div>
+                    </div>
+                  </div>
+
+                  <div class="grab-img-row">
+                    <img src="./assets/football-team-celebration.jpg" alt="" class="grab-thumb" />
+                    <div class="grab-img-meta">
+                      <div class="grab-meta-title">football-team-celebration.jpg</div>
+                      <div class="grab-meta-alt">alt: "Championship football team celebrating victory surrounded by golden confetti"</div>
+                      <div><span class="mono-tag">1280 × 823 px</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="filter-footer-bar">
+                  <span>SKIPPED: 7 avatars (38px), 24 SVG UI icons</span>
+                  <span>FILTER: altTextOnly = true</span>
+                </div>
+              </div>
+
+              <!-- Text Segments Column -->
+              <div class="fvf-panel grab-column">
+                <div class="col-header">
+                  <h3 class="col-title">Text Segments Extracted</h3>
+                  <span class="mono-tag ember">6 blocks • ≥ 250 chars</span>
+                </div>
+
+                <div class="grab-text-list">
+                  <div class="grab-text-card highlight">
+                    <div class="grab-text-top">
+                      <span class="grab-author">@pitchside_hq — Post Caption</span>
+                      <span class="mono-tag ember">321 chars</span>
+                    </div>
+                    <p class="grab-quote">
+                      "Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline, and relentless determination boiling down to this iconic moment of glory. Absolute football history! ⚽🔥 #Football #Champions #WorldCup #Victory #Trophy"
+                    </p>
+                  </div>
+
+                  <div class="grab-text-card">
+                    <div class="grab-text-top">
+                      <span class="grab-author">@streetwear_daily — Post Caption</span>
+                      <span class="mono-tag">304 chars</span>
+                    </div>
+                    <p class="grab-quote">
+                      "Honestly cannot get over this fit 🥶 Pope Francis stepping out in the custom oversized puffer jacket is pure high fashion drip. The Vatican's stylist went absolutely crazy for winter fashion week! Nobody can rock pure white down like this. Absolutely iconic 🔥🤍 #PopeDrip #Balenciaga #WinterFit #Streetwear"
+                    </p>
+                  </div>
+
+                  <div class="grab-text-card">
+                    <div class="grab-text-top">
+                      <span class="grab-author">@wildlife_frame — Post Caption</span>
+                      <span class="mono-tag">381 chars</span>
+                    </div>
+                    <p class="grab-quote">
+                      "Still completely mesmerized by Nima Sarikhani’s award-winning photograph 'Ice Bed'. Captured in the Svalbard archipelago after three days searching through thick fog, he watched this young polar bear carve out a resting spot on a small iceberg and drift off to sleep..."
+                    </p>
+                  </div>
+                </div>
+
+                <div class="filter-footer-bar">
+                  <span>SKIPPED: nav labels, timestamps, view counters</span>
+                  <span>MIN LENGTH: 250 chars</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Seam Conduit -> Slide 4 Queue Rail -->
+            <div class="seam-conduit out-to-right" style="top: 760px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-label" style="right: 12px; left: auto;">Stream</span>
+              <span class="seam-chevron" style="right: 8px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 4: PRIORITISE CONTENT + NATIVE HOST SEAM DOCK
+               ================================================================ -->
+          <section class="slide-frame" id="slide-4" data-slide="4">
+            <div class="seam-conduit in-from-left" style="top: 760px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span class="slide-kicker-num">STEP 02</span>
+                  <span>Dynamic Prioritization &amp; Native IPC</span>
+                </div>
+                <h2 class="slide-title">Prioritise Content</h2>
+              </div>
+              <p class="slide-subtitle">
+                Items don't wait behind static batches. Whatever sits under your mouse cursor jumps straight to the front of the local inference pipe.
+              </p>
+            </header>
+
+            <div class="priority-layout">
+              <div class="priority-left">
+                <!-- Priority Tiers Schedule -->
+                <div class="fvf-panel priority-tiers-panel">
+                  <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-size: 18px; font-weight: 400; color: #ffffff;">4-Tier Live Scheduling</span>
+                    <span class="mono-tag ember">120ms hover dwell boost • In-RAM LRU cache</span>
+                  </div>
+                  <div class="priority-tiers-grid">
+                    <div class="tier-row p0">
+                      <span class="tier-badge p0">Priority 0</span>
+                      <div>
+                        <div class="tier-title">Content currently under mouse</div>
+                        <div class="tier-desc">Pre-empts queue immediately after 120ms hover dwell</div>
+                      </div>
+                    </div>
+                    <div class="tier-row p1">
+                      <span class="tier-badge p1">Priority 1</span>
+                      <div>
+                        <div class="tier-title">Content currently on screen</div>
+                        <div class="tier-desc">Active viewport items tracked by IntersectionObserver</div>
+                      </div>
+                    </div>
+                    <div class="tier-row">
+                      <span class="tier-badge p2">Priority 2</span>
+                      <div>
+                        <div class="tier-title">Content on current tab</div>
+                        <div class="tier-desc">Below-the-fold media queued ahead of scrolling</div>
+                      </div>
+                    </div>
+                    <div class="tier-row">
+                      <span class="tier-badge p3">Priority 3</span>
+                      <div>
+                        <div class="tier-title">Content on other tabs</div>
+                        <div class="tier-desc">Background tabs; stale jobs auto-purge on navigation</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Horizontal Queue Stage -->
+                <div class="queue-stage">
+                  <div class="queue-caption">
+                    <span>Queued Items Ordered by Attention →</span>
+                    <span>Dispatching to Native Host via OS stdio IPC</span>
+                  </div>
+
+                  <div class="queue-cards-row">
+                    <div class="q-card">
+                      <div class="q-card-head">
+                        <span class="mono-tag">P2 • BELOW FOLD</span>
+                        <span class="mono-tag">IMG</span>
+                      </div>
+                      <img src="./assets/football-team-celebration.jpg" alt="" class="q-img" />
+                    </div>
+
+                    <div class="q-card p1-item">
+                      <div class="q-card-head">
+                        <span class="mono-tag ember">P1 • VIEWPORT</span>
+                        <span class="mono-tag">IMG</span>
+                      </div>
+                      <img src="./assets/turtle-tzahi-finkelstein.jpg" alt="" class="q-img" />
+                    </div>
+
+                    <div class="q-card p1-item">
+                      <div class="q-card-head">
+                        <span class="mono-tag ember">P1 • VIEWPORT</span>
+                        <span class="mono-tag">IMG</span>
+                      </div>
+                      <img src="./assets/polar-bear-nima-sarikhani.jpg" alt="" class="q-img" />
+                    </div>
+
+                    <div class="q-card p1-item">
+                      <div class="q-card-head">
+                        <span class="mono-tag ember">P1 • VIEWPORT</span>
+                        <span class="mono-tag">TEXT</span>
+                      </div>
+                      <div class="q-text-preview">
+                        "@pitchside_hq: Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline..."
+                      </div>
+                    </div>
+
+                    <div class="q-card p0-front">
+                      <div class="q-cursor-tag">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-7 2-3 7-4-18z"/></svg>
+                        <span>P0 • UNDER MOUSE</span>
+                      </div>
+                      <div class="q-card-head">
+                        <span class="mono-tag ember">NEXT IN</span>
+                        <span class="mono-tag">700×858</span>
+                      </div>
+                      <img src="./assets/balenciaga-pope.jpg" alt="" class="q-img pope" />
+                    </div>
+                  </div>
+
+                  <div class="queue-rail-bar">
+                    <div class="queue-rail-fill"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Native Host Dock on Right Seam -->
+              <aside class="native-host-dock">
+                <span class="mono-tag green">● HOST WARM IN RAM</span>
+
+                <div>
+                  <img src="./assets/icon.svg" alt="Fire vs Fire Native Host" class="dock-logo" />
+                  <div class="dock-title">Native Inference Host</div>
+                  <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.45;">
+                    Local hardware-accelerated Python engine outside the browser sandbox.
+                  </div>
+                </div>
+
+                <div class="dock-specs">
+                  <div class="dock-spec-row">IPC: stdin / stdout JSON</div>
+                  <div class="dock-spec-row">Backends: CUDA · DirectML · MPS</div>
+                  <div class="dock-spec-row">Network Sockets: 0 (Air-Gapped)</div>
+                </div>
+              </aside>
+            </div>
+
+            <!-- Right Seam Conduit -> Slide 5 -->
+            <div class="seam-conduit out-to-right" style="top: 560px; width: 42px;">
+              <span class="seam-chevron" style="right: 6px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 5: IMAGE ANALYSIS I — HEIMDALL 04 B (3-BRANCH SPLIT)
+               ================================================================ -->
+          <section class="slide-frame" id="slide-5" data-slide="5">
+            <div class="seam-conduit in-from-left" style="top: 560px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span class="slide-kicker-num">STEP 03</span>
+                  <span>Image Classification • FvF Heimdall 04 B</span>
+                </div>
+                <h2 class="slide-title">3-Branch Visual Decomposition</h2>
+              </div>
+              <p class="slide-subtitle">
+                Every image is split into three parallel representations: un-resized 1:1 sensor crops, a 256×256 full scene view, and a 128×128 visual genre map.
+              </p>
+            </header>
+
+            <div class="decomp-layout">
+              <svg class="decomp-wiring" viewBox="0 0 56 850" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M 0 425 L 26 425 L 26 135 L 56 135" fill="none" stroke="rgba(255,68,0,0.7)" stroke-width="2" />
+                <path d="M 0 425 L 56 425" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
+                <path d="M 26 425 L 26 715 L 56 715" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
+                <circle cx="26" cy="425" r="4" fill="#ff4400" />
+              </svg>
+              <!-- Incoming Image -->
+              <div class="decomp-input-col">
+                <div class="fvf-panel-ember decomp-source-card">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="mono-tag ember">P0 INPUT PAYLOAD</span>
+                    <span class="mono-tag">700 × 858 RGB</span>
+                  </div>
+                  <img src="./assets/balenciaga-pope.jpg" alt="Pope Francis AI generated test image" class="decomp-source-img" />
+                  <div style="font-size: 16px; font-weight: 400; color: #ffffff; margin-bottom: 4px;">@streetwear_daily media</div>
+                  <div style="font-size: 13px; color: var(--text-muted); line-height: 1.4;">
+                    Dispatched simultaneously into all three neural branches in a single micro-batch.
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3 Parallel Branches -->
+              <div class="decomp-lanes">
+                <!-- Branch 1: 1:1 Crops -->
+                <div class="fvf-panel-ember branch-lane primary">
+                  <div>
+                    <div class="branch-tag">Branch 01 • Native-Grid Local Forensics</div>
+                    <h3 class="branch-name">Un-Resized 1:1 Crops (Corner, Center, Edge)</h3>
+                    <p class="branch-desc">
+                      Samples exact 256×256 1:1 pixel regions directly without downsampling—preserving high-frequency generator grid artifacts, sensor noise falloff, and center-vs-periphery consistency.
+                    </p>
+                  </div>
+                  <div class="crops-trio">
+                    <div class="crop-box">
+                      <img src="./assets/forensics/pope_crop_corner.png" alt="Corner 1:1 crop" />
+                      <span>Corner (1:1)</span>
+                    </div>
+                    <div class="crop-box">
+                      <img src="./assets/forensics/pope_crop_center.png" alt="Center 1:1 crop" />
+                      <span>Center (1:1)</span>
+                    </div>
+                    <div class="crop-box">
+                      <img src="./assets/forensics/pope_crop_edge.png" alt="Edge 1:1 crop" />
+                      <span>Edge (1:1)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Branch 2: Global 256x256 -->
+                <div class="fvf-panel branch-lane">
+                  <div>
+                    <div class="branch-tag">Branch 02 • Global Semantic Backbone (ConvNeXt-V2 Base)</div>
+                    <h3 class="branch-name">Downsampled 256×256 Full Image</h3>
+                    <p class="branch-desc">
+                      Resizes the full image via bicubic interpolation to evaluate global lighting, proportions, reflections, and overall scene coherence across 768 semantic dimensions.
+                    </p>
+                  </div>
+                  <div class="global-pair">
+                    <div class="global-thumb-box">
+                      <img src="./assets/forensics/pope_global_256.png" alt="Downsampled 256x256 RGB" />
+                      <span>256 × 256 Bicubic RGB</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Branch 3: Genre Context Branch -->
+                <div class="fvf-panel branch-lane">
+                  <div>
+                    <div class="branch-tag">Branch 03 • Intrinsic Genre &amp; Medium Context (RGB+Y CNN)</div>
+                    <h3 class="branch-name">128×128 RGB + Luminance (Y) Genre Detector</h3>
+                    <p class="branch-desc">
+                      Identifies whether the image is a photograph, poster, illustration, or diagram—calibrating the final decision head to eliminate false positives on graphic art and memes.
+                    </p>
+                  </div>
+                  <div class="global-pair">
+                    <div class="global-thumb-box sm">
+                      <img src="./assets/forensics/pope_luma_128.png" alt="128x128 Luminance Y" />
+                      <span>128 × 128 Y-Luma</span>
+                    </div>
+                    <div class="genre-bars">
+                      <div class="genre-row">
+                        <span>Photorealistic</span>
+                        <div class="genre-track"><div class="genre-fill" style="width: 94%;"></div></div>
+                        <span>94%</span>
+                      </div>
+                      <div class="genre-row">
+                        <span>Poster / Meme</span>
+                        <div class="genre-track"><div class="genre-fill muted" style="width: 3%;"></div></div>
+                        <span>3%</span>
+                      </div>
+                      <div class="genre-row">
+                        <span>Illustration</span>
+                        <div class="genre-track"><div class="genre-fill muted" style="width: 2%;"></div></div>
+                        <span>2%</span>
+                      </div>
+                      <div class="genre-row">
+                        <span>Diagram / UI</span>
+                        <div class="genre-track"><div class="genre-fill muted" style="width: 1%;"></div></div>
+                        <span>1%</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Seam Conduits matching exact row centers -> Slide 6 -->
+            <div class="seam-conduit out-to-right" style="top: 309px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+            <div class="seam-conduit out-to-right" style="top: 599px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+            <div class="seam-conduit out-to-right" style="top: 889px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 6: IMAGE ANALYSIS II — 24-CH FORENSIC GRID & VERDICT
+               ================================================================ -->
+          <section class="slide-frame" id="slide-6" data-slide="6">
+            <div class="seam-conduit in-from-left" style="top: 309px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+            <div class="seam-conduit in-from-left" style="top: 599px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+            <div class="seam-conduit in-from-left" style="top: 889px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span class="slide-kicker-num">STEP 04</span>
+                  <span>Forensic Extraction &amp; Gated Fusion</span>
+                </div>
+                <h2 class="slide-title">24-Channel Forensics &amp; Verdict</h2>
+              </div>
+              <p class="slide-subtitle">
+                Branch 1 extracts 24 mathematical channels per 1:1 crop (9 distinct channels shown below) before fusing with Semantic &amp; Genre embeddings.
+              </p>
+            </header>
+
+            <div class="forensic-layout">
+              <!-- 3x3 Grid of 9 Most Distinct Forensic Extractions -->
+              <div class="forensic-grid-3x3">
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/dct8_axial_hf_energy.png" alt="DCT8 Axial HF Energy" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">8×8 DCT Axial Energy</span>
+                    <span class="fx-code">dct8_axial_hf</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap spectrum">
+                    <img src="./assets/forensics/fft_residual_highpass.png" alt="2D FFT Residual Highpass" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">2D FFT High-Pass</span>
+                    <span class="fx-code">fft_res_highpass</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap spectrum">
+                    <img src="./assets/forensics/fft_chroma_diff.png" alt="2D FFT Chroma Diff" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">2D FFT Chroma Diff</span>
+                    <span class="fx-code">fft_chroma_diff</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/lbp_microtexture.png" alt="LBP Microtexture" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">LBP Microtexture</span>
+                    <span class="fx-code">lbp_8neighbor</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/res_half_sobel_x.png" alt="Sobel X Residual" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">Sobel-X Residual</span>
+                    <span class="fx-code">res_half_sobel_x</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/res_half_sobel_y.png" alt="Sobel Y Residual" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">Sobel-Y Residual</span>
+                    <span class="fx-code">res_half_sobel_y</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/res_half_laplacian.png" alt="Laplacian Edge Residual" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">Laplacian Residual</span>
+                    <span class="fx-code">res_half_laplacian</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/wavelet_db4_HL.png" alt="Daubechies-4 Wavelet HL" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">Wavelet db4 (HL)</span>
+                    <span class="fx-code">wavelet_db4_HL</span>
+                  </div>
+                </div>
+
+                <div class="fx-tile">
+                  <div class="fx-img-wrap">
+                    <img src="./assets/forensics/ycbcr_Cr.png" alt="YCbCr Cr Chrominance" />
+                  </div>
+                  <div class="fx-tile-footer">
+                    <span class="fx-name">Chrominance (Cr)</span>
+                    <span class="fx-code">ycbcr_Cr</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Gated Cross-Stream Fusion Head -->
+              <aside class="fvf-panel-ember fusion-col">
+                <div>
+                  <div class="branch-tag">Gated Cross-Stream Head</div>
+                  <h3 style="font-size: 23px; font-weight: 400; color: #ffffff;">Heimdall 04 B Fusion</h3>
+
+                  <div class="fusion-inputs-list">
+                    <div class="fusion-input-item active">
+                      <div class="fusion-input-label">Branch 01 • ForensicNeXt-24</div>
+                      <div class="fusion-input-val">768-d Crop Moment Pool</div>
+                      <div class="fusion-input-sub">Mean / Std / Max across 1:1 crops + center-vs-edge diff</div>
+                    </div>
+
+                    <div class="fusion-input-item">
+                      <div class="fusion-input-label">Branch 02 • ConvNeXt-V2 Base</div>
+                      <div class="fusion-input-val">1024-d Semantic Modulation</div>
+                      <div class="fusion-input-sub">Gated interaction with global RGB scene structure</div>
+                    </div>
+
+                    <div class="fusion-input-item">
+                      <div class="fusion-input-label">Branch 03 • Genre Context</div>
+                      <div class="fusion-input-val">24-d Genre Conditioning</div>
+                      <div class="fusion-input-sub">8 genre logits + 16 latent features (Anti-FP barrier)</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="verdict-box">
+                  <div class="verdict-label-row">
+                    <span class="verdict-badge-preview">AI generated 99%</span>
+                  </div>
+                  <div class="verdict-score-sub">Threshold: 75% • Calibrated with AFPL</div>
+                </div>
+              </aside>
+            </div>
+
+            <div class="forensic-bypass-bar">
+              <span>BRANCH 2 &amp; 3 CONDUITS</span>
+              <span class="bypass-pipe"></span>
+              <span>Global RGB (1024-d) + Genre Context (24-d) → Gated Fusion Head</span>
+            </div>
+
+            <!-- Right Seam Conduit -> Slide 7 (Text Pipeline) -->
+            <div class="seam-conduit out-to-right" style="top: 560px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-label" style="left: 14px;">Text</span>
+              <span class="seam-chevron" style="right: 8px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 7: TEXT ANALYSIS I — MIMIR 02 B (3-STREAM DECOMPOSITION)
+               ================================================================ -->
+          <section class="slide-frame" id="slide-7" data-slide="7">
+            <div class="seam-conduit in-from-left" style="top: 560px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span class="slide-kicker-num">STEP 05</span>
+                  <span>Text Classification • FvF Mímir 02 B</span>
+                </div>
+                <h2 class="slide-title">3-Stream Text Decomposition</h2>
+              </div>
+              <p class="slide-subtitle">
+                Queued text is sanitized and evaluated across three independent forensic streams: discourse semantics, token-rank curvature, and stylometry.
+              </p>
+            </header>
+
+            <div class="decomp-layout">
+              <svg class="decomp-wiring" viewBox="0 0 56 850" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M 0 425 L 26 425 L 26 135 L 56 135" fill="none" stroke="rgba(255,68,0,0.7)" stroke-width="2" />
+                <path d="M 0 425 L 56 425" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
+                <path d="M 26 425 L 26 715 L 56 715" fill="none" stroke="rgba(255,68,0,0.55)" stroke-width="2" />
+                <circle cx="26" cy="425" r="4" fill="#ff4400" />
+              </svg>
+              <!-- Incoming Text Input -->
+              <div class="decomp-input-col">
+                <div class="fvf-panel-ember decomp-source-card">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="mono-tag ember">P1 TEXT PAYLOAD</span>
+                    <span class="mono-tag">321 chars</span>
+                  </div>
+                  <div class="decomp-source-text">
+                    "Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline, and relentless determination boiling down to this iconic moment of glory. Absolute football history! ⚽🔥 #Football #Champions #WorldCup #Victory #Trophy"
+                  </div>
+                  <div style="font-size: 15px; font-weight: 400; color: #ffffff; margin-bottom: 4px;">@pitchside_hq caption</div>
+                  <div style="font-size: 13px; color: var(--text-muted); line-height: 1.4;">
+                    Image is a real photograph — Mímir evaluates text independently so AI captions on real media are still caught.
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3 Parallel Text Streams -->
+              <div class="decomp-lanes">
+                <!-- Stream 1: Discourse Encoder -->
+                <div class="fvf-panel-ember branch-lane primary">
+                  <div>
+                    <div class="branch-tag">Stream 01 • Semantic &amp; Discourse Encoder</div>
+                    <h3 class="branch-name">DistilRoBERTa-AFPL INT8 (384-Token Window)</h3>
+                    <p class="branch-desc">
+                      Inspects phrasing symmetries, rhetorical cadence, and synthetic discourse patterns across the full sanitized sequence, outputting calibrated encoder logit and probability signals.
+                    </p>
+                  </div>
+                  <div style="width: 340px; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="stylo-chip" style="width: 100%;">
+                      <span>tokenizer</span>
+                      <span>mimir_tokenizer (BPE)</span>
+                    </div>
+                    <div class="stylo-chip" style="width: 100%;">
+                      <span>window_tokens</span>
+                      <span>68 / 384 active</span>
+                    </div>
+                    <div class="stylo-chip" style="width: 100%; border-color: var(--border-ember);">
+                      <span>runtime</span>
+                      <span>ONNX INT8 Quantized</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Stream 2A: Causal LM Perplexity & Curvature -->
+                <div class="fvf-panel branch-lane">
+                  <div>
+                    <div class="branch-tag">Stream 02A • Causal LM Perplexity &amp; Curvature (DistilGPT-2 INT8)</div>
+                    <h3 class="branch-name">Token-Rank Predictability Strip</h3>
+                    <p class="branch-desc">
+                      Measures how consistently each next word sits in the model's highest-probability ranks (Top-1 / Top-5) and compares negative log-likelihood against token entropy.
+                    </p>
+                  </div>
+                  <div>
+                    <div class="token-legend">
+                      <span><i style="background: rgba(255, 68, 0, 0.7);"></i>Top-1 Rank</span>
+                      <span><i style="background: rgba(255, 138, 61, 0.55);"></i>Top-5 Rank</span>
+                      <span><i style="background: rgba(46, 204, 113, 0.6);"></i>Tail &gt;100</span>
+                    </div>
+                    <div class="token-rank-strip">
+                      <span class="tok top1">Pure</span>
+                      <span class="tok top5">elation</span>
+                      <span class="tok top1">as</span>
+                      <span class="tok top1">the</span>
+                      <span class="tok top5">squad</span>
+                      <span class="tok tail">hoists</span>
+                      <span class="tok top1">the</span>
+                      <span class="tok top1">championship</span>
+                      <span class="tok top1">trophy</span>
+                      <span class="tok top5">amid</span>
+                      <span class="tok top1">a</span>
+                      <span class="tok top5">blizzard</span>
+                      <span class="tok top1">of</span>
+                      <span class="tok top1">golden</span>
+                      <span class="tok top1">confetti!</span>
+                      <span class="tok top1">tactical</span>
+                      <span class="tok top1">discipline</span>
+                      <span class="tok top1">relentless</span>
+                      <span class="tok top1">determination</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Stream 2B: Mindner Stylometrics -->
+                <div class="fvf-panel branch-lane">
+                  <div>
+                    <div class="branch-tag">Stream 02B • Length-Normalized Mindner Stylometrics (19 Features)</div>
+                    <h3 class="branch-name">Lexical Diversity, Readability &amp; Clause Pacing</h3>
+                    <p class="branch-desc">
+                      Extracts length-normalized ratios (no raw length bias) covering vocabulary richness, Flesch-Kincaid grade, part-of-speech densities, and punctuation pacing variance.
+                    </p>
+                  </div>
+                  <div class="stylo-chips">
+                    <div class="stylo-chip"><span>word_count</span><span>46 words</span></div>
+                    <div class="stylo-chip"><span>sentences</span><span>4 sents</span></div>
+                    <div class="stylo-chip"><span>ttr_ratio</span><span>0.870</span></div>
+                    <div class="stylo-chip"><span>syll / word</span><span>1.89</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Seam Conduits matching exact row centers -> Slide 8 -->
+            <div class="seam-conduit out-to-right" style="top: 309px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+            <div class="seam-conduit out-to-right" style="top: 599px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+            <div class="seam-conduit out-to-right" style="top: 889px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-chevron" style="right: 10px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 8: TEXT ANALYSIS II — 38-FEATURE EXTRACTION & VERDICT
+               ================================================================ -->
+          <section class="slide-frame" id="slide-8" data-slide="8">
+            <div class="seam-conduit in-from-left" style="top: 309px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+            <div class="seam-conduit in-from-left" style="top: 599px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+            <div class="seam-conduit in-from-left" style="top: 889px; width: 72px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <header class="slide-header">
+              <div>
+                <div class="slide-kicker">
+                  <span class="slide-kicker-num">STEP 06</span>
+                  <span>Text Forensics &amp; Calibrated Fusion</span>
+                </div>
+                <h2 class="slide-title">38-Feature Signals &amp; Text Verdict</h2>
+              </div>
+              <p class="slide-subtitle">
+                Mímir's 9 forensic feature groups combine encoder logits, LM curvature, and real computed Mindner stylometrics into a calibrated LightGBM verdict.
+              </p>
+            </header>
+
+            <div class="forensic-layout">
+              <!-- 3x3 Grid of 9 Forensic Text Signal Cards -->
+              <div class="forensic-grid-3x3">
+                <div class="mimir-card accent">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Discourse Encoder</span>
+                    <span class="mimir-card-sub">Stream 1</span>
+                  </div>
+                  <div class="mimir-big-val">0.964</div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>enc_logit</span><span>+3.29</span></div>
+                    <div class="mimir-metric-row"><span>enc_prob</span><span>0.964</span></div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Token Rank Share</span>
+                    <span class="mimir-card-sub">Stream 2A</span>
+                  </div>
+                  <div class="mini-bar-group">
+                    <div class="mini-bar-row">
+                      <span>Top-1</span>
+                      <div class="mini-bar-track"><div class="mini-bar-fill" style="width: 62%;"></div></div>
+                      <span>62%</span>
+                    </div>
+                    <div class="mini-bar-row">
+                      <span>Top-5</span>
+                      <div class="mini-bar-track"><div class="mini-bar-fill soft" style="width: 88%;"></div></div>
+                      <span>88%</span>
+                    </div>
+                    <div class="mini-bar-row">
+                      <span>Tail &gt;100</span>
+                      <div class="mini-bar-track"><div class="mini-bar-fill green" style="width: 3%;"></div></div>
+                      <span>3%</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Perplexity Profile</span>
+                    <span class="mimir-card-sub">Stream 2A</span>
+                  </div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>lm_ppl_global</span><span>14.2</span></div>
+                    <div class="mimir-metric-row"><span>lm_mean_nll</span><span>2.65</span></div>
+                    <div class="mimir-metric-row"><span>lm_entropy_mean</span><span>3.58</span></div>
+                    <div class="mimir-metric-row"><span>lm_ppl_norm</span><span>0.74</span></div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Curvature Signal</span>
+                    <span class="mimir-card-sub">Stream 2A</span>
+                  </div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>|NLL - Entropy|</span><span>0.93</span></div>
+                    <div class="mimir-metric-row"><span>logprob_std</span><span>1.68</span></div>
+                    <div class="mimir-metric-row"><span>logprob_skew</span><span>-1.14</span></div>
+                    <div class="mimir-metric-row"><span>logprob_kurt</span><span>3.92</span></div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Burstiness</span>
+                    <span class="mimir-card-sub">Stream 2A</span>
+                  </div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>sent_ppl_mean</span><span>15.1</span></div>
+                    <div class="mimir-metric-row"><span>sent_ppl_std</span><span>3.4</span></div>
+                    <div class="mimir-metric-row"><span>range_ratio</span><span>1.72</span></div>
+                    <div class="mimir-metric-row"><span>uniformity</span><span>High (AI-like)</span></div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Lexical Diversity</span>
+                    <span class="mimir-card-sub">Computed 2B</span>
+                  </div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>stylo_ttr</span><span>0.870</span></div>
+                    <div class="mimir-metric-row"><span>stylo_yules_k</span><span>66.16</span></div>
+                    <div class="mimir-metric-row"><span>stylo_simpson_d</span><span>0.0068</span></div>
+                    <div class="mimir-metric-row"><span>words / sent</span><span>11.50</span></div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Readability</span>
+                    <span class="mimir-card-sub">Computed 2B</span>
+                  </div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>flesch_ease</span><span>35.16</span></div>
+                    <div class="mimir-metric-row"><span>fk_grade</span><span>11.21</span></div>
+                    <div class="mimir-metric-row"><span>stylo_ari</span><span>12.07</span></div>
+                    <div class="mimir-metric-row"><span>syllables / word</span><span>1.89</span></div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">POS Densities</span>
+                    <span class="mimir-card-sub">Computed 2B</span>
+                  </div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>determiner_dens</span><span>10.9%</span></div>
+                    <div class="mimir-metric-row"><span>preposition_dens</span><span>10.9%</span></div>
+                    <div class="mimir-metric-row"><span>adjective_dens</span><span>6.5%</span></div>
+                    <div class="mimir-metric-row"><span>verb_dens</span><span>6.5%</span></div>
+                  </div>
+                </div>
+
+                <div class="mimir-card">
+                  <div class="mimir-card-head">
+                    <span class="mimir-card-title">Pacing &amp; Punct</span>
+                    <span class="mimir-card-sub">Computed 2B</span>
+                  </div>
+                  <div class="mimir-metrics-list">
+                    <div class="mimir-metric-row"><span>pacing_std</span><span>9.74</span></div>
+                    <div class="mimir-metric-row"><span>comma_density</span><span>4.35%</span></div>
+                    <div class="mimir-metric-row"><span>punct_density</span><span>4.35%</span></div>
+                    <div class="mimir-metric-row"><span>1st/2nd pronoun</span><span>0.0%</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 38-Feature LightGBM Fusion Verdict -->
+              <aside class="fvf-panel-ember fusion-col">
+                <div>
+                  <div class="branch-tag">38-Feature Fusion Head</div>
+                  <h3 style="font-size: 23px; font-weight: 400; color: #ffffff;">Mímir 02 B Verdict</h3>
+
+                  <div class="fusion-inputs-list">
+                    <div class="fusion-input-item active">
+                      <div class="fusion-input-label">Stream 01 • Encoder</div>
+                      <div class="fusion-input-val">2 Forensic Features</div>
+                      <div class="fusion-input-sub">enc_logit (+3.29) &amp; enc_prob (0.964)</div>
+                    </div>
+
+                    <div class="fusion-input-item">
+                      <div class="fusion-input-label">Stream 02A • Perplexity</div>
+                      <div class="fusion-input-val">17 Curvature Features</div>
+                      <div class="fusion-input-sub">Rank concentration + burstiness flatness</div>
+                    </div>
+
+                    <div class="fusion-input-item">
+                      <div class="fusion-input-label">Stream 02B • Mindner</div>
+                      <div class="fusion-input-val">19 Stylometric Features</div>
+                      <div class="fusion-input-sub">Computed live via extract_stylometric_features()</div>
+                    </div>
+                  </div>
+
+                  <div class="text-preview-box">
+                    <span class="flagged-sample">Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy...</span>
+                  </div>
+                </div>
+
+                <div class="verdict-box" style="background: rgba(255, 0, 100, 0.08); border-color: rgba(255, 0, 100, 0.45);">
+                  <div class="verdict-label-row">
+                    <span class="verdict-badge-preview text-mode">AI text 96%</span>
+                  </div>
+                  <div class="verdict-score-sub">Threshold: 75% • Blur + #FF0064 Strike</div>
+                </div>
+              </aside>
+            </div>
+
+            <div class="forensic-bypass-bar">
+              <span>FUSION VECTOR</span>
+              <span class="bypass-pipe"></span>
+              <span>[2 Encoder + 17 LM Curvature + 19 Stylometrics] → Calibrated LightGBM Head</span>
+            </div>
+
+            <!-- Right Seam Conduit -> Slide 9 -->
+            <div class="seam-conduit out-to-right" style="top: 540px; width: 72px;">
+              <div class="seam-node" style="left: 0;"></div>
+              <span class="seam-label" style="left: 14px;">Tags</span>
+              <span class="seam-chevron" style="right: 8px;">›</span>
+            </div>
+          </section>
+
+          <!-- ================================================================
+               SLIDE 9: CLASSIFIED COMMUNITY FEED (FINAL RESULT)
+               ================================================================ -->
+          <section class="slide-frame slide-feed-frame slide-classified" id="slide-9" data-slide="9">
+            <div class="seam-conduit in-from-left" style="top: 540px; width: 40px;">
+              <div class="seam-node" style="right: 0;"></div>
+            </div>
+
+            <div class="embedded-feed-window">
+              <aside class="ef-nav-rail">
+                <div class="ef-nav-top">
+                  <div class="ef-app-logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                  </div>
+                  <ul class="ef-nav-icons">
+                    <li class="ef-nav-icon active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></li>
+                    <li class="ef-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg></li>
+                    <li class="ef-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></li>
+                    <li class="ef-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></li>
+                  </ul>
+                </div>
+                <img src="./assets/avatar-user.svg" alt="" class="ef-rail-avatar" />
+              </aside>
+
+              <div class="ef-main">
+                <div class="ef-top-bar">
+                  <div class="ef-title-group">
+                    <div class="ef-title">Community Feed</div>
+                    <div class="ef-tabs">
+                      <span class="ef-tab active">Trending</span>
+                      <span class="ef-tab">Latest</span>
+                      <span class="ef-tab">Photos</span>
+                    </div>
+                  </div>
+                  <div class="ef-controls">
+                    <div class="ef-fvf-status-pill">
+                      <img src="./assets/icon.svg" alt="" />
+                      <span>Fire vs Fire Active • 2 AI Images, 1 AI Text Flagged (Hover to reveal)</span>
+                    </div>
+                    <div class="ef-view-switch">
+                      <span class="ef-view-btn active">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+                        <span>Grid (3×2)</span>
+                      </span>
+                      <span class="ef-view-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line></svg>
+                        <span>Timeline</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ef-posts-grid">
+                  <!-- Post 1: Pope (AI IMAGE FLAGGED) -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-streetwear.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Streetwear Archive <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@streetwear_daily · 2h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Honestly cannot get over this fit 🥶 Pope Francis stepping out in the custom oversized puffer jacket is pure high fashion drip. The Vatican's stylist went absolutely crazy for winter fashion week! Nobody can rock pure white down like this. Absolutely iconic 🔥🤍 <span class="ef-hashtag">#PopeDrip</span></p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box" title="AI generated (99% confidence) — Hover to reveal">
+                      <img src="./assets/balenciaga-pope.jpg" alt="" class="ef-post-img ai-detected" style="object-position: center 16%;" />
+                      <span class="ef-ai-badge">AI generated 99%</span>
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>4.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>28.4K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>142.8K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>1.8M</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 2: Polar Bear (REAL - UNTOUCHED) -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-wildlife.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Wildlife &amp; Conservation Lens <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@wildlife_frame · 6h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Still completely mesmerized by Nima Sarikhani’s award-winning photograph 'Ice Bed'. Captured in the Svalbard archipelago after three days searching through thick fog, he watched this young polar bear carve out a resting spot on a small iceberg and drift off to sleep.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/polar-bear-nima-sarikhani.jpg" alt="" class="ef-post-img" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>1.1K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>14.1K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>89.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>740K</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 3: Turtle (REAL - UNTOUCHED) -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-nature.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Macro Nature Chronicles <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@macro_chronicles · 12h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Timing is everything in nature photography! 📸 Israeli photographer Tzahi Finkelstein was watching birds in the Jezreel Valley when he spotted this Balkan pond turtle swimming. Out of nowhere, a dragonfly landed right on its nose, and the turtle looked utterly amazed.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/turtle-tzahi-finkelstein.jpg" alt="" class="ef-post-img" style="object-position: center 35%;" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>856</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>8.9K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>64.7K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>510K</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 4: Football (REAL PHOTO + AI TEXT FLAGGED) -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-sports.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Pitchside Football <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@pitchside_hq · 14h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap" title="AI text (96% confidence) — Hover to reveal">
+                        <p class="ef-post-text ai-text-flagged">Nothing in world sport matches this feeling 🏆 Pure elation as the squad hoists the championship trophy amid a blizzard of golden confetti! Years of sacrifice, tactical discipline, and relentless determination boiling down to this iconic moment of glory. <span class="ef-hashtag">#Football</span></p>
+                        <span class="ef-text-badge">AI text 96%</span>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/football-team-celebration.jpg" alt="" class="ef-post-img" style="object-position: center 25%;" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>3.4K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>19.7K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>118.4K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>1.4M</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 5: Sagrada Familia (REAL - UNTOUCHED) -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-architecture.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Architectural Heritage <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@arch_wonders · 18h ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Over 140 years in the making! 🏗️✨ Breathtaking golden hour view of Antoni Gaudí’s masterwork, the Basílica de la Sagrada Família, with the central spires and the Tower of Jesus Christ nearing final completion across Barcelona's skyline.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box">
+                      <img src="./assets/sagrada-familia-finished.jpg" alt="" class="ef-post-img" style="object-position: center 38%;" />
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>2.1K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>16.3K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>94.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>980K</span></span>
+                    </div>
+                  </article>
+
+                  <!-- Post 6: Theatre D'opera Spatial (AI IMAGE FLAGGED) -->
+                  <article class="ef-post-card">
+                    <div>
+                      <div class="ef-post-header">
+                        <div class="ef-author-wrap">
+                          <img src="./assets/avatar-ai-art.svg" alt="" class="ef-avatar" />
+                          <div>
+                            <div class="ef-author-name">Digital Art &amp; Synth <svg class="ef-verified" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg></div>
+                            <div class="ef-handle">@digital_curator · 1d ago</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="ef-post-text-wrap">
+                        <p class="ef-post-text">Revisiting the watershed moment for generative AI: Jason M. Allen's 'Théâtre D’opéra Spatial'. Generated using Midjourney v3 and upscaled with Gigapixel AI, this piece shocked the art world when it took 1st place in the digital arts category.</p>
+                      </div>
+                    </div>
+                    <div class="ef-media-box" title="AI generated (98% confidence) — Hover to reveal">
+                      <img src="./assets/theatre-dopera-spatial.jpg" alt="" class="ef-post-img ai-detected" />
+                      <span class="ef-ai-badge">AI generated 98%</span>
+                    </div>
+                    <div class="ef-actions">
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>5.8K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg><span>31.2K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>168.5K</span></span>
+                      <span class="ef-action"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>2.3M</span></span>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </main>
+      </div>
+    </div>
+
+    <script src="./showcase.js?v=1.0"></script>
+  </body>
+</html>

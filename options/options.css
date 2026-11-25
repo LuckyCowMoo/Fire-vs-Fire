@@ -1832,6 +1832,75 @@ body {
   flex-shrink: 0;
 }
 
+/* Automatic Host & Classifier Update Action Bar */
+.update-banner-wrap[hidden],
+.update-banner-btn[hidden],
+.update-banner-status[hidden] {
+  display: none !important;
+}
+
+.update-banner-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.update-banner-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, rgba(255, 68, 0, 0.2), rgba(255, 118, 36, 0.14));
+  border: 1px solid rgba(255, 98, 24, 0.55);
+  color: #ffb38a;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-banner-btn:hover:not(:disabled) {
+  background: linear-gradient(90deg, rgba(255, 68, 0, 0.3), rgba(255, 118, 36, 0.22));
+  border-color: rgba(255, 118, 36, 0.85);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(255, 68, 0, 0.2);
+}
+
+.update-banner-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.update-banner-btn--classifier {
+  background: linear-gradient(90deg, rgba(255, 148, 36, 0.16), rgba(255, 98, 24, 0.12));
+  border-color: rgba(255, 152, 56, 0.45);
+  color: #ffd099;
+}
+
+.update-banner-btn--classifier:hover:not(:disabled) {
+  background: linear-gradient(90deg, rgba(255, 148, 36, 0.26), rgba(255, 98, 24, 0.2));
+  border-color: rgba(255, 168, 72, 0.8);
+  color: #ffffff;
+}
+
+.update-banner-status {
+  font-size: 11.5px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+  line-height: 1.4;
+}
+
 /* Native Host Status & Updater Panel */
 .native-host-panel {
   border-color: rgba(255, 98, 24, 0.22);

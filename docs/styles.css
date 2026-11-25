@@ -801,6 +801,18 @@ body {
   cursor: not-allowed;
 }
 
+.btn-tile-action.btn-tile-update {
+  border-radius: 0;
+  color: #ffb26b;
+  background: linear-gradient(180deg, rgba(255, 138, 61, 0.16), rgba(9, 12, 18, 0.96));
+  border-bottom: 1px solid rgba(255, 138, 61, 0.35);
+}
+
+.btn-tile-action.btn-tile-update:hover:not(:disabled) {
+  color: #ffffff;
+  background: linear-gradient(180deg, rgba(255, 138, 61, 0.3), rgba(20, 24, 34, 0.98));
+}
+
 /* Hold-to-uninstall button styled after .category-delete-btn from options.css */
 .btn-tile-action.btn-tile-uninstall,
 .category-delete-btn {

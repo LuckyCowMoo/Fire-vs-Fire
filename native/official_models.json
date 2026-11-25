@@ -323,6 +323,14 @@
       "ram_size": "500 MB RAM"
     }
   ],
-  "host_version": "2.1.0",
-  "release_notes": "FvF v2.1.0: Self-healing Native Host, 1-click updates, declared classifier dependencies, and responsive quadrant UI."
+  "host_version": "2.2.0",
+  "release_notes": "FvF v2.2.0: Automatic Native Host & classifier update scanning, atomic self-updates, hover P0 priority, and Mímir 02 B support.",
+  "host_files": [
+    "native/echo_host_V2.py",
+    "native/model_registry.py",
+    "native/official_models.json",
+    "native/classifiers/base_classifier.py",
+    "native/classifiers/_heimdall_arch.py",
+    "native/classifiers/mimir_extractor.py"
+  ]
 }

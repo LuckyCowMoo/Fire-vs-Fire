@@ -20,6 +20,7 @@ let settings = {
   enabled: true,                  // Master toggle for the extension
   altTextOnly: true,              // If true, only process images with alt text (default: true)
   ignoreSmallImages: true,        // Skip physically small images such as avatars and UI icons
+  investigator: true,             // Automatically locate higher-res candidates for small/compressed thumbnails
   blurAmount: 3,                  // Blur radius (px) for flagged images
   borderMultiplier: 1,            // Multiplier for border width calculation
   borderColor: '#ff0064',       // Color for image borders and text strikethrough (red)
@@ -560,11 +561,19 @@ function attachGlobalHoverHandler() {
 // Single-Item Real-Time Streaming Dispatch
 // ============================================================================
 
+function getCaptureQuality() {
+  return typeof settings.imageCaptureQuality === 'number'
+    ? Math.max(0.2, Math.min(1.0, settings.imageCaptureQuality))
+    : 1.0;
+}
+
 // Extract image as compact base64 from DOM; returns null if tainted by cross-origin CORS
 function imageToBase64(imgElement) {
   try {
-    let w = imgElement.naturalWidth || imgElement.width || 0;
-    let h = imgElement.naturalHeight || imgElement.height || 0;
+    const srcForDims = imgElement.currentSrc || imgElement.src || imgElement.getAttribute('src') || '';
+    const dims = getEffectiveImageDimensions(imgElement, srcForDims);
+    let w = dims.width || imgElement.width || 0;
+    let h = dims.height || imgElement.height || 0;
     if (w < 48 || h < 48) return null;
 
     const MAX_DIM = 768;
@@ -584,9 +593,7 @@ function imageToBase64(imgElement) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(imgElement, 0, 0, w, h);
 
-    const quality = typeof settings.imageCaptureQuality === 'number'
-      ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality))
-      : 0.90;
+    const quality = getCaptureQuality();
     const dataUrl = canvas.toDataURL('image/jpeg', quality);
     canvas.width = 0;
     canvas.height = 0;
@@ -611,31 +618,42 @@ function dispatchSingleImageItem(imgObj, modelConfig) {
     observeImage(imgObj.element);
   }
 
-  const base64Data = imageToBase64(imgObj.element);
-  const quality = typeof settings.imageCaptureQuality === 'number'
-    ? Math.max(0.6, Math.min(0.95, settings.imageCaptureQuality))
-    : 0.90;
+  const localBase64 = imageToBase64(imgObj.element);
+  const upgradedSrc = imgObj.investigatorSrc || null;
+  const quality = getCaptureQuality();
 
   if (settings.verboseLogs) {
+    const modeLabel = upgradedSrc
+      ? 'investigator-hi-res'
+      : (localBase64 ? 'canvas-b64' : 'bg-cors-fetch');
     console.log(
-      `[AI Detector] Streaming image (${inViewport ? 'P1 viewport' : 'P2 offscreen'}, ${base64Data ? 'canvas-b64' : 'bg-cors-fetch'}):`,
+      `[AI Detector] Streaming image (${inViewport ? 'P1 viewport' : 'P2 offscreen'}, ${modeLabel}):`,
       itemId.substring(0, 80)
     );
   }
 
-  ext.runtime.sendMessage({
+  const messagePayload = {
     type: 'CLASSIFY_SINGLE_ITEM',
     pageId: currentPageId,
     itemId,
     modality: 'image',
     inViewport,
-    data: base64Data,
-    src: imgObj.src,
+    data: upgradedSrc ? null : localBase64,
+    src: upgradedSrc || imgObj.src,
     captureQuality: quality,
     width: imgObj.width || null,
     height: imgObj.height || null,
     model: modelConfig
-  }).catch((err) => {
+  };
+  if (upgradedSrc) {
+    messagePayload.isInvestigatorUpgrade = true;
+    messagePayload.fallbackSrc = imgObj.src;
+    if (localBase64) {
+      messagePayload.fallbackData = localBase64;
+    }
+  }
+
+  ext.runtime.sendMessage(messagePayload).catch((err) => {
     if (settings.verboseLogs) {
       console.warn('[AI Detector] Failed to send single image item:', err);
     }
@@ -972,11 +990,315 @@ function processTextElement(el) {
   return TU.buildTextSection(el, seenTextContent.size, text);
 }
 
+const INVESTIGATOR_MAX_SIDE_THRESHOLD = 640;
+const INVESTIGATOR_HIGHRES_ATTRS = [
+  'data-large-file',
+  'data-orig-file',
+  'data-full-src',
+  'data-zoom-src',
+  'data-hi-res-src',
+  'data-original',
+  'data-src'
+];
+
+function parseSrcset(raw, baseUri) {
+  const results = [];
+  if (!raw || typeof raw !== 'string') return results;
+  const len = raw.length;
+  let i = 0;
+
+  while (i < len) {
+    while (i < len && (raw[i] === ',' || /\s/.test(raw[i]))) i++;
+    if (i >= len) break;
+
+    const urlStart = i;
+    while (i < len && !/\s/.test(raw[i])) i++;
+    let urlToken = raw.slice(urlStart, i);
+    let width = null;
+    let density = null;
+
+    if (urlToken.endsWith(',')) {
+      urlToken = urlToken.replace(/,+$/, '');
+      density = 1;
+    } else {
+      while (i < len && /\s/.test(raw[i])) i++;
+      const descStart = i;
+      while (i < len && raw[i] !== ',') i++;
+      const descStr = raw.slice(descStart, i).trim();
+      if (i < len && raw[i] === ',') i++;
+
+      if (!descStr) {
+        density = 1;
+      } else {
+        const firstToken = descStr.split(/\s+/)[0];
+        const match = firstToken.match(/^(\d+(?:\.\d+)?)(w|x)$/i);
+        if (!match) continue;
+        const val = parseFloat(match[1]);
+        if (!Number.isFinite(val) || val <= 0) continue;
+        if (match[2].toLowerCase() === 'w') {
+          width = Math.round(val);
+        } else {
+          density = val;
+        }
+      }
+    }
+
+    if (!urlToken) continue;
+    try {
+      const resolved = new URL(urlToken, baseUri);
+      if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue;
+      results.push({ url: resolved.href, width, density });
+    } catch (_) {}
+  }
+
+  return results;
+}
+
+function collectSrcsetCandidates(el, baseUri) {
+  const srcsetStrings = [];
+  if (el && typeof el.getAttribute === 'function') {
+    ['srcset', 'data-srcset', 'data-lazy-srcset'].forEach((attr) => {
+      const v = el.getAttribute(attr);
+      if (v) srcsetStrings.push(v);
+    });
+  }
+
+  const parent = el && el.parentElement;
+  if (parent && parent.tagName && parent.tagName.toLowerCase() === 'picture' && parent.children) {
+    for (let i = 0; i < parent.children.length; i++) {
+      const child = parent.children[i];
+      if (!child || !child.tagName || child.tagName.toLowerCase() !== 'source') continue;
+      const mimeType = typeof child.getAttribute === 'function'
+        ? (child.getAttribute('type') || '').toLowerCase()
+        : '';
+      if (mimeType === 'image/svg+xml') continue;
+      if (typeof child.getAttribute === 'function') {
+        ['srcset', 'data-srcset', 'data-lazy-srcset'].forEach((attr) => {
+          const v = child.getAttribute(attr);
+          if (v) srcsetStrings.push(v);
+        });
+      }
+    }
+  }
+
+  if (srcsetStrings.length === 0) return [];
+  const parsedByUrl = new Map();
+  srcsetStrings.forEach((raw) => {
+    parseSrcset(raw, baseUri).forEach((cand) => {
+      if (!parsedByUrl.has(cand.url)) {
+        parsedByUrl.set(cand.url, cand);
+      }
+    });
+  });
+  return Array.from(parsedByUrl.values());
+}
+
+function getEffectiveImageDimensions(el, baseSrc) {
+  const nw = (el && el.naturalWidth) || 0;
+  const nh = (el && el.naturalHeight) || 0;
+  if (!el || nw <= 0 || nh <= 0) {
+    return { width: nw, height: nh, density: 1 };
+  }
+
+  const baseUri = (typeof document !== 'undefined' && document.baseURI) ||
+    (typeof window !== 'undefined' && window.location && window.location.href) ||
+    baseSrc || '';
+  const candidates = collectSrcsetCandidates(el, baseUri);
+  if (candidates.length > 0 && baseSrc) {
+    const match = candidates.find((c) => c.url === baseSrc && c.density && c.density > 1);
+    if (match) {
+      return {
+        width: Math.round(nw * match.density),
+        height: Math.round(nh * match.density),
+        density: match.density
+      };
+    }
+  }
+  return { width: nw, height: nh, density: 1 };
+}
+
+function getRegistrableDomain(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+  if (!host) return '';
+  const parts = host.split('.');
+  if (parts.length <= 2) return host;
+  const twoPart = parts.slice(-2).join('.');
+  if (twoPart === 'co.uk' || twoPart === 'com.au' || twoPart === 'org.uk' || twoPart === 'ac.uk') {
+    return parts.slice(-3).join('.');
+  }
+  return twoPart;
+}
+
+function upgradeSameCdnUrl(urlStr, el = null) {
+  try {
+    const u = new URL(urlStr);
+    const host = u.hostname.toLowerCase();
+
+    // Pinterest small thumbnails -> 736x medium-high tier
+    if (host === 'i.pinimg.com') {
+      if (/\/(?:170x|236x|474x|564x)\//.test(u.pathname)) {
+        u.pathname = u.pathname.replace(/\/(?:170x|236x|474x|564x)\//, '/736x/');
+        return u.href;
+      }
+      return null;
+    }
+
+    // X / Twitter media thumbnails -> large
+    if (host === 'pbs.twimg.com' && u.pathname.startsWith('/media/')) {
+      const nameParam = u.searchParams.get('name');
+      if (nameParam && /^(?:thumb|tiny|small|120x120|240x240|360x360)$/i.test(nameParam)) {
+        u.searchParams.set('name', 'large');
+        return u.href;
+      }
+      if (/:(?:small|thumb)$/i.test(u.pathname)) {
+        u.pathname = u.pathname.replace(/:(?:small|thumb)$/i, ':large');
+        return u.href;
+      }
+      return null;
+    }
+
+    // Wikimedia Commons thumbnails -> valid standard bucket step (960px or 500px; 800px returns HTTP 400)
+    if ((host === 'upload.wikimedia.org' || host === 'thumb.wikimedia.org') && u.pathname.includes('/thumb/')) {
+      const m = u.pathname.match(/\/(\d+)px-([^/]+)$/);
+      if (m) {
+        const currentPx = parseInt(m[1], 10);
+        const origWidthAttr = el && typeof el.getAttribute === 'function'
+          ? parseInt(el.getAttribute('data-file-width') || '', 10)
+          : NaN;
+        const maxOrigPx = Number.isFinite(origWidthAttr) && origWidthAttr > 0 ? origWidthAttr : Infinity;
+        const validSteps = [500, 960];
+        const targetStep = validSteps.find((s) => s > currentPx && s <= maxOrigPx && (s >= INVESTIGATOR_MAX_SIDE_THRESHOLD || maxOrigPx < 960))
+          || (960 > currentPx && maxOrigPx >= 960 ? 960 : (500 > currentPx && maxOrigPx >= 500 ? 500 : null));
+        if (targetStep && targetStep > currentPx) {
+          u.pathname = u.pathname.replace(/\/(\d+)px-([^/]+)$/, `/${targetStep}px-` + m[2]);
+          return u.href;
+        }
+      }
+      return null;
+    }
+
+    // WordPress Photon CDN
+    if (host === 'i0.wp.com' || host === 'i1.wp.com' || host === 'i2.wp.com') {
+      const wParam = u.searchParams.get('w');
+      if (wParam && /^\d+$/.test(wParam) && parseInt(wParam, 10) < INVESTIGATOR_MAX_SIDE_THRESHOLD) {
+        u.searchParams.set('w', '768');
+        return u.href;
+      }
+      return null;
+    }
+
+    // Shopify CDN
+    if (host === 'cdn.shopify.com' || u.pathname.includes('/cdn/shop/')) {
+      const widthParam = u.searchParams.get('width');
+      if (widthParam && /^\d+$/.test(widthParam) && parseInt(widthParam, 10) < INVESTIGATOR_MAX_SIDE_THRESHOLD) {
+        u.searchParams.set('width', '800');
+        return u.href;
+      }
+      const m = u.pathname.match(/_(\d{2,3})x(\.(?:jpe?g|png|webp))$/i);
+      if (m && parseInt(m[1], 10) < INVESTIGATOR_MAX_SIDE_THRESHOLD) {
+        u.pathname = u.pathname.replace(/_(\d{2,3})x(\.(?:jpe?g|png|webp))$/i, '_800x' + m[2]);
+        return u.href;
+      }
+      return null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function resolveInvestigatorImageUrl(el, baseSrc, nw, nh) {
+  if (!el || !baseSrc) return null;
+  const baseUri = (typeof document !== 'undefined' && document.baseURI) ||
+    (typeof window !== 'undefined' && window.location && window.location.href) ||
+    baseSrc;
+
+  const dims = getEffectiveImageDimensions(el, baseSrc);
+  const trueWidth = dims.width || nw || 0;
+
+  // 1. Gather srcset candidates from <img> and parent <picture><source>
+  const candidates = collectSrcsetCandidates(el, baseUri);
+  if (candidates.length > 0) {
+    // nw is already CSS 1x width when a density-based srcset candidate is active
+    const base1xWidth = nw || 240;
+
+    const better = candidates
+      .map((c) => ({
+        url: c.url,
+        estWidth: c.width || Math.round((c.density || 1) * base1xWidth)
+      }))
+      .filter((c) => c.url !== baseSrc && c.estWidth > trueWidth);
+
+    if (better.length > 0) {
+      const geThreshold = better.filter((c) => c.estWidth >= INVESTIGATOR_MAX_SIDE_THRESHOLD);
+      if (geThreshold.length > 0) {
+        geThreshold.sort((a, b) => a.estWidth - b.estWidth);
+        return geThreshold[0].url;
+      }
+      better.sort((a, b) => b.estWidth - a.estWidth);
+      return better[0].url;
+    }
+  }
+
+  // 2. High-res data-* attributes on the <img> element
+  if (typeof el.getAttribute === 'function') {
+    for (let i = 0; i < INVESTIGATOR_HIGHRES_ATTRS.length; i++) {
+      const val = el.getAttribute(INVESTIGATOR_HIGHRES_ATTRS[i]);
+      if (!val || !val.trim()) continue;
+      try {
+        const resolved = new URL(val.trim(), baseUri);
+        if ((resolved.protocol === 'http:' || resolved.protocol === 'https:') && resolved.href !== baseSrc) {
+          return resolved.href;
+        }
+      } catch (_) {}
+    }
+  }
+
+  // 3. Same-domain direct-image wrapping <a href> (excluding HTML file description pages such as MediaWiki /wiki/File:...)
+  const anchor = typeof el.closest === 'function' ? el.closest('a[href]') : null;
+  const isMediaWikiFileLink = anchor && (
+    (anchor.classList && (anchor.classList.contains('mw-file-description') || anchor.classList.contains('image')))
+  );
+  if (anchor && !isMediaWikiFileLink && typeof anchor.getAttribute === 'function') {
+    const hrefAttr = anchor.getAttribute('href');
+    if (hrefAttr) {
+      try {
+        const anchorUrl = new URL(hrefAttr, baseUri);
+        const looksLikeHtmlFilePage = /\/wiki\/[^/]*:/i.test(anchorUrl.pathname) || /\/w\/index\.php$/i.test(anchorUrl.pathname);
+        if (
+          !looksLikeHtmlFilePage &&
+          (anchorUrl.protocol === 'http:' || anchorUrl.protocol === 'https:') &&
+          anchorUrl.href !== baseSrc &&
+          /\.(?:jpe?g|png|webp)(?:$|[?#])/i.test(anchorUrl.pathname)
+        ) {
+          const anchorDomain = getRegistrableDomain(anchorUrl.hostname);
+          const pageDomain = getRegistrableDomain(typeof window !== 'undefined' && window.location && window.location.hostname);
+          let srcDomain = '';
+          if (baseSrc.startsWith('http://') || baseSrc.startsWith('https://')) {
+            try { srcDomain = getRegistrableDomain(new URL(baseSrc).hostname); } catch (_) {}
+          }
+          if (anchorDomain && (anchorDomain === pageDomain || (srcDomain && anchorDomain === srcDomain))) {
+            return anchorUrl.href;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  // 4. Safe same-CDN URL upgrade
+  if (baseSrc.startsWith('http://') || baseSrc.startsWith('https://')) {
+    const cdnUpgraded = upgradeSameCdnUrl(baseSrc, el);
+    if (cdnUpgraded && cdnUpgraded !== baseSrc) {
+      return cdnUpgraded;
+    }
+  }
+
+  return null;
+}
+
 function processImageElement(el, isLazy = false) {
   if (!el || el.tagName.toLowerCase() !== 'img') return null;
   if (processedImages.has(el)) return null;
 
-  const src = el.src || el.getAttribute('src');
+  const src = el.currentSrc || el.src || el.getAttribute('src');
   if (!src) return null;
 
   const nw = el.naturalWidth || 0;
@@ -986,7 +1308,7 @@ function processImageElement(el, isLazy = false) {
       el.dataset.aiLoadListenerAttached = 'true';
       el.addEventListener('load', () => {
         if (settings.verboseLogs) {
-          console.log(`[AI Detector] Image load event:`, el.src.substring(0, 80));
+          console.log(`[AI Detector] Image load event:`, (el.currentSrc || el.src || '').substring(0, 80));
         }
         processedImages.delete(el);
         unobserveImage(el);
@@ -1036,11 +1358,21 @@ function processImageElement(el, isLazy = false) {
 
   seenImageUrls.add(src);
 
+  const effDims = getEffectiveImageDimensions(el, src);
+  const trueWidth = effDims.width || nw;
+  const trueHeight = effDims.height || nh;
+
+  const investigatorSrc = (
+    settings.investigator !== false &&
+    Math.max(trueWidth, trueHeight) < INVESTIGATOR_MAX_SIDE_THRESHOLD
+  ) ? resolveInvestigatorImageUrl(el, src, nw, nh) : null;
+
   return {
     src,
+    investigatorSrc,
     alt: el.alt || '',
-    width: el.naturalWidth || el.width || null,
-    height: el.naturalHeight || el.height || null,
+    width: trueWidth || el.width || null,
+    height: trueHeight || el.height || null,
     element: el,
     lazy: isLazy,
     inViewport: isElementInViewport(el)
@@ -1219,7 +1551,7 @@ function applyStylesForItem(itemId) {
   const elements = getElementsForItem(itemId).filter((el) => el && el.isConnected);
   if (!elements.length) {
     if (entry.modality === 'image') {
-      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => img.src === itemId);
+      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => img.currentSrc === itemId || img.src === itemId);
       if (liveImgs.length) {
         liveImgs.forEach((img) => trackElement(itemId, img));
         elements.push(...liveImgs);
@@ -1374,6 +1706,7 @@ async function loadSettings() {
       'enabled',
       'altTextOnly',
       'ignoreSmallImages',
+      'investigator',
       'blurAmount',
       'borderMultiplier',
       'borderColor',
@@ -1394,6 +1727,7 @@ async function loadSettings() {
     if (res && typeof res.enabled === 'boolean') settings.enabled = res.enabled;
     if (res && typeof res.altTextOnly === 'boolean') settings.altTextOnly = res.altTextOnly;
     if (res && typeof res.ignoreSmallImages === 'boolean') settings.ignoreSmallImages = res.ignoreSmallImages;
+    if (res && typeof res.investigator === 'boolean') settings.investigator = res.investigator;
     if (res && typeof res.blurAmount === 'number') settings.blurAmount = res.blurAmount;
     if (res && typeof res.borderMultiplier === 'number') settings.borderMultiplier = res.borderMultiplier;
     if (res && typeof res.borderColor === 'string') settings.borderColor = res.borderColor;
@@ -1730,9 +2064,9 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 
       if (srcUrl) {
         const images = Array.from(document.querySelectorAll('img'));
-        const targetImage = images.find((img) => img.src === srcUrl);
+        const targetImage = images.find((img) => img.currentSrc === srcUrl || img.src === srcUrl);
         if (targetImage) {
-          const itemId = targetImage.src;
+          const itemId = elementToItemId.get(targetImage) || targetImage.currentSrc || targetImage.src;
           const hasVisibleAiStyling = targetImage.classList.contains('ai-detected');
 
           if (hasVisibleAiStyling) {
@@ -1938,7 +2272,7 @@ async function reloadSettingsAndRescan() {
 
 if (ext && ext.storage && ext.storage.onChanged) {
   ext.storage.onChanged.addListener((changes) => {
-    const classificationKeys = ['enabled', 'altTextOnly', 'ignoreSmallImages', 'minImageDimension', 'minTextLength'];
+    const classificationKeys = ['enabled', 'altTextOnly', 'ignoreSmallImages', 'investigator', 'minImageDimension', 'minTextLength'];
     const visualKeys = ['blurAmount', 'borderMultiplier', 'borderColor', 'textBlurAmount', 'textStrikethroughEnabled', 'imageAiThreshold', 'textAiThreshold'];
     const performanceKeys = ['classificationDelay', 'verboseLogs', 'lazyLoad', 'imageCaptureQuality', 'miniBatchSize'];
 

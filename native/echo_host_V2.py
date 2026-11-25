@@ -27,15 +27,18 @@ import time
 import hashlib
 import threading
 import gc
+import zipfile
 from pathlib import Path
 from io import BytesIO
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from collections import OrderedDict
 import base64
 import urllib.parse
 from typing import List, Dict, Any, Optional, Tuple, Set
 from PIL import Image
 import os
+import re
 import ssl
 
 # Setup logging to file
@@ -1712,8 +1715,12 @@ def classify_items(envelope: Dict[str, Any], job_id: Optional[str] = None, send_
     }
 
 
-def list_models(request_id: Optional[str] = None) -> Dict[str, Any]:
-    """List available classifiers from registry with fresh folder scan."""
+def list_models(
+    request_id: Optional[str] = None,
+    check_updates: bool = False,
+    force_update_check: bool = False,
+) -> Dict[str, Any]:
+    """List available classifiers from registry with fresh folder scan and optional update check."""
     registry = get_registry()
     available = [c for c in registry.list_available_details(force_rescan=True) if c.get("weights_ready")]
 
@@ -1723,28 +1730,434 @@ def list_models(request_id: Optional[str] = None) -> Dict[str, Any]:
     if imm_dir.exists():
         pt_files = [p.name for p in imm_dir.glob('*.pt') if p.is_file()]
 
-    response = {
+    response: Dict[str, Any] = {
         'ok': True,
         'classifiers': available,
         'model_files': sorted(pt_files),
     }
+    if check_updates:
+        try:
+            response['updates'] = _compute_update_status(force_remote=force_update_check, timeout=2.5)
+        except Exception as exc:
+            log(f"[Updater] Failed piggybacked update check in list_models: {exc}")
     if request_id:
         response['requestId'] = request_id
     return response
 
 
 # ============================================================================
-# Catalog & Updater Helpers
+# Catalog & Release-Diff Updater Helpers
 # ============================================================================
 
 HOST_VERSION = "2.2.0"
+GITHUB_RELEASE_LATEST_API = "https://api.github.com/repos/LuckyCowMoo/Fire-vs-Fire/releases/latest"
+GITHUB_RELEASES_API = "https://api.github.com/repos/LuckyCowMoo/Fire-vs-Fire/releases"
 OFFICIAL_CATALOG_URL = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json"
+DEFAULT_HOST_FILES = (
+    "native/echo_host_V2.py",
+    "native/model_registry.py",
+    "native/official_models.json",
+    "native/classifiers/base_classifier.py",
+    "native/classifiers/_heimdall_arch.py",
+    "native/classifiers/mimir_extractor.py",
+)
 ALLOWED_GITHUB_PREFIXES = (
     "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/",
     "https://media.githubusercontent.com/media/LuckyCowMoo/Fire-vs-Fire/",
-    "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/",
+    "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/",
 )
 WEIGHT_EXTENSIONS = (".pt", ".onnx", ".joblib", ".bin", ".pth", ".safetensors")
+_TEXT_FILE_EXTENSIONS = frozenset({
+    ".py", ".json", ".bat", ".ps1", ".reg", ".txt", ".md",
+    ".js", ".html", ".css", ".svg", ".yaml", ".yml",
+})
+_MACHINE_LOCAL_HOST_PATHS = frozenset({
+    "manifest.json",
+    "native/manifest.chrome.json",
+    "native/manifest.firefox.json",
+    "native/register-chrome-host.reg",
+    "native/register-firefox-host.reg",
+})
+_HASH_CACHE_SIZE_THRESHOLD = 2 * 1024 * 1024
+_CATALOG_REMOTE_CACHE_TTL = 600.0
+_RELEASE_CACHE_TTL = 600.0
+
+
+def _get_ssl_contexts() -> List[Any]:
+    contexts: List[Any] = []
+    try:
+        import certifi
+        contexts.append(ssl.create_default_context(cafile=certifi.where()))
+    except Exception:
+        pass
+    try:
+        contexts.append(ssl.create_default_context())
+    except Exception:
+        pass
+    try:
+        contexts.append(ssl._create_unverified_context())
+    except Exception:
+        pass
+    return contexts
+
+
+def _urlopen_response_with_ssl_fallback(req: Request, timeout: float = 5.0) -> Tuple[bytes, Dict[str, str]]:
+    last_exc: Optional[Exception] = None
+    for ctx in _get_ssl_contexts():
+        try:
+            with urlopen(req, context=ctx, timeout=timeout) as resp:
+                hdrs = {k.lower(): v for k, v in resp.headers.items()}
+                return resp.read(), hdrs
+        except Exception as exc:
+            last_exc = exc
+            err_msg = f"{type(exc).__name__}: {exc}"
+            if "SSL" not in err_msg and "CERTIFICATE" not in err_msg:
+                raise
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("No SSL contexts available")
+
+
+def _urlopen_with_ssl_fallback(req: Request, timeout: float = 5.0) -> bytes:
+    body, _ = _urlopen_response_with_ssl_fallback(req, timeout=timeout)
+    return body
+
+
+def _normalize_repo_rel_path(rel_path: str) -> str:
+    return str(rel_path or "").strip().lstrip("/").replace("\\", "/")
+
+
+def _is_text_rel_path(rel_path: str) -> bool:
+    norm = _normalize_repo_rel_path(rel_path)
+    p = Path(norm)
+    return p.suffix.lower() in _TEXT_FILE_EXTENSIONS or p.name.lower() == "license"
+
+
+def _is_machine_local_host_path(rel_path: str) -> bool:
+    norm = _normalize_repo_rel_path(rel_path).lower()
+    if not norm or norm.endswith("/"):
+        return True
+    if norm in _MACHINE_LOCAL_HOST_PATHS:
+        return True
+    parts = [part for part in norm.split("/") if part]
+    if any(part in (".venv", ".git", "__pycache__", "dist") or part.startswith(".") for part in parts):
+        return True
+    if norm.endswith(".log"):
+        return True
+    return False
+
+
+def _compute_sha256_bytes(data: bytes, normalize_eol: bool = False) -> str:
+    if normalize_eol:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest().lower()
+
+
+def _normalize_digest_hex(raw_digest: Any) -> Optional[str]:
+    if not isinstance(raw_digest, str):
+        return None
+    val = raw_digest.strip().lower()
+    if val.startswith("sha256:"):
+        val = val[7:]
+    if len(val) == 64 and all(c in "0123456789abcdef" for c in val):
+        return val
+    return None
+
+
+def _read_json_file_safe(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_json_file_safe(path: Path, data: Dict[str, Any]) -> None:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp_path, path)
+    except Exception as exc:
+        log(f"[Updater] Failed writing {path.name}: {exc}")
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+
+
+_local_hash_mem_cache: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _get_local_file_sha256(path: Path, normalize_eol: Optional[bool] = None) -> Optional[str]:
+    global _local_hash_mem_cache
+    if not path.is_file():
+        return None
+    if normalize_eol is None:
+        normalize_eol = _is_text_rel_path(path.name)
+
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+
+    size = int(st.st_size)
+    mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+
+    if not normalize_eol and size >= _HASH_CACHE_SIZE_THRESHOLD:
+        cache_path = Path(__file__).resolve().parent / ".local_file_hashes.json"
+        if _local_hash_mem_cache is None:
+            raw_cache = _read_json_file_safe(cache_path)
+            _local_hash_mem_cache = {
+                str(k): v for k, v in raw_cache.items() if isinstance(v, dict)
+            }
+        cache_key = str(path.resolve())
+        cached = _local_hash_mem_cache.get(cache_key)
+        if (
+            cached
+            and cached.get("size") == size
+            and cached.get("mtime_ns") == mtime_ns
+            and _normalize_digest_hex(cached.get("sha256"))
+        ):
+            return _normalize_digest_hex(cached.get("sha256"))
+
+    try:
+        if normalize_eol:
+            digest = _compute_sha256_bytes(path.read_bytes(), normalize_eol=True)
+        else:
+            h = hashlib.sha256()
+            with open(path, "rb") as fh:
+                while True:
+                    chunk = fh.read(4 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+            digest = h.hexdigest().lower()
+    except OSError:
+        return None
+
+    if not normalize_eol and size >= _HASH_CACHE_SIZE_THRESHOLD and _local_hash_mem_cache is not None:
+        cache_path = Path(__file__).resolve().parent / ".local_file_hashes.json"
+        _local_hash_mem_cache[str(path.resolve())] = {
+            "size": size,
+            "mtime_ns": mtime_ns,
+            "sha256": digest,
+        }
+        _write_json_file_safe(cache_path, _local_hash_mem_cache)
+
+    return digest
+
+
+_release_remote_cache: Optional[Dict[str, Any]] = None
+_release_remote_cache_time: float = 0.0
+
+
+def _release_cache_path() -> Path:
+    return Path(__file__).resolve().parent / ".release_cache.json"
+
+
+def _normalize_github_release(raw_rel: Dict[str, Any], etag: Optional[str] = None) -> Dict[str, Any]:
+    assets_by_name: Dict[str, Dict[str, Any]] = {}
+    for asset in raw_rel.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "").strip()
+        if not name:
+            continue
+        assets_by_name[name] = {
+            "name": name,
+            "size": int(asset.get("size") or 0),
+            "digest": _normalize_digest_hex(asset.get("digest")),
+            "updated_at": str(asset.get("updated_at") or ""),
+            "browser_download_url": str(asset.get("browser_download_url") or ""),
+        }
+
+    return {
+        "tag_name": str(raw_rel.get("tag_name") or ""),
+        "name": str(raw_rel.get("name") or raw_rel.get("tag_name") or ""),
+        "html_url": str(raw_rel.get("html_url") or "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases"),
+        "target_commitish": str(raw_rel.get("target_commitish") or ""),
+        "published_at": str(raw_rel.get("published_at") or ""),
+        "body": str(raw_rel.get("body") or ""),
+        "assets_by_name": assets_by_name,
+        "etag": etag or str(raw_rel.get("etag") or ""),
+    }
+
+
+def _find_native_host_zip_asset(release: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(release, dict):
+        return None
+    assets = release.get("assets_by_name") or {}
+    if "FireVsFire-NativeHost.zip" in assets:
+        return assets["FireVsFire-NativeHost.zip"]
+    for name, info in assets.items():
+        low = name.lower()
+        if low.startswith("firevsfire-nativehost") and low.endswith(".zip"):
+            return info
+    return None
+
+
+def _fetch_latest_github_release(force: bool = False, timeout: float = 4.0) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """Fetch current GitHub release metadata with ETag conditional validation."""
+    global _release_remote_cache, _release_remote_cache_time
+    now = time.time()
+    if (
+        not force
+        and _release_remote_cache is not None
+        and (now - _release_remote_cache_time) < _RELEASE_CACHE_TTL
+    ):
+        return copy.deepcopy(_release_remote_cache), True
+
+    disk_cache = _read_json_file_safe(_release_cache_path())
+    cached_rel = disk_cache.get("release") if isinstance(disk_cache.get("release"), dict) else None
+    cached_etag = str(disk_cache.get("etag") or "")
+
+    headers = {
+        "User-Agent": f"FireVsFire-NativeHost/{HOST_VERSION}",
+        "Accept": "application/vnd.github+json",
+    }
+    if cached_etag and cached_rel:
+        headers["If-None-Match"] = cached_etag
+
+    try:
+        req = Request(GITHUB_RELEASE_LATEST_API, headers=headers)
+        try:
+            raw_bytes, resp_headers = _urlopen_response_with_ssl_fallback(req, timeout=timeout)
+            raw_rel = json.loads(raw_bytes.decode("utf-8"))
+            new_etag = resp_headers.get("etag", "")
+        except HTTPError as http_err:
+            if http_err.code == 304 and cached_rel is not None:
+                _release_remote_cache = copy.deepcopy(cached_rel)
+                _release_remote_cache_time = now
+                log("[ReleaseCheck] GitHub release metadata unchanged (304 Not Modified)")
+                return copy.deepcopy(cached_rel), True
+            if http_err.code == 404:
+                req_all = Request(GITHUB_RELEASES_API, headers={
+                    "User-Agent": f"FireVsFire-NativeHost/{HOST_VERSION}",
+                    "Accept": "application/vnd.github+json",
+                })
+                raw_bytes, resp_headers = _urlopen_response_with_ssl_fallback(req_all, timeout=timeout)
+                rel_list = json.loads(raw_bytes.decode("utf-8"))
+                non_drafts = [r for r in (rel_list or []) if isinstance(r, dict) and not r.get("draft")]
+                if not non_drafts:
+                    raise RuntimeError("No published releases found on GitHub")
+                raw_rel = non_drafts[0]
+                new_etag = resp_headers.get("etag", "")
+            else:
+                raise
+
+        if isinstance(raw_rel, dict) and raw_rel.get("tag_name"):
+            normalized = _normalize_github_release(raw_rel, etag=new_etag)
+            _release_remote_cache = normalized
+            _release_remote_cache_time = now
+            disk_cache["etag"] = new_etag
+            disk_cache["release"] = normalized
+            _write_json_file_safe(_release_cache_path(), disk_cache)
+            log(f"[ReleaseCheck] Loaded GitHub release '{normalized.get('tag_name')}' metadata")
+            return copy.deepcopy(normalized), True
+    except Exception as exc:
+        log(f"[ReleaseCheck] Failed fetching GitHub release metadata: {exc}")
+
+    if _release_remote_cache is not None:
+        return copy.deepcopy(_release_remote_cache), False
+    if cached_rel is not None:
+        return copy.deepcopy(cached_rel), False
+    return None, False
+
+
+def _asset_cache_key(asset: Dict[str, Any]) -> str:
+    return str(
+        asset.get("digest")
+        or f"size:{asset.get('size', 0)}|at:{asset.get('updated_at', '')}"
+    )
+
+
+def _manifest_from_zip_bytes(raw_bytes: bytes, asset: Dict[str, Any], release: Dict[str, Any]) -> Dict[str, Any]:
+    files_hashes: Dict[str, str] = {}
+    with zipfile.ZipFile(BytesIO(raw_bytes)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            norm = _normalize_repo_rel_path(info.filename)
+            if _is_machine_local_host_path(norm):
+                continue
+            entry_bytes = zf.read(info.filename)
+            files_hashes[norm] = _compute_sha256_bytes(
+                entry_bytes,
+                normalize_eol=_is_text_rel_path(norm),
+            )
+    return {
+        "asset_name": asset.get("name") or "FireVsFire-NativeHost.zip",
+        "asset_key": _asset_cache_key(asset),
+        "asset_digest": asset.get("digest") or "",
+        "asset_size": int(asset.get("size") or len(raw_bytes)),
+        "asset_updated_at": asset.get("updated_at") or "",
+        "tag_name": release.get("tag_name") or "",
+        "files": files_hashes,
+    }
+
+
+def _get_release_zip_manifest(release: Dict[str, Any], timeout: float = 8.0) -> Optional[Dict[str, Any]]:
+    asset = _find_native_host_zip_asset(release)
+    if not asset:
+        return None
+    target_key = _asset_cache_key(asset)
+    disk_cache = _read_json_file_safe(_release_cache_path())
+    cached_manifest = disk_cache.get("zip_manifest")
+    if (
+        isinstance(cached_manifest, dict)
+        and cached_manifest.get("asset_key") == target_key
+        and isinstance(cached_manifest.get("files"), dict)
+        and cached_manifest.get("files")
+    ):
+        return cached_manifest
+
+    dl_url = str(asset.get("browser_download_url") or "")
+    if not dl_url or not _is_allowed_official_url(dl_url):
+        return None
+
+    try:
+        req = Request(
+            dl_url,
+            headers={"User-Agent": f"FireVsFire-NativeHost/{HOST_VERSION}", "Cache-Control": "no-cache"},
+        )
+        raw_bytes = _urlopen_with_ssl_fallback(req, timeout=timeout)
+        expected_digest = asset.get("digest")
+        if expected_digest:
+            actual_digest = hashlib.sha256(raw_bytes).hexdigest().lower()
+            if actual_digest != expected_digest:
+                raise RuntimeError(f"Release zip SHA-256 mismatch ({actual_digest[:12]} != {expected_digest[:12]})")
+        manifest = _manifest_from_zip_bytes(raw_bytes, asset, release)
+        disk_cache["zip_manifest"] = manifest
+        _write_json_file_safe(_release_cache_path(), disk_cache)
+        log(f"[ReleaseCheck] Indexed {len(manifest['files'])} files from release archive {asset.get('name')}")
+        return manifest
+    except Exception as exc:
+        log(f"[ReleaseCheck] Failed fetching release zip manifest: {exc}")
+        return None
+
+
+def _parse_model_family_and_rank(model: Dict[str, Any]) -> Tuple[Optional[str], int]:
+    if not isinstance(model, dict):
+        return None, -1
+    raw_name = str(model.get("name") or model.get("id") or "")
+    m = re.search(
+        r"(heimdall|mimir|mímir|huginn|bragi)[\s_v-]*0*(\d+)(?:[\s_-]*([a-z])(?:\b|$))?",
+        raw_name,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None, -1
+    family = m.group(1).lower()
+    if family == "mímir":
+        family = "mimir"
+    major = int(m.group(2))
+    suffix = (ord(m.group(3).lower()) - 96) if m.group(3) else 0
+    return family, major * 100 + suffix
 
 
 def _is_allowed_official_url(url: str) -> bool:
@@ -1769,52 +2182,148 @@ _catalog_remote_cache: Optional[Dict[str, Any]] = None
 _catalog_remote_cache_time: float = 0.0
 
 
-def _load_official_catalog(force_remote: bool = False) -> Dict[str, Any]:
-    global _catalog_remote_cache, _catalog_remote_cache_time
+def _load_local_catalog_raw() -> Optional[Dict[str, Any]]:
     local_catalog_path = Path(__file__).resolve().parent / "official_models.json"
-    catalog = None
+    if not local_catalog_path.exists():
+        return None
+    try:
+        with open(local_catalog_path, "r", encoding="utf-8") as fh:
+            local_data = json.load(fh)
+            if isinstance(local_data, dict) and isinstance(local_data.get("models"), list):
+                return copy.deepcopy(local_data)
+    except Exception as exc:
+        log(f"[Catalog] Failed to load local official_models.json: {exc}")
+    return None
 
-    # Load local catalog first (instantaneous, < 1ms)
-    if local_catalog_path.exists():
-        try:
-            with open(local_catalog_path, "r", encoding="utf-8") as fh:
-                local_data = json.load(fh)
-                if isinstance(local_data, dict) and isinstance(local_data.get("models"), list):
-                    catalog = copy.deepcopy(local_data)
-        except Exception as exc:
-            log(f"[Catalog] Failed to load local official_models.json: {exc}")
 
-    # Fetch from remote GitHub only if explicitly forced or if local catalog is missing
+def _fetch_remote_catalog(force: bool = False, timeout: float = 2.5) -> Tuple[Optional[Dict[str, Any]], bool]:
+    global _catalog_remote_cache, _catalog_remote_cache_time
     now = time.time()
-    if (force_remote or catalog is None) and (now - _catalog_remote_cache_time > 300.0):
+    if (
+        not force
+        and _catalog_remote_cache is not None
+        and (now - _catalog_remote_cache_time) < _CATALOG_REMOTE_CACHE_TTL
+    ):
+        return copy.deepcopy(_catalog_remote_cache), True
+
+    try:
+        req = Request(
+            OFFICIAL_CATALOG_URL,
+            headers={"User-Agent": f"FireVsFire-NativeHost/{HOST_VERSION}", "Cache-Control": "no-cache"},
+        )
+        raw = _urlopen_with_ssl_fallback(req, timeout=timeout).decode("utf-8")
+        candidate = json.loads(raw)
+        if isinstance(candidate, dict) and isinstance(candidate.get("models"), list):
+            _catalog_remote_cache = candidate
+            _catalog_remote_cache_time = now
+            log("[Catalog] Loaded latest official_models.json from GitHub")
+            return copy.deepcopy(candidate), True
+    except Exception as exc:
+        log(f"[Catalog] Remote GitHub fetch fell back to cache/local: {exc}")
+
+    if _catalog_remote_cache is not None:
+        return copy.deepcopy(_catalog_remote_cache), False
+    return None, False
+
+
+def _installed_versions_path() -> Path:
+    return Path(__file__).resolve().parent / ".installed_versions.json"
+
+
+def _read_installed_versions() -> Dict[str, str]:
+    path = _installed_versions_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items() if k and v}
+    except Exception as exc:
+        log(f"[Catalog] Failed to read .installed_versions.json: {exc}")
+    return {}
+
+
+def _write_installed_versions(versions: Dict[str, str]) -> None:
+    path = _installed_versions_path()
+    tmp_path = path.with_suffix(".json.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(versions, fh, indent=2)
+        os.replace(tmp_path, path)
+    except Exception as exc:
+        log(f"[Catalog] Failed to write .installed_versions.json: {exc}")
         try:
-            req = Request(
-                OFFICIAL_CATALOG_URL,
-                headers={"User-Agent": "FireVsFire-NativeHost/2.2", "Cache-Control": "no-cache"},
-            )
-            with urlopen(req, timeout=3) as resp:
-                raw = resp.read().decode("utf-8")
-                candidate = json.loads(raw)
-                if isinstance(candidate, dict) and isinstance(candidate.get("models"), list):
-                    _catalog_remote_cache = candidate
-                    _catalog_remote_cache_time = now
-                    log("[Catalog] Loaded latest official_models.json from GitHub")
-        except Exception as exc:
-            log(f"[Catalog] Remote GitHub fetch fell back to local catalog: {exc}")
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
-    if _catalog_remote_cache and isinstance(_catalog_remote_cache.get("models"), list):
-        if catalog is None:
-            catalog = copy.deepcopy(_catalog_remote_cache)
-        else:
-            local_ids = {m.get("id") for m in catalog.get("models", [])}
-            for rm in _catalog_remote_cache.get("models", []):
-                if rm.get("id") not in local_ids:
-                    catalog["models"].append(rm)
 
-    if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list):
-        catalog = {"catalog_version": 2, "repository": "LuckyCowMoo/Fire-vs-Fire", "models": []}
+def _record_installed_model_version(model_id: str, version: str) -> None:
+    if not model_id or not version:
+        return
+    versions = _read_installed_versions()
+    versions[model_id] = version
+    _write_installed_versions(versions)
 
-    return _sync_catalog_with_local_folder(catalog)
+
+def _remove_installed_model_version(model_id: str) -> None:
+    if not model_id:
+        return
+    versions = _read_installed_versions()
+    if model_id in versions:
+        versions.pop(model_id, None)
+        _write_installed_versions(versions)
+
+
+def _merge_remote_into_catalog(
+    local_catalog: Optional[Dict[str, Any]],
+    remote_catalog: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if local_catalog is None and remote_catalog is None:
+        return {"catalog_version": 2, "repository": "LuckyCowMoo/Fire-vs-Fire", "models": []}
+    if local_catalog is None:
+        return copy.deepcopy(remote_catalog)  # type: ignore[arg-type]
+    if remote_catalog is None:
+        return copy.deepcopy(local_catalog)
+
+    merged = copy.deepcopy(local_catalog)
+    for key in ("catalog_version", "repository", "branch", "author", "updated_at", "host_version", "release_notes", "host_files"):
+        if key in remote_catalog:
+            merged[key] = copy.deepcopy(remote_catalog[key])
+
+    remote_by_id = {
+        m.get("id"): m for m in remote_catalog.get("models", []) if isinstance(m, dict) and m.get("id")
+    }
+    updated_models: List[Dict[str, Any]] = []
+    seen_ids: Set[str] = set()
+    for m in merged.get("models", []):
+        if not isinstance(m, dict) or not m.get("id"):
+            continue
+        mid = m["id"]
+        seen_ids.add(mid)
+        updated_models.append(copy.deepcopy(remote_by_id[mid]) if mid in remote_by_id else m)
+
+    for rm in remote_catalog.get("models", []):
+        if isinstance(rm, dict) and rm.get("id") and rm["id"] not in seen_ids:
+            updated_models.append(copy.deepcopy(rm))
+            seen_ids.add(rm["id"])
+
+    merged["models"] = updated_models
+    return merged
+
+
+def _load_official_catalog(force_remote: bool = False) -> Dict[str, Any]:
+    catalog = _load_local_catalog_raw()
+    remote_catalog: Optional[Dict[str, Any]] = None
+    if force_remote or catalog is None:
+        remote_catalog, _ = _fetch_remote_catalog(force=force_remote, timeout=3.0)
+    elif _catalog_remote_cache is not None:
+        remote_catalog = copy.deepcopy(_catalog_remote_cache)
+
+    merged = _merge_remote_into_catalog(catalog, remote_catalog)
+    return _sync_catalog_with_local_folder(merged)
 
 
 def _evaluate_model_disk_status(model: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -1942,8 +2451,32 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
     return catalog
 
 
+def _resolve_release_asset_for_file(f_entry: Dict[str, Any], release: Optional[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Return matching GitHub release asset metadata and asset filename for a catalog file entry."""
+    rel_path = str(f_entry.get("relative_path") or "")
+    primary_url = str(f_entry.get("url") or "")
+    parsed_name = Path(urllib.parse.urlparse(primary_url).path).name if primary_url else ""
+    asset_name = parsed_name or Path(rel_path).name
+    assets = (release or {}).get("assets_by_name") or {}
+    return assets.get(asset_name), asset_name
+
+
 def get_official_catalog_response(request_id: Optional[str] = None) -> Dict[str, Any]:
     catalog = _load_official_catalog()
+    try:
+        status = _compute_update_status(force_remote=False, timeout=2.5)
+        release_outdated_ids = {
+            item.get("installedId")
+            for item in (status.get("classifiers") or {}).get("outdated") or []
+            if item.get("reason") == "release_updated" and item.get("installedId")
+        }
+        for m in catalog.get("models") or []:
+            if isinstance(m, dict) and m.get("installed") and m.get("id") in release_outdated_ids:
+                m["update_available"] = True
+                m["update_reason"] = "release_updated"
+    except Exception as exc:
+        log(f"[Catalog] Skipped annotating classifier updates in getOfficialCatalog: {exc}")
+
     registry = get_registry()
     classifiers = [c for c in registry.list_available_details(force_rescan=False) if c.get("weights_ready")]
     resp = {
@@ -1997,23 +2530,6 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
         "Accept-Encoding": "identity",
     }
 
-    def _get_ssl_contexts():
-        contexts = []
-        try:
-            import certifi
-            contexts.append(ssl.create_default_context(cafile=certifi.where()))
-        except Exception:
-            pass
-        try:
-            contexts.append(ssl.create_default_context())
-        except Exception:
-            pass
-        try:
-            contexts.append(ssl._create_unverified_context())
-        except Exception:
-            pass
-        return contexts
-
     ssl_contexts = _get_ssl_contexts()
     total_files = len(files)
     downloaded_files = []
@@ -2046,6 +2562,8 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
         except Exception:
             pass
 
+    latest_release, _ = _fetch_latest_github_release(force=False, timeout=3.0)
+
     # Immediately emit 0% with known total size on tile
     _emit_progress(0, effective_total_bytes, pct_override=0)
 
@@ -2053,6 +2571,15 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
         rel_path = f_entry.get("relative_path", "")
         primary_url = f_entry.get("url", "")
         fallback_url = f_entry.get("fallback_url", "")
+        release_asset, _ = _resolve_release_asset_for_file(f_entry, latest_release)
+        expected_sha256 = (release_asset or {}).get("digest")
+
+        if release_asset and release_asset.get("browser_download_url"):
+            rel_dl_url = str(release_asset["browser_download_url"])
+            if _is_allowed_official_url(rel_dl_url):
+                if primary_url and primary_url != rel_dl_url and not fallback_url:
+                    fallback_url = primary_url
+                primary_url = rel_dl_url
 
         dest_path = _resolve_safe_repo_path(rel_path)
         if dest_path is None:
@@ -2069,7 +2596,12 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if not force_download and dest_path.exists() and dest_path.stat().st_size > 0:
+        local_matches_release = True
+        if dest_path.exists() and dest_path.stat().st_size > 0 and expected_sha256:
+            local_digest = _get_local_file_sha256(dest_path, normalize_eol=False)
+            local_matches_release = (local_digest == expected_sha256)
+
+        if not force_download and dest_path.exists() and dest_path.stat().st_size > 0 and local_matches_release:
             file_size = dest_path.stat().st_size
             cumulative_bytes += file_size
             if cumulative_bytes > effective_total_bytes:
@@ -2163,6 +2695,8 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
 
     final_total = max(cumulative_bytes, effective_total_bytes)
     _emit_progress(final_total, final_total, pct_override=100)
+
+    _record_installed_model_version(model_id, str(target_model.get("version") or ""))
 
     registry = get_registry()
     registry.discover_classifiers(force=True)
@@ -2286,6 +2820,11 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
                 break
 
     # Step 3: Force rediscovery and sync catalog from actual disk state
+    if canonical_id:
+        _remove_installed_model_version(canonical_id)
+    if model_id and model_id != canonical_id:
+        _remove_installed_model_version(model_id)
+
     registry.discover_classifiers(force=True)
     available = [c for c in registry.list_available_details(force_rescan=True) if c.get("weights_ready")]
 
@@ -2309,18 +2848,195 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
     return resp
 
 
-def check_for_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
-    catalog = _load_official_catalog()
-    remote_version = catalog.get("host_version", HOST_VERSION)
-    update_available = remote_version != HOST_VERSION
+def _compare_host_with_release(
+    release: Optional[Dict[str, Any]],
+    zip_manifest: Optional[Dict[str, Any]],
+) -> Tuple[bool, List[str]]:
+    """Return (update_available, changed_rel_paths) by comparing local host files to GitHub release archive."""
+    if not release or not zip_manifest:
+        return False, []
+    manifest_files = zip_manifest.get("files")
+    if not isinstance(manifest_files, dict) or not manifest_files:
+        return False, []
+
+    changed: List[str] = []
+    for rel_path, remote_hash in manifest_files.items():
+        if _is_machine_local_host_path(rel_path):
+            continue
+        local_path = _resolve_safe_repo_path(rel_path)
+        if local_path is None:
+            continue
+        local_hash = _get_local_file_sha256(local_path, normalize_eol=_is_text_rel_path(rel_path))
+        if local_hash != remote_hash:
+            changed.append(rel_path)
+    return len(changed) > 0, sorted(changed)
+
+
+def _compare_classifiers_with_release(
+    synced_catalog: Dict[str, Any],
+    release: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Detect outdated installed classifiers via release asset SHA-256 digests and newer family models."""
+    models = [m for m in (synced_catalog.get("models") or []) if isinstance(m, dict) and m.get("id")]
+    installed_ids = set(synced_catalog.get("installed_models") or [])
+    assets_by_name = (release or {}).get("assets_by_name") or {}
+    release_tag = str((release or {}).get("tag_name") or "")
+
+    available_models = [m for m in models if m.get("status") == "available"]
+    outdated: List[Dict[str, Any]] = []
+    flagged_installed_ids: Set[str] = set()
+
+    # Case A: Check every installed classifier's release asset files against current GitHub release hashes/sizes
+    for m in available_models:
+        mid = str(m.get("id"))
+        if mid not in installed_ids:
+            continue
+        changed_files: List[str] = []
+        for f_entry in m.get("files") or []:
+            rel_path = str(f_entry.get("relative_path") or "")
+            if not rel_path:
+                continue
+            asset, asset_name = _resolve_release_asset_for_file(f_entry, release)
+            if not asset:
+                continue
+            local_path = _resolve_safe_repo_path(rel_path)
+            if local_path is None or not local_path.is_file():
+                changed_files.append(asset_name)
+                continue
+            expected_digest = asset.get("digest")
+            if expected_digest:
+                local_digest = _get_local_file_sha256(local_path, normalize_eol=False)
+                if local_digest != expected_digest:
+                    changed_files.append(asset_name)
+            elif asset.get("size") and local_path.stat().st_size != int(asset["size"]):
+                changed_files.append(asset_name)
+
+        if changed_files:
+            fam, _ = _parse_model_family_and_rank(m)
+            outdated.append({
+                "family": fam or mid,
+                "modality": m.get("modality") or "image",
+                "reason": "release_updated",
+                "installedId": mid,
+                "installedName": m.get("name") or mid,
+                "installedVersion": str(m.get("version") or ""),
+                "latestId": mid,
+                "latestName": m.get("name") or mid,
+                "latestVersion": release_tag or str(m.get("version") or ""),
+                "releaseTag": release_tag,
+                "downloadSize": str(m.get("download_size") or ""),
+                "changedFiles": changed_files,
+            })
+            flagged_installed_ids.add(mid)
+
+    # Case B: Newer generation exists in an installed model family (e.g. Heimdall 03/04 -> Heimdall 04 B)
+    family_groups: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
+    for m in available_models:
+        fam, rank = _parse_model_family_and_rank(m)
+        if fam is not None and rank >= 0:
+            family_groups.setdefault(fam, []).append((rank, m))
+
+    for fam, ranked_models in family_groups.items():
+        ranked_models.sort(key=lambda pair: pair[0], reverse=True)
+        best_remote_rank, best_remote = ranked_models[0]
+        installed_in_fam = [(rank, m) for rank, m in ranked_models if m.get("id") in installed_ids]
+        if not installed_in_fam:
+            continue
+        best_installed_rank, best_installed = installed_in_fam[0]
+        best_inst_id = str(best_installed.get("id"))
+        if best_remote.get("id") != best_inst_id and best_remote_rank > best_installed_rank:
+            outdated.append({
+                "family": fam,
+                "modality": best_remote.get("modality") or best_installed.get("modality") or "image",
+                "reason": "newer_generation",
+                "installedId": best_inst_id,
+                "installedName": best_installed.get("name") or best_inst_id,
+                "installedVersion": str(best_installed.get("version") or ""),
+                "latestId": best_remote.get("id"),
+                "latestName": best_remote.get("name") or best_remote.get("id"),
+                "latestVersion": str(best_remote.get("version") or release_tag or ""),
+                "releaseTag": release_tag,
+                "downloadSize": str(best_remote.get("download_size") or ""),
+            })
+
+    return outdated
+
+
+def _compute_update_status(force_remote: bool = False, timeout: float = 4.0) -> Dict[str, Any]:
+    """Compare local native host and installed classifiers against the current GitHub release."""
+    local_catalog = _load_local_catalog_raw()
+    remote_catalog, _ = _fetch_remote_catalog(force=force_remote, timeout=timeout)
+    release, rel_fetched = _fetch_latest_github_release(force=force_remote, timeout=timeout)
+    now_ms = int(time.time() * 1000)
+
+    zip_asset = _find_native_host_zip_asset(release)
+    zip_manifest = _get_release_zip_manifest(release, timeout=max(timeout, 8.0)) if (release and zip_asset) else None
+    default_dl_url = "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/latest/download/FireVsFire-NativeHost.zip"
+    download_url = str((zip_asset or {}).get("browser_download_url") or (release or {}).get("html_url") or default_dl_url)
+    release_tag = str((release or {}).get("tag_name") or "")
+    release_name = str((release or {}).get("name") or release_tag or "Latest Release")
+
+    effective_catalog = _merge_remote_into_catalog(local_catalog, remote_catalog) if remote_catalog else copy.deepcopy(local_catalog or {"models": []})
+    synced = _sync_catalog_with_local_folder(effective_catalog)
+
+    host_update_available, diff_files = _compare_host_with_release(release, zip_manifest)
+    outdated = _compare_classifiers_with_release(synced, release) if release else []
+
+    release_notes = str(
+        (remote_catalog or {}).get("release_notes")
+        or (local_catalog or {}).get("release_notes")
+        or (release or {}).get("body")
+        or "Includes updates from the latest GitHub release."
+    )
+    checked = bool(release is not None and (zip_manifest is not None or len(outdated) > 0 or rel_fetched))
+
+    host_info = {
+        "currentVersion": HOST_VERSION,
+        "latestVersion": release_tag or HOST_VERSION,
+        "releaseTag": release_tag,
+        "releaseName": release_name,
+        "assetDigest": str((zip_asset or {}).get("digest") or ""),
+        "assetUpdatedAt": str((zip_asset or {}).get("updated_at") or ""),
+        "diffCount": len(diff_files),
+        "diffFiles": diff_files[:25],
+        "updateAvailable": host_update_available,
+        "releaseNotes": release_notes,
+        "downloadUrl": download_url,
+    }
+    classifiers_info = {
+        "updateAvailable": len(outdated) > 0,
+        "outdated": outdated,
+    }
+    return {
+        "checked": checked,
+        "checkedAt": now_ms,
+        "host": host_info,
+        "classifiers": classifiers_info,
+        "anyUpdateAvailable": bool(host_update_available or outdated),
+    }
+
+
+def check_for_host_updates(request_id: Optional[str] = None, force: bool = True) -> Dict[str, Any]:
+    status = _compute_update_status(force_remote=force, timeout=5.0)
+    host_info = status.get("host") or {}
     resp = {
         "ok": True,
         "type": "checkUpdateResponse",
-        "currentVersion": HOST_VERSION,
-        "latestVersion": remote_version,
-        "updateAvailable": update_available,
-        "releaseNotes": catalog.get("release_notes", "Performance improvements and new model support."),
-        "downloadUrl": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip",
+        "checked": bool(status.get("checked", False)),
+        "currentVersion": host_info.get("currentVersion", HOST_VERSION),
+        "latestVersion": host_info.get("latestVersion", ""),
+        "releaseTag": host_info.get("releaseTag", ""),
+        "releaseName": host_info.get("releaseName", ""),
+        "diffCount": int(host_info.get("diffCount", 0)),
+        "diffFiles": host_info.get("diffFiles", []),
+        "updateAvailable": bool(host_info.get("updateAvailable", False)),
+        "releaseNotes": host_info.get("releaseNotes", ""),
+        "downloadUrl": host_info.get(
+            "downloadUrl",
+            "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/latest/download/FireVsFire-NativeHost.zip",
+        ),
+        "classifierUpdates": status.get("classifiers") or {"updateAvailable": False, "outdated": []},
+        "updates": status,
         "timestamp": int(time.time() * 1000),
     }
     if request_id:
@@ -2329,49 +3045,123 @@ def check_for_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 def apply_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
-    files_to_update = [
-        "native/echo_host_V2.py",
-        "native/model_registry.py",
-        "native/official_models.json",
-        "native/classifiers/base_classifier.py",
-        "native/classifiers/fvf_heimdall_02_classifier.py",
-        "native/classifiers/fvf_heimdall_03_classifier.py",
-        "native/classifiers/fvf_heimdall_04_classifier.py",
-        "native/classifiers/fvf_heimdall_04_b_classifier.py",
-        "native/classifiers/Resnet50_spider.py",
-    ]
-    base_raw_url = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/"
-    updated_files = []
-    errors = []
+    global _catalog_remote_cache, _catalog_remote_cache_time, _release_remote_cache, _release_remote_cache_time, _local_hash_mem_cache
+    release, _ = _fetch_latest_github_release(force=True, timeout=6.0)
+    zip_asset = _find_native_host_zip_asset(release)
+    if not release or not zip_asset or not zip_asset.get("browser_download_url"):
+        resp = {
+            "ok": False,
+            "type": "applyUpdateResponse",
+            "updatedFiles": [],
+            "errors": ["Could not locate FireVsFire-NativeHost.zip on the latest GitHub release."],
+            "timestamp": int(time.time() * 1000),
+        }
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
 
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent
+    dl_url = str(zip_asset["browser_download_url"])
+    if not _is_allowed_official_url(dl_url):
+        resp = {
+            "ok": False,
+            "type": "applyUpdateResponse",
+            "updatedFiles": [],
+            "errors": [f"Rejected untrusted release URL: {dl_url}"],
+            "timestamp": int(time.time() * 1000),
+        }
+        if request_id:
+            resp["requestId"] = request_id
+        return resp
 
-    for rel_path in files_to_update:
-        target_path = repo_root / rel_path
-        remote_url = base_raw_url + rel_path
-        try:
-            req = Request(remote_url, headers={"User-Agent": f"FireVsFire-Updater/{HOST_VERSION}", "Cache-Control": "no-cache"})
-            with urlopen(req, timeout=12) as resp_stream:
-                content = resp_stream.read()
-                if content and len(content) > 50:
+    updated_files: List[str] = []
+    errors: List[str] = []
+    already_up_to_date = False
+
+    try:
+        req = Request(
+            dl_url,
+            headers={"User-Agent": f"FireVsFire-Updater/{HOST_VERSION}", "Cache-Control": "no-cache"},
+        )
+        raw_bytes = _urlopen_with_ssl_fallback(req, timeout=30.0)
+        expected_digest = zip_asset.get("digest")
+        if expected_digest:
+            actual_digest = hashlib.sha256(raw_bytes).hexdigest().lower()
+            if actual_digest != expected_digest:
+                raise RuntimeError(f"Release zip SHA-256 verification failed ({actual_digest[:12]} != {expected_digest[:12]})")
+
+        manifest = _manifest_from_zip_bytes(raw_bytes, zip_asset, release)
+        manifest_files = manifest.get("files") or {}
+
+        with zipfile.ZipFile(BytesIO(raw_bytes)) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                rel_path = _normalize_repo_rel_path(info.filename)
+                if _is_machine_local_host_path(rel_path):
+                    continue
+                target_path = _resolve_safe_repo_path(rel_path)
+                if target_path is None:
+                    errors.append(f"Rejected unsafe path: {rel_path}")
+                    continue
+
+                entry_bytes = zf.read(info.filename)
+                remote_hash = manifest_files.get(rel_path)
+                local_hash = _get_local_file_sha256(target_path, normalize_eol=_is_text_rel_path(rel_path))
+                if remote_hash and local_hash == remote_hash:
+                    continue
+
+                tmp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+                try:
                     target_path.parent.mkdir(parents=True, exist_ok=True)
-                    target_path.write_bytes(content)
+                    tmp_path.write_bytes(entry_bytes)
+                    os.replace(tmp_path, target_path)
                     updated_files.append(rel_path)
-                    log(f"[Updater] Successfully updated {rel_path}")
-        except Exception as exc:
-            log(f"[Updater] Failed updating {rel_path}: {exc}")
-            errors.append(f"{rel_path}: {exc}")
+                    log(f"[Updater] Updated {rel_path} from release {release.get('tag_name')}")
+                except Exception as file_exc:
+                    errors.append(f"{rel_path}: {file_exc}")
+                    log(f"[Updater] Failed updating {rel_path}: {file_exc}")
+                    try:
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+                    except Exception:
+                        pass
 
-    catalog = _load_official_catalog()
+        disk_cache = _read_json_file_safe(_release_cache_path())
+        disk_cache["release"] = release
+        disk_cache["zip_manifest"] = manifest
+        _write_json_file_safe(_release_cache_path(), disk_cache)
+
+        if not updated_files and not errors:
+            already_up_to_date = True
+    except Exception as exc:
+        log(f"[Updater] Failed applying release update: {exc}")
+        errors.append(str(exc))
+
+    _catalog_remote_cache = None
+    _catalog_remote_cache_time = 0.0
+    _release_remote_cache = None
+    _release_remote_cache_time = 0.0
+    _local_hash_mem_cache = None
+
+    release_tag = str(release.get("tag_name") or "latest")
+    catalog = _load_official_catalog(force_remote=False)
     new_version = catalog.get("host_version", HOST_VERSION)
 
+    if already_up_to_date:
+        msg = f"Native Host already matches GitHub release {release_tag}."
+    else:
+        msg = f"Updated {len(updated_files)} native host file(s) from GitHub release {release_tag}."
+
     resp = {
-        "ok": len(updated_files) > 0,
+        "ok": len(errors) == 0 and (len(updated_files) > 0 or already_up_to_date),
         "type": "applyUpdateResponse",
         "updatedFiles": updated_files,
+        "alreadyUpToDate": already_up_to_date,
+        "releaseTag": release_tag,
+        "assetDigest": str(zip_asset.get("digest") or ""),
         "version": new_version,
-        "message": f"Successfully updated {len(updated_files)} native host component(s) to v{new_version}. Please reload the extension or restart your browser.",
+        "restartRecommended": len(updated_files) > 0,
+        "message": msg,
         "timestamp": int(time.time() * 1000),
     }
     if errors:
@@ -2525,7 +3315,7 @@ def main() -> None:
             # ------------------------------------------------------------------
             elif mtype == 'checkUpdate' or mtype == 'checkNativeHostUpdate':
                 req_id = msg.get('requestId')
-                send_message(check_for_host_updates(req_id))
+                send_message(check_for_host_updates(req_id, force=bool(msg.get('force', True))))
                 continue
 
             elif mtype == 'applyUpdate' or mtype == 'applyNativeHostUpdate':
@@ -2534,7 +3324,11 @@ def main() -> None:
                 continue
 
             elif mtype == 'listModels':
-                send_message(list_models(msg.get('requestId')))
+                send_message(list_models(
+                    msg.get('requestId'),
+                    check_updates=bool(msg.get('checkUpdates', False)),
+                    force_update_check=bool(msg.get('forceUpdateCheck', False)),
+                ))
                 continue
 
             elif mtype == 'getOfficialCatalog':

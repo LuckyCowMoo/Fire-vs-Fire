@@ -233,6 +233,26 @@ function ensureNativePort() {
   return nativePort;
 }
 
+async function restartNativeHost() {
+  for (const [reqId, { reject, timeoutId }] of pendingNativeRequests) {
+    if (timeoutId) clearTimeout(timeoutId);
+    reject(new Error('Native host restarting'));
+    pendingNativeRequests.delete(reqId);
+  }
+  pendingJobs.clear();
+  setExactRemainingItemCount(0);
+
+  if (nativePort) {
+    try {
+      nativePort.disconnect();
+    } catch (_) {}
+    nativePort = null;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  return sendToNative({ type: 'ping', version: 2 }, { timeoutMs: 4000 });
+}
+
 function sendToNative(message, options = {}) {
   if (ENABLE_FAKE_NATIVE) {
     return Promise.resolve({
@@ -322,14 +342,16 @@ async function blobToDataUrl(blob) {
  * host permissions bypass page CORS restrictions) and downscales/compresses it to
  * a compact JPEG data URL so the Native Host never needs internet access.
  */
-async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 0.88) {
+async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 1.0, timeoutMs = 8000) {
   if (!imageUrl || typeof imageUrl !== 'string') return null;
   if (imageUrl.startsWith('data:')) return imageUrl;
   if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) return null;
 
+  const clampedQuality = Math.max(0.2, Math.min(1.0, typeof quality === 'number' ? quality : 1.0));
+
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(imageUrl, {
       signal: controller.signal,
       credentials: 'omit',
@@ -341,13 +363,31 @@ async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 0
     const blob = await response.blob();
     if (!blob || blob.size === 0) return null;
 
-    // Downscale using createImageBitmap + OffscreenCanvas / HTMLCanvasElement if available
+    const contentType = (blob.type || response.headers?.get?.('content-type') || '').toLowerCase();
+    if (
+      contentType.startsWith('text/') ||
+      contentType.includes('html') ||
+      contentType.includes('json') ||
+      contentType.includes('xml') ||
+      contentType.includes('svg') ||
+      (contentType && !contentType.startsWith('image/') && !contentType.startsWith('application/octet-stream'))
+    ) {
+      return null;
+    }
+
+    // Preserve untouched original bytes when within maxDim; otherwise downscale cleanly
     if (typeof createImageBitmap === 'function') {
       try {
         const bitmap = await createImageBitmap(blob);
         let w = bitmap.width || 0;
         let h = bitmap.height || 0;
         if (w >= 32 && h >= 32) {
+          const mime = (blob.type || '').toLowerCase();
+          const isDirectFormat = mime === 'image/jpeg' || mime === 'image/jpg' || mime === 'image/png' || mime === 'image/webp';
+          if (w <= maxDim && h <= maxDim && clampedQuality >= 0.99 && isDirectFormat && blob.size <= 1572864) {
+            bitmap.close?.();
+            return await blobToDataUrl(blob);
+          }
           if (w > maxDim || h > maxDim) {
             if (w >= h) {
               h = Math.round((h * maxDim) / w);
@@ -364,10 +404,10 @@ async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 0
             bitmap.close?.();
             const outBlob = await offCanvas.convertToBlob({
               type: 'image/jpeg',
-              quality: Math.max(0.5, Math.min(0.95, quality))
+              quality: clampedQuality
             });
-            offCanvas.width = 0;
-            offCanvas.height = 0;
+            offCanvas.width = 0;
+            offCanvas.height = 0;
             return await blobToDataUrl(outBlob);
           } else if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
             const canvas = document.createElement('canvas');
@@ -376,15 +416,16 @@ async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 0
             const ctx = canvas.getContext('2d');
             ctx.drawImage(bitmap, 0, 0, w, h);
             bitmap.close?.();
-            const dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.5, Math.min(0.95, quality)));
-            canvas.width = 0;
-            canvas.height = 0;
+            const dataUrl = canvas.toDataURL('image/jpeg', clampedQuality);
+            canvas.width = 0;
+            canvas.height = 0;
             return dataUrl;
           }
         }
         bitmap.close?.();
       } catch (_) {
-        // Fallback to raw blob data URL below
+        // Non-decodable payload (e.g. corrupt/non-image response): allow caller fallback
+        return null;
       }
     }
 
@@ -418,11 +459,22 @@ async function handleClassifySingleItem(message, sender) {
 
   let dataPayload = message.data || message.text || '';
 
-  // If content script could not extract base64 due to CORS canvas taint, capture it here in background.js
+  // Capture image via background privileges (CORS bypass or Investigator high-res upgrade)
   if (modality === 'image' && (!dataPayload || !dataPayload.startsWith('data:'))) {
     const candidateUrl = message.src || message.url || itemId;
-    const quality = typeof message.captureQuality === 'number' ? message.captureQuality : 0.88;
-    const fetchedDataUrl = await fetchCrossOriginImageAsBase64(candidateUrl, 768, quality);
+    const quality = typeof message.captureQuality === 'number' ? message.captureQuality : 1.0;
+    const primaryTimeout = message.isInvestigatorUpgrade ? 4500 : 8000;
+    let fetchedDataUrl = await fetchCrossOriginImageAsBase64(candidateUrl, 768, quality, primaryTimeout);
+
+    // If an Investigator high-res URL 404s or times out, fall back to original thumbnail seamlessly
+    if (!fetchedDataUrl && message.isInvestigatorUpgrade) {
+      if (message.fallbackData && typeof message.fallbackData === 'string' && message.fallbackData.startsWith('data:')) {
+        fetchedDataUrl = message.fallbackData;
+      } else if (message.fallbackSrc && message.fallbackSrc !== candidateUrl) {
+        fetchedDataUrl = await fetchCrossOriginImageAsBase64(message.fallbackSrc, 768, quality, 8000);
+      }
+    }
+
     if (!fetchedDataUrl) {
       return { ok: false, error: 'cors_image_capture_failed' };
     }
@@ -935,10 +987,12 @@ ext.runtime.onInstalled.addListener((details) => {
   if (!details || details.reason === 'install') {
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
     if (storageArea && storageArea.get && storageArea.set) {
-      storageArea.get(['altTextOnly', 'ignoreSmallImages', 'minImageDimension', 'minTextLength']).then((existing) => {
+      storageArea.get(['altTextOnly', 'ignoreSmallImages', 'investigator', 'imageCaptureQuality', 'minImageDimension', 'minTextLength']).then((existing) => {
         const defaults = {};
         if (typeof existing?.altTextOnly !== 'boolean') defaults.altTextOnly = true;
         if (typeof existing?.ignoreSmallImages !== 'boolean') defaults.ignoreSmallImages = true;
+        if (typeof existing?.investigator !== 'boolean') defaults.investigator = true;
+        if (typeof existing?.imageCaptureQuality !== 'number') defaults.imageCaptureQuality = 1;
         if (typeof existing?.minImageDimension !== 'number') defaults.minImageDimension = 80;
         if (typeof existing?.minTextLength !== 'number') defaults.minTextLength = 250;
         if (Object.keys(defaults).length > 0) {
@@ -949,6 +1003,24 @@ ext.runtime.onInstalled.addListener((details) => {
     openOnboardingExperience();
   }
 });
+
+(async function ensureMaxCaptureQualityAndInvestigatorDefaults() {
+  try {
+    const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+    if (!storageArea || !storageArea.get || !storageArea.set) return;
+    const res = await storageArea.get(['imageCaptureQualityAutoMaxV1', 'investigator']);
+    if (!res || !res.imageCaptureQualityAutoMaxV1) {
+      const updates = {
+        imageCaptureQuality: 1,
+        imageCaptureQualityAutoMaxV1: true
+      };
+      if (typeof res?.investigator !== 'boolean') {
+        updates.investigator = true;
+      }
+      await storageArea.set(updates);
+    }
+  } catch (_) {}
+})();
 
 if (ext.contextMenus && ext.contextMenus.onClicked) {
   ext.contextMenus.onClicked.addListener((info, tab) => {
@@ -1073,24 +1145,32 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message && message.type === 'CHECK_NATIVE_UPDATE') {
-    sendToNative({ type: 'checkUpdate', version: 2 }, { timeoutMs: 5000 })
+    const force = message.force !== false;
+    sendToNative({ type: 'checkUpdate', version: 2, force }, { timeoutMs: 6000 })
       .then((res) => {
         sendResponse({ ok: true, connected: true, updateInfo: res });
       })
       .catch(async (err) => {
         try {
-          const resp = await fetch('https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json', { cache: 'no-store' });
-          if (resp && resp.ok) {
-            const cat = await resp.json();
+          const relResp = await fetch('https://api.github.com/repos/LuckyCowMoo/Fire-vs-Fire/releases/latest', {
+            cache: 'no-store',
+            headers: { Accept: 'application/vnd.github+json' }
+          });
+          if (relResp && relResp.ok) {
+            const rel = await relResp.json();
+            const zipAsset = (rel.assets || []).find((a) => /nativehost.*\.zip$/i.test(a.name || '')) || (rel.assets || []).find((a) => a.name === 'FireVsFire-NativeHost.zip');
             sendResponse({
               ok: true,
               connected: false,
               updateInfo: {
+                checked: true,
                 currentVersion: 'Not connected',
-                latestVersion: cat.host_version || '2.2.0',
+                latestVersion: rel.tag_name || '',
+                releaseTag: rel.tag_name || '',
+                releaseName: rel.name || rel.tag_name || 'Latest Release',
                 updateAvailable: true,
-                releaseNotes: cat.release_notes || 'Updated Native Host installer',
-                downloadUrl: 'https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/FireVsFire-NativeHost.zip'
+                releaseNotes: rel.body || 'Latest Native Host release on GitHub',
+                downloadUrl: (zipAsset && zipAsset.browser_download_url) || rel.html_url || 'https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/latest'
               }
             });
             return;
@@ -1103,8 +1183,15 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message && message.type === 'APPLY_NATIVE_UPDATE') {
     sendToNative({ type: 'applyUpdate', version: 2 }, { timeoutMs: 30000 })
-      .then((res) => {
-        sendResponse({ ok: true, result: res });
+      .then(async (res) => {
+        let restarted = false;
+        if (res && res.ok) {
+          try {
+            await restartNativeHost();
+            restarted = true;
+          } catch (_) {}
+        }
+        sendResponse({ ok: true, result: res, restarted });
       })
       .catch((err) => {
         sendResponse({ ok: false, error: err.message || String(err) });
@@ -1289,13 +1376,23 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message && message.type === 'LIST_MODELS') {
-    sendToNative({ type: 'listModels', version: 2 })
+    sendToNative({
+      type: 'listModels',
+      version: 2,
+      checkUpdates: Boolean(message.checkUpdates),
+      forceUpdateCheck: Boolean(message.forceUpdateCheck)
+    })
       .then((response) => {
         const rawClassifiers = Array.isArray(response.classifiers) ? response.classifiers : [];
         const models = rawClassifiers.length
           ? rawClassifiers.map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean)
           : (response.models || response.model_files || []);
-        sendResponse({ ok: true, models, raw: response });
+        sendResponse({
+          ok: true,
+          models,
+          raw: response,
+          updates: response.updates || null
+        });
       })
       .catch((err) => sendResponse({ ok: false, error: err.message || String(err) }));
     return true;

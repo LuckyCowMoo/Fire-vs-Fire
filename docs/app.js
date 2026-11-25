@@ -342,7 +342,7 @@ let lastRenderFingerprint = '';
 function buildRenderFingerprint() {
   const models = (officialCatalog && Array.isArray(officialCatalog.models)) ? officialCatalog.models : [];
   return models
-    .map((m) => `${m.id}:${m.status}:${installedModels.has(m.id) ? 1 : 0}:${m.disk_size || ''}`)
+    .map((m) => `${m.id}:${m.status}:${installedModels.has(m.id) ? 1 : 0}:${m.update_available ? 1 : 0}:${m.disk_size || ''}`)
     .sort()
     .join('|');
 }
@@ -538,9 +538,11 @@ function createModelTileElement(model) {
       </div>
     `;
   } else if (isInstalled) {
+    const hasUpdate = Boolean(model.update_available);
     footerActionHtml = `
       <div class="model-tile-footer">
-        <button type="button" class="btn-tile-action btn-tile-uninstall category-delete-btn" data-model-id="${model.id}" aria-label="Hold for 3 seconds to uninstall ${model.name}" title="Hold for 3 seconds to remove downloaded weights for this model">
+        ${hasUpdate ? `<button type="button" class="btn-tile-action btn-tile-update" data-model-id="${model.id}" ${isDownloading ? 'disabled hidden' : ''} title="Newer weights available on GitHub release">↑ Update Classifier</button>` : ''}
+        <button type="button" class="btn-tile-action btn-tile-uninstall category-delete-btn" data-model-id="${model.id}" ${isDownloading ? 'hidden' : ''} aria-label="Hold for 3 seconds to uninstall ${model.name}" title="Hold for 3 seconds to remove downloaded weights for this model">
           <div class="category-delete-fill"></div>
           <span class="category-delete-label">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -550,6 +552,15 @@ function createModelTileElement(model) {
             <span class="delete-text">Hold to uninstall</span>
           </span>
         </button>
+        <div class="model-progress-wrap" id="progress-wrap-${model.id}" ${isDownloading ? '' : 'hidden'}>
+          <div class="model-progress-bar">
+            <div class="model-progress-fill" id="progress-fill-${model.id}" style="width: 0%;"></div>
+          </div>
+          <div class="model-progress-text">
+            <span id="progress-label-${model.id}" class="model-progress-label">0.0 / ${dlText}</span>
+            <span id="progress-pct-${model.id}" class="model-progress-pct">0%</span>
+          </div>
+        </div>
       </div>
     `;
   } else {
@@ -588,6 +599,14 @@ function createModelTileElement(model) {
     dlBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       downloadSingleModel(model.id);
+    });
+  }
+
+  const updBtn = tile.querySelector('.btn-tile-update');
+  if (updBtn) {
+    updBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloadSingleModel(model.id, { forceDownload: true });
     });
   }
 
@@ -741,12 +760,16 @@ function handleDownloadProgressEvent(progress) {
   const modelId = progress.modelId;
   const tile = document.querySelector(`.model-tile[data-model-id="${modelId}"]`);
   const dlBtn = tile?.querySelector('.btn-tile-download');
+  const updBtn = tile?.querySelector('.btn-tile-update');
+  const unBtn = tile?.querySelector('.btn-tile-uninstall');
   const wrap = document.getElementById(`progress-wrap-${modelId}`);
   const fill = document.getElementById(`progress-fill-${modelId}`);
   const label = document.getElementById(`progress-label-${modelId}`);
   const pct = document.getElementById(`progress-pct-${modelId}`);
 
   if (dlBtn) dlBtn.hidden = true;
+  if (updBtn) updBtn.hidden = true;
+  if (unBtn) unBtn.hidden = true;
   if (wrap) wrap.hidden = false;
 
   const modelObj = (officialCatalog?.models || []).find((m) => m.id === modelId);
@@ -790,12 +813,14 @@ function handleDownloadProgressEvent(progress) {
   }
 }
 
-async function downloadSingleModel(modelId) {
+async function downloadSingleModel(modelId, { forceDownload = false } = {}) {
   if (activeDownloads.has(modelId)) return;
   activeDownloads.add(modelId);
 
   const tile = document.querySelector(`.model-tile[data-model-id="${modelId}"]`);
   const btn = tile?.querySelector('.btn-tile-download');
+  const updBtn = tile?.querySelector('.btn-tile-update');
+  const unBtn = tile?.querySelector('.btn-tile-uninstall');
   const wrap = document.getElementById(`progress-wrap-${modelId}`);
   const fill = document.getElementById(`progress-fill-${modelId}`);
   const label = document.getElementById(`progress-label-${modelId}`);
@@ -807,6 +832,14 @@ async function downloadSingleModel(modelId) {
     if (tile) tile.classList.add('downloading');
     btn.textContent = 'Install';
   }
+  if (updBtn) {
+    updBtn.disabled = true;
+    updBtn.hidden = true;
+    if (tile) tile.classList.add('downloading');
+  }
+  if (unBtn) {
+    unBtn.hidden = true;
+  }
   if (wrap) wrap.hidden = false;
   if (fill) fill.style.width = '0%';
   if (pct) pct.textContent = '0%';
@@ -816,7 +849,7 @@ async function downloadSingleModel(modelId) {
   if (label) label.textContent = totalMbStr ? `0.0 / ${totalMbStr}` : '0%';
 
   try {
-    const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId }, 600000);
+    const res = await sendBridgeMessage('DOWNLOAD_OFFICIAL_MODEL', { modelId, forceDownload }, 600000);
     activeDownloads.delete(modelId);
 
     if (res && res.ok) {
@@ -825,6 +858,8 @@ async function downloadSingleModel(modelId) {
         const target = officialCatalog.models.find((m) => m.id === modelId);
         if (target) {
           target.installed = true;
+          target.update_available = false;
+          delete target.update_reason;
         }
       }
       if (fill) fill.style.width = '100%';
@@ -856,6 +891,12 @@ async function downloadSingleModel(modelId) {
           btn.textContent = 'Install';
           btn.title = errMsg;
         }
+        if (updBtn) {
+          updBtn.disabled = false;
+          updBtn.hidden = false;
+          updBtn.title = errMsg;
+        }
+        if (unBtn) unBtn.hidden = false;
       }, 2500);
     }
   } catch (err) {
@@ -873,6 +914,12 @@ async function downloadSingleModel(modelId) {
         btn.textContent = 'Install';
         btn.title = errMsg;
       }
+      if (updBtn) {
+        updBtn.disabled = false;
+        updBtn.hidden = false;
+        updBtn.title = errMsg;
+      }
+      if (unBtn) unBtn.hidden = false;
     }, 2500);
   }
 

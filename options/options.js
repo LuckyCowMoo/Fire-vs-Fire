@@ -19,6 +19,7 @@ const MODE_ICONS = {
 const enabledInput = document.getElementById('enabled');
 const altTextOnlyInput = document.getElementById('altTextOnly');
 const ignoreSmallImagesInput = document.getElementById('ignoreSmallImages');
+const investigatorInput = document.getElementById('investigator');
 const minImageDimensionInput = document.getElementById('minImageDimension');
 const classificationDelayInput = document.getElementById('classificationDelay');
 const classificationDelayValue = document.getElementById('classificationDelayValue');
@@ -26,6 +27,7 @@ const imageCaptureQualityInput = document.getElementById('imageCaptureQuality');
 const imageCaptureQualityValue = document.getElementById('imageCaptureQualityValue');
 const verboseLogsInput = document.getElementById('verboseLogs');
 const lazyLoadInput = document.getElementById('lazyLoad');
+const disableUpdateNotificationsInput = document.getElementById('disableUpdateNotifications');
 const minTextLengthInput = document.getElementById('minTextLength');
 
 const pauseOnBatteryInput = document.getElementById('pauseOnBattery');
@@ -37,9 +39,16 @@ let isClassifying = false;
 let classifyCount = 0;
 let isPowerPaused = false;
 let currentPowerStatus = null;
+let disableUpdateNotifications = false;
+let settingsLoaded = false;
+let latestUpdateStatus = null;
 
 const refreshBtn = document.getElementById('refresh-models');
 const modelStatusEl = document.getElementById('model-status');
+const updateBannerWrapEl = document.getElementById('update-banner-wrap');
+const hostUpdateBannerBtn = document.getElementById('host-update-banner-btn');
+const classifierUpdateBannerBtn = document.getElementById('classifier-update-banner-btn');
+const updateBannerStatusEl = document.getElementById('update-banner-status');
 
 const categoryStripWrapEl = document.getElementById('category-strip-wrap');
 const categoryStripEl = document.getElementById('category-strip');
@@ -2018,6 +2027,7 @@ async function load() {
           'enabled',
           'altTextOnly',
           'ignoreSmallImages',
+          'investigator',
           'minImageDimension',
           'pauseOnBattery',
           'pauseBelowThreshold',
@@ -2026,6 +2036,7 @@ async function load() {
           'imageCaptureQuality',
           'verboseLogs',
           'lazyLoad',
+          'disableUpdateNotifications',
           'minTextLength',
           'ensembleConfigsV2'
         ])
@@ -2042,6 +2053,13 @@ async function load() {
         ignoreSmallImagesInput.checked = res.ignoreSmallImages;
       } else {
         ignoreSmallImagesInput.checked = true; // Default true on first install
+      }
+    }
+    if (investigatorInput) {
+      if (res && typeof res.investigator === 'boolean') {
+        investigatorInput.checked = res.investigator;
+      } else {
+        investigatorInput.checked = true; // Default true on first install
       }
     }
     if (minImageDimensionInput) {
@@ -2066,9 +2084,16 @@ async function load() {
     }
     if (res && typeof res.imageCaptureQuality === 'number') {
       imageCaptureQualityInput.value = res.imageCaptureQuality;
+    } else if (imageCaptureQualityInput) {
+      imageCaptureQualityInput.value = '1';
     }
     if (res && typeof res.verboseLogs === 'boolean') verboseLogsInput.checked = res.verboseLogs;
     if (res && typeof res.lazyLoad === 'boolean') lazyLoadInput.checked = res.lazyLoad;
+    disableUpdateNotifications = Boolean(res && res.disableUpdateNotifications);
+    if (disableUpdateNotificationsInput) {
+      disableUpdateNotificationsInput.checked = disableUpdateNotifications;
+    }
+    settingsLoaded = true;
     if (res && typeof res.minTextLength === 'number') minTextLengthInput.value = res.minTextLength;
 
     if (res && Array.isArray(res.ensembleConfigsV2) && res.ensembleConfigsV2.length) {
@@ -2171,6 +2196,12 @@ if (ignoreSmallImagesInput) {
   });
 }
 
+if (investigatorInput) {
+  investigatorInput.addEventListener('change', async () => {
+    await saveSetting('investigator', investigatorInput.checked);
+  });
+}
+
 if (minImageDimensionInput) {
   minImageDimensionInput.addEventListener('change', async () => {
     const value = Math.max(16, Math.min(512, parseInt(minImageDimensionInput.value, 10) || 80));
@@ -2208,6 +2239,19 @@ lazyLoadInput.addEventListener('change', async () => {
   await saveSetting('lazyLoad', lazyLoadInput.checked);
 });
 
+if (disableUpdateNotificationsInput) {
+  disableUpdateNotificationsInput.addEventListener('change', async () => {
+    disableUpdateNotifications = disableUpdateNotificationsInput.checked;
+    await saveSetting('disableUpdateNotifications', disableUpdateNotifications);
+    if (disableUpdateNotifications) {
+      latestUpdateStatus = null;
+      renderUpdateBanner(null);
+    } else {
+      fetchModels({ forceUpdateCheck: false }).catch(() => {});
+    }
+  });
+}
+
 minTextLengthInput.addEventListener('change', async () => {
   const value = Math.max(50, Math.min(2000, parseInt(minTextLengthInput.value, 10) || 250));
   minTextLengthInput.value = value;
@@ -2216,7 +2260,10 @@ minTextLengthInput.addEventListener('change', async () => {
 
 initCollapsibleAnimations();
 initInteractionParticles();
-load().then(() => requestAnimationFrame(stabilizePopupWidth));
+load().then(() => {
+  requestAnimationFrame(stabilizePopupWidth);
+  fetchModels().catch(() => {});
+});
 refreshRunState();
 runStateTimer = setInterval(refreshRunState, 800);
 
@@ -2317,6 +2364,15 @@ if (cancelAllBtn) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function setModelStatus(text, type = 'info') {
   if (!modelStatusEl) return;
   modelStatusEl.textContent = text;
@@ -2324,10 +2380,73 @@ function setModelStatus(text, type = 'info') {
   modelStatusEl.style.color = type === 'error' ? '#c04a4a' : '';
 }
 
-async function fetchModels() {
+let updateStatusHideTimer = null;
+
+function renderUpdateBanner(updates) {
+  if (!updateBannerWrapEl || !hostUpdateBannerBtn || !classifierUpdateBannerBtn) return;
+
+  const hasTransientStatus = Boolean(updateBannerStatusEl && !updateBannerStatusEl.hidden);
+
+  if (disableUpdateNotifications || !updates || !updates.anyUpdateAvailable) {
+    hostUpdateBannerBtn.hidden = true;
+    classifierUpdateBannerBtn.hidden = true;
+    if (!hasTransientStatus) {
+      updateBannerWrapEl.hidden = true;
+    }
+    return;
+  }
+
+  let anyBtnVisible = false;
+  const hostInfo = updates.host || {};
+  if (hostInfo.updateAvailable) {
+    const relTag = hostInfo.releaseTag || '';
+    const diffCount = Number(hostInfo.diffCount) || 0;
+    hostUpdateBannerBtn.textContent = relTag
+      ? `↑ Update Native Host (${relTag})`
+      : '↑ Update Native Host';
+    const diffSummary = diffCount > 0 ? `${diffCount} file(s) differ from GitHub release` : '';
+    hostUpdateBannerBtn.title = [diffSummary, hostInfo.releaseNotes].filter(Boolean).join(' — ') || 'Update local Native Host components now';
+    hostUpdateBannerBtn.disabled = false;
+    hostUpdateBannerBtn.hidden = false;
+    anyBtnVisible = true;
+  } else {
+    hostUpdateBannerBtn.hidden = true;
+  }
+
+  const clfInfo = updates.classifiers || {};
+  const outdated = Array.isArray(clfInfo.outdated) ? clfInfo.outdated : [];
+  if (clfInfo.updateAvailable && outdated.length > 0) {
+    if (outdated.length === 1) {
+      const item = outdated[0];
+      const prefix = item.reason === 'newer_generation' ? '↑ Newer Classifier' : '↑ Update Classifier';
+      classifierUpdateBannerBtn.textContent = `${prefix}: ${item.latestName || item.latestId}`;
+    } else {
+      classifierUpdateBannerBtn.textContent = `↑ ${outdated.length} Classifier Updates Available`;
+    }
+    classifierUpdateBannerBtn.title = outdated
+      .map((item) => (
+        item.reason === 'release_updated'
+          ? `${item.installedName || item.installedId}: updated release weights available`
+          : `${item.installedName || item.installedId} → ${item.latestName || item.latestId}`
+      ))
+      .join('\n');
+    classifierUpdateBannerBtn.hidden = false;
+    anyBtnVisible = true;
+  } else {
+    classifierUpdateBannerBtn.hidden = true;
+  }
+
+  updateBannerWrapEl.hidden = !(anyBtnVisible || hasTransientStatus);
+}
+
+async function fetchModels({ forceUpdateCheck = false } = {}) {
   setModelStatus('Loading models…');
   try {
-    const resp = await ext.runtime.sendMessage({ type: 'LIST_MODELS' });
+    const resp = await ext.runtime.sendMessage({
+      type: 'LIST_MODELS',
+      checkUpdates: !disableUpdateNotifications,
+      forceUpdateCheck
+    });
     if (!resp || resp.ok !== true) throw new Error(resp?.error || 'Failed to list models');
     const models = Array.isArray(resp.models) ? resp.models : [];
     const rawClassifiers = resp.raw && Array.isArray(resp.raw.classifiers) ? resp.raw.classifiers : [];
@@ -2336,6 +2455,13 @@ async function fetchModels() {
       : models.map((id) => ({ id, name: id, label: 'AI generated', modalities: [] }));
     renderEnsembles();
     setModelStatus(models.length ? `${models.length} model(s) loaded` : 'No models found');
+
+    if (!disableUpdateNotifications && resp.updates) {
+      latestUpdateStatus = resp.updates;
+      renderUpdateBanner(latestUpdateStatus);
+    } else if (disableUpdateNotifications) {
+      renderUpdateBanner(null);
+    }
   } catch (err) {
     console.warn('LIST_MODELS failed', err);
     availableClassifiers = [];
@@ -2345,7 +2471,7 @@ async function fetchModels() {
 }
 
 if (refreshBtn) {
-  refreshBtn.addEventListener('click', () => fetchModels());
+  refreshBtn.addEventListener('click', () => fetchModels({ forceUpdateCheck: !disableUpdateNotifications }));
   const openOnboardingBtn = document.getElementById('open-onboarding');
   if (openOnboardingBtn) {
     openOnboardingBtn.addEventListener('click', () => {
@@ -2355,12 +2481,10 @@ if (refreshBtn) {
   }
 }
 
-(async () => {
-  await fetchModels();
-})();
-
 window.addEventListener('focus', () => {
-  fetchModels().catch(() => {});
+  if (settingsLoaded) {
+    fetchModels().catch(() => {});
+  }
 });
 
 // Initialize accent sliders on load
@@ -2505,6 +2629,67 @@ function initNavButtonsAndHostUpdater() {
     });
   }
 
+  if (hostUpdateBannerBtn) {
+    hostUpdateBannerBtn.addEventListener('click', async () => {
+      hostUpdateBannerBtn.disabled = true;
+      hostUpdateBannerBtn.textContent = 'Updating Native Host…';
+      if (updateBannerStatusEl) {
+        updateBannerStatusEl.hidden = true;
+      }
+      try {
+        const applyResp = await ext.runtime.sendMessage({ type: 'APPLY_NATIVE_UPDATE' });
+        if (applyResp && applyResp.ok && applyResp.result && applyResp.result.ok) {
+          const relTag = applyResp.result.releaseTag || '';
+          hostUpdateBannerBtn.hidden = true;
+          if (updateBannerStatusEl) {
+            updateBannerStatusEl.style.color = '#2ecc71';
+            updateBannerStatusEl.textContent = applyResp.result.alreadyUpToDate
+              ? `✓ Native Host already matches GitHub${relTag ? ` (${relTag})` : ''}`
+              : `✓ Native Host updated${relTag ? ` (${relTag})` : ''}${applyResp.restarted ? ' — restarted' : ''}`;
+            updateBannerStatusEl.hidden = false;
+            updateBannerWrapEl.hidden = false;
+          }
+          await refreshHostStatus();
+          await fetchModels({ forceUpdateCheck: true });
+          if (updateStatusHideTimer) clearTimeout(updateStatusHideTimer);
+          updateStatusHideTimer = setTimeout(() => {
+            if (updateBannerStatusEl) updateBannerStatusEl.hidden = true;
+            renderUpdateBanner(latestUpdateStatus);
+          }, 3500);
+        } else {
+          const errText = applyResp?.result?.errors?.join('; ') || applyResp?.error || 'Update failed';
+          if (updateBannerStatusEl) {
+            updateBannerStatusEl.style.color = '#e74c3c';
+            updateBannerStatusEl.textContent = `✕ Native Host update failed: ${errText}`;
+            updateBannerStatusEl.hidden = false;
+            updateBannerWrapEl.hidden = false;
+          }
+          hostUpdateBannerBtn.disabled = false;
+          renderUpdateBanner(latestUpdateStatus);
+        }
+      } catch (err) {
+        if (updateBannerStatusEl) {
+          updateBannerStatusEl.style.color = '#e74c3c';
+          updateBannerStatusEl.textContent = `✕ Error: ${err.message || String(err)}`;
+          updateBannerStatusEl.hidden = false;
+          updateBannerWrapEl.hidden = false;
+        }
+        hostUpdateBannerBtn.disabled = false;
+        renderUpdateBanner(latestUpdateStatus);
+      }
+    });
+  }
+
+  if (classifierUpdateBannerBtn) {
+    classifierUpdateBannerBtn.addEventListener('click', () => {
+      ext.runtime.sendMessage({ type: 'OPEN_MODELS_HUB' }).catch(() => {
+        if (ext.tabs && ext.tabs.create) {
+          ext.tabs.create({ url: ext.runtime.getURL('docs/index.html?screen=2&manage=1') });
+        }
+      });
+    });
+  }
+
   if (checkUpdateBtn && updateStatusEl) {
     checkUpdateBtn.addEventListener('click', async () => {
       checkUpdateBtn.disabled = true;
@@ -2513,50 +2698,94 @@ function initNavButtonsAndHostUpdater() {
       updateStatusEl.innerHTML = '<span style="color: #f1c40f;">Connecting to GitHub / Native Host…</span>';
 
       try {
-        const resp = await ext.runtime.sendMessage({ type: 'CHECK_NATIVE_UPDATE' });
+        const resp = await ext.runtime.sendMessage({ type: 'CHECK_NATIVE_UPDATE', force: true });
         checkUpdateBtn.disabled = false;
         checkUpdateBtn.innerHTML = '<span>↻ Check for Updates</span>';
 
         if (resp && resp.ok && resp.updateInfo) {
           const info = resp.updateInfo;
+          const clfUpdates = info.classifierUpdates || info.updates?.classifiers || {};
+          const outdated = Array.isArray(clfUpdates.outdated) ? clfUpdates.outdated : [];
+
+          if (info.updates && !disableUpdateNotifications) {
+            latestUpdateStatus = info.updates;
+            renderUpdateBanner(latestUpdateStatus);
+          }
+
+          let html = '';
+          const relTag = info.releaseTag || info.latestVersion || 'latest';
+          const diffCount = Number(info.diffCount) || 0;
           if (info.updateAvailable) {
-            updateStatusEl.innerHTML = `
-              <div style="color: #ff9d66; font-weight: 600; margin-bottom: 4px;">⚡ Update Available: v${info.latestVersion} (Current: ${info.currentVersion})</div>
-              <div style="color: var(--text-muted); font-size: 11px; margin-bottom: 8px;">${info.releaseNotes || 'Includes new features & optimizations.'}</div>
-              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            const dlUrl = escapeHtml(info.downloadUrl || 'https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/latest');
+            const diffDetail = diffCount > 0 ? ` — ${diffCount} file(s) differ` : '';
+            html += `
+              <div style="color: #ff9d66; font-weight: 600; margin-bottom: 4px;">⚡ Host Update Available (${escapeHtml(relTag)}${diffDetail})</div>
+              <div style="color: var(--text-muted); font-size: 11px; margin-bottom: 8px;">${escapeHtml(info.releaseNotes || 'Differs from current GitHub release.')}</div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: ${outdated.length ? '8px' : '0'};">
                 ${resp.connected ? '<button type="button" id="apply-native-update-btn" class="btn btn-outline" style="font-size: 11px; padding: 4px 10px; border-color: #2ecc71; color: #2ecc71;">⚡ Update In-Place Now</button>' : ''}
-                <a href="${info.downloadUrl || 'https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/tag/v2.0'}" target="_blank" class="btn btn-outline" style="font-size: 11px; padding: 4px 10px; text-decoration: none;">Download ZIP</a>
+                <a href="${dlUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 11px; padding: 4px 10px; text-decoration: none;">Download ZIP</a>
               </div>
             `;
+          } else if (info.checked === false) {
+            html += `<div style="color: #f1c40f; margin-bottom: ${outdated.length ? '6px' : '0'};">⚠️ Could not verify GitHub release (network unavailable).</div>`;
+          } else {
+            html += `<div style="color: #2ecc71; margin-bottom: ${outdated.length ? '6px' : '0'};">✅ Native Host matches GitHub release (${escapeHtml(relTag)}).</div>`;
+          }
 
-            const applyBtn = document.getElementById('apply-native-update-btn');
-            if (applyBtn) {
-              applyBtn.addEventListener('click', async () => {
-                applyBtn.disabled = true;
-                applyBtn.textContent = 'Updating components…';
-                try {
-                  const applyResp = await ext.runtime.sendMessage({ type: 'APPLY_NATIVE_UPDATE' });
-                  if (applyResp && applyResp.ok) {
-                    updateStatusEl.innerHTML = `<span style="color: #2ecc71; font-weight: 600;">✅ ${applyResp.result?.message || 'Updated successfully!'}</span>`;
-                    refreshHostStatus();
-                  } else {
-                    updateStatusEl.innerHTML = `<span style="color: #e74c3c;">❌ Update failed: ${applyResp?.error || 'Unknown error'}</span>`;
-                  }
-                } catch (e) {
-                  updateStatusEl.innerHTML = `<span style="color: #e74c3c;">❌ Error: ${e.message}</span>`;
+          if (outdated.length > 0) {
+            const listItems = outdated
+              .map((item) => (
+                item.reason === 'release_updated'
+                  ? `<li><strong>${escapeHtml(item.installedName || item.installedId)}</strong> — updated weights on GitHub release</li>`
+                  : `<li>${escapeHtml(item.installedName || item.installedId)} → <strong>${escapeHtml(item.latestName || item.latestId)}</strong></li>`
+              ))
+              .join('');
+            html += `
+              <div style="color: #ffd099; font-weight: 600; margin-bottom: 4px;">⚡ Classifier Update${outdated.length > 1 ? 's' : ''} Available:</div>
+              <ul style="margin: 0 0 8px 16px; padding: 0; font-size: 11px; color: var(--text-secondary);">${listItems}</ul>
+              <button type="button" id="open-classifier-updates-btn" class="btn btn-outline" style="font-size: 11px; padding: 4px 10px; border-color: #ff9838; color: #ffd099;">Open FvF Classifiers</button>
+            `;
+          }
+
+          updateStatusEl.innerHTML = html;
+
+          const applyBtn = document.getElementById('apply-native-update-btn');
+          if (applyBtn) {
+            applyBtn.addEventListener('click', async () => {
+              applyBtn.disabled = true;
+              applyBtn.textContent = 'Updating components…';
+              try {
+                const applyResp = await ext.runtime.sendMessage({ type: 'APPLY_NATIVE_UPDATE' });
+                if (applyResp && applyResp.ok && applyResp.result && applyResp.result.ok) {
+                  updateStatusEl.innerHTML = `<span style="color: #2ecc71; font-weight: 600;">✅ ${escapeHtml(applyResp.result?.message || 'Updated successfully!')}</span>`;
+                  await refreshHostStatus();
+                  await fetchModels({ forceUpdateCheck: true });
+                } else {
+                  updateStatusEl.innerHTML = `<span style="color: #e74c3c;">❌ Update failed: ${escapeHtml(applyResp?.error || 'Unknown error')}</span>`;
+                }
+              } catch (e) {
+                updateStatusEl.innerHTML = `<span style="color: #e74c3c;">❌ Error: ${escapeHtml(e.message)}</span>`;
+              }
+            });
+          }
+
+          const openClfBtn = document.getElementById('open-classifier-updates-btn');
+          if (openClfBtn) {
+            openClfBtn.addEventListener('click', () => {
+              ext.runtime.sendMessage({ type: 'OPEN_MODELS_HUB' }).catch(() => {
+                if (ext.tabs && ext.tabs.create) {
+                  ext.tabs.create({ url: ext.runtime.getURL('docs/index.html?screen=2&manage=1') });
                 }
               });
-            }
-          } else {
-            updateStatusEl.innerHTML = `<span style="color: #2ecc71;">✅ Native Host is up to date (v${info.currentVersion || '2.1.0'}).</span>`;
+            });
           }
         } else {
-          updateStatusEl.innerHTML = `<span style="color: #e74c3c;">Could not check updates: ${resp?.error || 'Native Host not responding'}</span>`;
+          updateStatusEl.innerHTML = `<span style="color: #e74c3c;">Could not check updates: ${escapeHtml(resp?.error || 'Native Host not responding')}</span>`;
         }
       } catch (err) {
         checkUpdateBtn.disabled = false;
         checkUpdateBtn.innerHTML = '<span>↻ Check for Updates</span>';
-        updateStatusEl.innerHTML = `<span style="color: #e74c3c;">Error: ${err.message || String(err)}</span>`;
+        updateStatusEl.innerHTML = `<span style="color: #e74c3c;">Error: ${escapeHtml(err.message || String(err))}</span>`;
       }
     });
   }

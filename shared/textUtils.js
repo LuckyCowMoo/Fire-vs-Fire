@@ -79,7 +79,7 @@
     };
   }
 
-  function extractCohesiveTextSections(root, minTextLength, isProcessedFn, seenSet) {
+  function extractCohesiveTextSections(root, minTextLength, isProcessedFn, seenSet, hasResultFn) {
     const scope = root || (typeof document !== 'undefined' ? document : null);
     if (!scope || !scope.querySelectorAll) return [];
 
@@ -114,7 +114,8 @@
           return;
         }
 
-        let sib = el.nextElementSibling;
+        const firstCached = Boolean(hasResultFn && hasResultFn(firstText.substring(0, 500)));
+        let sib = firstCached ? null : el.nextElementSibling;
         while (sib && group.length < 4 && accLen < 1800) {
           if (visited.has(sib) || (isProcessedFn && isProcessedFn(sib))) break;
           const sibTag = sib.tagName ? sib.tagName.toLowerCase() : '';
@@ -122,6 +123,7 @@
           if (hasNestedTextCandidate(sib) || isIsolatedFeedElement(sib)) break;
           const sibText = normalizeElementText(sib);
           if (!sibText) break;
+          if (hasResultFn && hasResultFn(sibText.substring(0, 500))) break;
           if (accLen + 2 + sibText.length > 1800 && accLen >= minLen) break;
           group.push(sib);
           parts.push(sibText);

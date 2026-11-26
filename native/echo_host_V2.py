@@ -41,6 +41,11 @@ import os
 import re
 import ssl
 
+# Suppress noisy tokenizer / HF Hub output before child imports run
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 # Setup logging to file
 LOG_FILE_LOCAL = Path(__file__).resolve().parent / "native_host.log"
 LOG_FILE_ROOT = Path(__file__).resolve().parent.parent / "native_host_v2.log"
@@ -78,9 +83,14 @@ from classifiers.base_classifier import BaseClassifier
 # Native Messaging Protocol (Thread-Safe)
 # ============================================================================
 
-# Preserve raw stdout binary buffer for Native Messaging protocol
-_raw_stdout = sys.stdout.buffer
-# Redirect text stdout to stderr so ANY accidental print() never corrupts native messaging!
+# Preserve raw OS file descriptor 1 exclusively for binary Native Messaging frames,
+# and redirect both OS fd 1 and Python sys.stdout to stderr so C++ libs / subprocesses never corrupt framing.
+try:
+    _native_stdout_fd = os.dup(1)
+    os.dup2(2, 1)
+    _raw_stdout = os.fdopen(_native_stdout_fd, "wb", closefd=False)
+except OSError:
+    _raw_stdout = sys.stdout.buffer
 sys.stdout = sys.stderr
 
 _stdout_lock = threading.Lock()
@@ -1728,9 +1738,9 @@ def list_models(
     check_updates: bool = False,
     force_update_check: bool = False,
 ) -> Dict[str, Any]:
-    """List available classifiers from registry with fresh folder scan and optional update check."""
+    """List available classifiers from registry with optional folder rescan and update check."""
     registry = get_registry()
-    available = [c for c in registry.list_available_details(force_rescan=True) if c.get("weights_ready")]
+    available = [c for c in registry.list_available_details(force_rescan=bool(force_update_check)) if c.get("weights_ready")]
 
     repo_root = Path(__file__).parent.parent
     imm_dir = repo_root / 'Immage Models'
@@ -2709,6 +2719,7 @@ def download_official_model(model_id: str, request_id: Optional[str] = None, for
     _emit_progress(final_total, final_total, pct_override=100)
 
     _record_installed_model_version(model_id, str(target_model.get("version") or ""))
+    _invalidate_update_status_cache()
 
     registry = get_registry()
     registry.discover_classifiers(force=True)
@@ -2836,6 +2847,7 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
         _remove_installed_model_version(canonical_id)
     if model_id and model_id != canonical_id:
         _remove_installed_model_version(model_id)
+    _invalidate_update_status_cache()
 
     registry.discover_classifiers(force=True)
     available = [c for c in registry.list_available_details(force_rescan=True) if c.get("weights_ready")]
@@ -2974,8 +2986,28 @@ def _compare_classifiers_with_release(
     return outdated
 
 
+_last_update_status_cache: Optional[Dict[str, Any]] = None
+_last_update_status_time: float = 0.0
+_UPDATE_STATUS_CACHE_TTL = 60.0
+
+
+def _invalidate_update_status_cache() -> None:
+    global _last_update_status_cache, _last_update_status_time
+    _last_update_status_cache = None
+    _last_update_status_time = 0.0
+
+
 def _compute_update_status(force_remote: bool = False, timeout: float = 4.0) -> Dict[str, Any]:
     """Compare local native host and installed classifiers against the current GitHub release."""
+    global _last_update_status_cache, _last_update_status_time
+    now = time.time()
+    if (
+        not force_remote
+        and _last_update_status_cache is not None
+        and (now - _last_update_status_time) < _UPDATE_STATUS_CACHE_TTL
+    ):
+        return copy.deepcopy(_last_update_status_cache)
+
     local_catalog = _load_local_catalog_raw()
     remote_catalog, _ = _fetch_remote_catalog(force=force_remote, timeout=timeout)
     release, rel_fetched = _fetch_latest_github_release(force=force_remote, timeout=timeout)
@@ -3019,13 +3051,16 @@ def _compute_update_status(force_remote: bool = False, timeout: float = 4.0) -> 
         "updateAvailable": len(outdated) > 0,
         "outdated": outdated,
     }
-    return {
+    status_result = {
         "checked": checked,
         "checkedAt": now_ms,
         "host": host_info,
         "classifiers": classifiers_info,
         "anyUpdateAvailable": bool(host_update_available or outdated),
     }
+    _last_update_status_cache = copy.deepcopy(status_result)
+    _last_update_status_time = time.time()
+    return status_result
 
 
 def check_for_host_updates(request_id: Optional[str] = None, force: bool = True) -> Dict[str, Any]:
@@ -3154,6 +3189,7 @@ def apply_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
     _release_remote_cache = None
     _release_remote_cache_time = 0.0
     _local_hash_mem_cache = None
+    _invalidate_update_status_cache()
 
     release_tag = str(release.get("tag_name") or "latest")
     catalog = _load_official_catalog(force_remote=False)

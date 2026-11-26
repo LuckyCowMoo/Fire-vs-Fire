@@ -85,10 +85,15 @@ let seenImageUrls = new Set();   // Image URLs already queued or classified
 let pendingMutations = [];       // Batched MutationObserver records
 let mutationFlushTimer = null;   // Debounce timer for mutation processing
 const MUTATION_FLUSH_MS = 120;
+const TEXT_STREAM_SETTLE_MS = 650;
+const TEXT_GROWTH_RECLASSIFY_DELTA = 40;
 const MAX_ITEM_RESULTS = 3000;
 const PERIODIC_SCAN_MS = 30000;
 
 let processedTextElements = new WeakSet();
+let streamingTextElements = new Map(); // Element -> { timerId, lastMutatedAt }
+let elementClassifiedMeta = new WeakMap(); // Element -> { preview, length }
+let activeMutationBatchBlocks = new Set(); // Temporarily blocks newly added/mutated trailing nodes during batch flush
 
 function isElementInViewport(el) {
   if (!el || typeof el.getBoundingClientRect !== 'function') return false;
@@ -240,8 +245,46 @@ function observeImage(el) {
   if (intersectionObserver) intersectionObserver.observe(el);
 }
 
+function clearStreamingTextElement(el) {
+  if (!el) return;
+  const entry = streamingTextElements.get(el);
+  if (entry && entry.timerId) {
+    clearTimeout(entry.timerId);
+  }
+  streamingTextElements.delete(el);
+}
+
+function clearAllStreamingTextElements() {
+  streamingTextElements.forEach((entry) => {
+    if (entry && entry.timerId) clearTimeout(entry.timerId);
+  });
+  streamingTextElements.clear();
+}
+
+function isEditableTextElement(el) {
+  if (!el || !(el instanceof Element)) return true;
+  if (el.isContentEditable) return true;
+  if (typeof el.closest === 'function' && el.closest('[contenteditable="true"], textarea, input')) {
+    return true;
+  }
+  return false;
+}
+
+function findEnclosingTextBlock(node) {
+  if (!node) return null;
+  const el = node.nodeType === 3 ? node.parentElement : node;
+  if (!el || typeof el.closest !== 'function') return null;
+  const block = el.closest(TU.TEXT_SELECTORS);
+  if (!block || !block.isConnected) return null;
+  if (isEditableTextElement(block)) return null;
+  if (TU.hasNestedTextCandidate(block)) return null;
+  return block;
+}
+
 function releaseElementTracking(el) {
   if (!el || !(el instanceof Element)) return;
+
+  clearStreamingTextElement(el);
 
   const itemId = elementToItemId.get(el);
   if (itemId) {
@@ -252,6 +295,7 @@ function releaseElementTracking(el) {
     } else if (tracked === el) {
       elementMap.delete(itemId);
     }
+    elementToItemId.delete(el);
   }
 
   if (el.tagName?.toLowerCase() === 'img') {
@@ -265,6 +309,7 @@ function releaseElementTracking(el) {
     if (currentHoverEl === el) currentHoverEl = null;
   } else {
     processedTextElements.delete(el);
+    elementClassifiedMeta.delete(el);
   }
 }
 
@@ -316,6 +361,12 @@ function cleanupStaleEntries() {
 
   if (currentHoverEl && !currentHoverEl.isConnected) {
     currentHoverEl = null;
+  }
+
+  for (const el of Array.from(streamingTextElements.keys())) {
+    if (!el || !el.isConnected) {
+      clearStreamingTextElement(el);
+    }
   }
 
   pruneItemResults();
@@ -739,6 +790,153 @@ function scheduleTextClassification(textSections) {
   });
 }
 
+function isTextElementBlocked(el) {
+  return !el || processedTextElements.has(el) || streamingTextElements.has(el) || activeMutationBatchBlocks.has(el) || isEditableTextElement(el);
+}
+
+function hasTrackedTextResult(preview) {
+  return Boolean(preview && (itemResults.has(preview) || pendingItemIds.has(preview)));
+}
+
+function extractSectionsFromScope(scope, outList = []) {
+  if (!scope || typeof TU.extractCohesiveTextSections !== 'function') return outList;
+  const candidates = TU.extractCohesiveTextSections(
+    scope,
+    getMinTextLength(),
+    isTextElementBlocked,
+    null,
+    hasTrackedTextResult
+  );
+  candidates.forEach((sec) => {
+    const accepted = acceptCohesiveTextSection(sec);
+    if (accepted) outList.push(accepted);
+  });
+  return outList;
+}
+
+function buildSectionForCompletedElement(el) {
+  if (!el || !el.isConnected || isTextElementBlocked(el)) return null;
+  if (TU.hasNestedTextCandidate(el)) return null;
+
+  const minLen = getMinTextLength();
+  const tag = el.tagName ? el.tagName.toLowerCase() : '';
+  if (tag === 'p' && !TU.isIsolatedFeedElement(el)) {
+    // Walk back to the start of any contiguous completed <p> run (capped at 4 paragraphs)
+    let runStart = el;
+    let backSteps = 0;
+    while (backSteps < 3 && runStart.previousElementSibling) {
+      const prev = runStart.previousElementSibling;
+      if (!prev.tagName || prev.tagName.toLowerCase() !== 'p') break;
+      if (isTextElementBlocked(prev) || TU.hasNestedTextCandidate(prev) || TU.isIsolatedFeedElement(prev)) break;
+      if (!TU.normalizeElementText(prev)) break;
+      runStart = prev;
+      backSteps++;
+    }
+
+    const group = [];
+    const parts = [];
+    let accLen = 0;
+    let cur = runStart;
+    while (cur && group.length < 4 && accLen < 1800) {
+      if (!cur.tagName || cur.tagName.toLowerCase() !== 'p') break;
+      if (isTextElementBlocked(cur) || TU.hasNestedTextCandidate(cur) || TU.isIsolatedFeedElement(cur)) break;
+      const curText = TU.normalizeElementText(cur);
+      if (!curText) break;
+      if (cur !== runStart && hasTrackedTextResult(curText.substring(0, 500))) break;
+      if (accLen + (parts.length ? 2 : 0) + curText.length > 1800 && accLen >= minLen && cur !== el && group.includes(el)) {
+        break;
+      }
+      group.push(cur);
+      parts.push(curText);
+      accLen += (parts.length > 1 ? 2 : 0) + curText.length;
+      if (cur === runStart && hasTrackedTextResult(curText.substring(0, 500))) break;
+      cur = cur.nextElementSibling;
+    }
+
+    const joined = parts.join('\n\n');
+    if (!joined || joined.length < minLen) return null;
+    return TU.buildTextSection(group[0], 0, joined, group);
+  }
+
+  const text = TU.normalizeElementText(el);
+  if (!text || text.length < minLen) return null;
+  return TU.buildTextSection(el, 0, text, [el]);
+}
+
+function flushStreamingTextElement(el) {
+  if (!streamingTextElements.has(el)) return;
+  clearStreamingTextElement(el);
+  if (!el || !el.isConnected || processedTextElements.has(el) || isEditableTextElement(el)) return;
+  if (!settings.enabled || scanPaused || !hasActiveModality('text')) return;
+
+  const sec = buildSectionForCompletedElement(el);
+  const accepted = sec ? acceptCohesiveTextSection(sec) : null;
+  if (accepted) {
+    scheduleTextClassification([accepted]);
+  }
+}
+
+function flushPrecedingStreamingSiblings(node, activeInBatchSet) {
+  if (!node || streamingTextElements.size === 0) return;
+
+  const toFlush = [];
+  for (const streamEl of streamingTextElements.keys()) {
+    if (!streamEl || streamEl === node) continue;
+    if (activeInBatchSet && activeInBatchSet.has(streamEl)) continue;
+    if (!streamEl.isConnected) {
+      toFlush.push(streamEl);
+      continue;
+    }
+    if (typeof node.contains === 'function' && (node.contains(streamEl) || streamEl.contains(node))) {
+      continue;
+    }
+    if (typeof streamEl.compareDocumentPosition === 'function') {
+      const pos = streamEl.compareDocumentPosition(node);
+      if ((pos & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+        toFlush.push(streamEl);
+      }
+    }
+  }
+
+  toFlush.forEach((streamEl) => flushStreamingTextElement(streamEl));
+}
+
+function scheduleStreamingTextSettle(el) {
+  if (!el || !el.isConnected || processedTextElements.has(el) || isEditableTextElement(el)) return;
+  if (TU.hasNestedTextCandidate(el)) return;
+
+  const existing = streamingTextElements.get(el);
+  if (existing && existing.timerId) {
+    clearTimeout(existing.timerId);
+  }
+  const timerId = setTimeout(() => {
+    flushStreamingTextElement(el);
+  }, TEXT_STREAM_SETTLE_MS);
+  streamingTextElements.set(el, { timerId, lastMutatedAt: Date.now() });
+}
+
+function checkAlreadyProcessedTextMutation(block) {
+  if (!block || !block.isConnected || !processedTextElements.has(block)) return;
+  if (isEditableTextElement(block) || TU.hasNestedTextCandidate(block)) return;
+
+  const newText = TU.normalizeElementText(block);
+  const prevMeta = elementClassifiedMeta.get(block);
+  if (prevMeta) {
+    const newPreview = newText.substring(0, 200);
+    const samePreview = newPreview === prevMeta.preview;
+    const lenDelta = Math.abs(newText.length - prevMeta.length);
+    if (samePreview && lenDelta < TEXT_GROWTH_RECLASSIFY_DELTA) {
+      return;
+    }
+  }
+
+  releaseElementTracking(block);
+  VE.clearTextStyles(block);
+  if (newText.length > 0) {
+    scheduleStreamingTextSettle(block);
+  }
+}
+
 function processMutationBatch(mutations) {
   if (!settings.enabled || scanPaused) return;
 
@@ -748,6 +946,8 @@ function processMutationBatch(mutations) {
 
   const newImages = [];
   const newText = [];
+  const inPlaceMutatedBlocks = new Set();
+  const newlyAddedNodes = [];
 
   mutations.forEach((mutation) => {
     mutation.removedNodes.forEach((node) => cleanupRemovedSubtree(node));
@@ -771,9 +971,24 @@ function processMutationBatch(mutations) {
           }
         }
       }
+      return;
+    }
+
+    if (hasText && mutation.type === 'characterData') {
+      const block = findEnclosingTextBlock(mutation.target);
+      if (block) inPlaceMutatedBlocks.add(block);
+      return;
     }
 
     mutation.addedNodes.forEach((node) => {
+      if (node.nodeType === 3) {
+        if (hasText) {
+          const block = findEnclosingTextBlock(node);
+          if (block) inPlaceMutatedBlocks.add(block);
+        }
+        return;
+      }
+
       if (node.nodeType !== 1) return;
 
       if (hasImages && node.tagName && node.tagName.toLowerCase() === 'img') {
@@ -793,25 +1008,71 @@ function processMutationBatch(mutations) {
         }
 
         if (hasText) {
-          const isSelfText = node.tagName && TU.isTextTagName(node.tagName.toLowerCase());
-          if (isSelfText || node.querySelector(TU.TEXT_SELECTORS)) {
-            const candidates = typeof TU.extractCohesiveTextSections === 'function'
-              ? TU.extractCohesiveTextSections(
-                  node,
-                  getMinTextLength(),
-                  (el) => processedTextElements.has(el),
-                  null
-                )
-              : [];
-            candidates.forEach((sec) => {
-              const accepted = acceptCohesiveTextSection(sec);
-              if (accepted) newText.push(accepted);
-            });
+          const isSelfText = Boolean(node.tagName && TU.isTextTagName(node.tagName.toLowerCase()));
+          const hasDescendantText = Boolean(node.querySelector(TU.TEXT_SELECTORS));
+          if (!isSelfText && !hasDescendantText) {
+            const enclosingBlock = findEnclosingTextBlock(node);
+            if (enclosingBlock) {
+              inPlaceMutatedBlocks.add(enclosingBlock);
+            }
+          } else {
+            newlyAddedNodes.push({ node, isSelfText });
           }
         }
       } catch (_) {}
     });
   });
+
+  activeMutationBatchBlocks = new Set(inPlaceMutatedBlocks);
+  newlyAddedNodes.forEach(({ node, isSelfText }) => {
+    if (isSelfText && node && !node.nextElementSibling && !TU.hasNestedTextCandidate(node)) {
+      activeMutationBatchBlocks.add(node);
+    }
+  });
+
+  try {
+    inPlaceMutatedBlocks.forEach((block) => {
+      flushPrecedingStreamingSiblings(block, activeMutationBatchBlocks);
+      if (processedTextElements.has(block)) {
+        checkAlreadyProcessedTextMutation(block);
+      } else {
+        scheduleStreamingTextSettle(block);
+      }
+    });
+
+    newlyAddedNodes.forEach(({ node, isSelfText }) => {
+      if (!node || !node.isConnected) return;
+      flushPrecedingStreamingSiblings(node, activeMutationBatchBlocks);
+
+      if (isSelfText && !node.nextElementSibling && !TU.hasNestedTextCandidate(node)) {
+        if (isEditableTextElement(node) || processedTextElements.has(node)) return;
+        const text = TU.normalizeElementText(node);
+        const preview = text.substring(0, 500);
+        if (text && (itemResults.has(preview) || pendingItemIds.has(preview))) {
+          const sec = TU.buildTextSection(node, 0, text, [node]);
+          activeMutationBatchBlocks.delete(node);
+          acceptCohesiveTextSection(sec);
+        } else {
+          scheduleStreamingTextSettle(node);
+        }
+        return;
+      }
+
+      if (isSelfText) {
+        activeMutationBatchBlocks.delete(node);
+        const sec = buildSectionForCompletedElement(node);
+        const accepted = sec ? acceptCohesiveTextSection(sec) : null;
+        if (accepted) {
+          newText.push(accepted);
+        }
+        return;
+      }
+
+      extractSectionsFromScope(node, newText);
+    });
+  } finally {
+    activeMutationBatchBlocks.clear();
+  }
 
   if (newImages.length > 0) {
     if (settings.verboseLogs) {
@@ -848,7 +1109,7 @@ function initMutationObserver() {
     subtree: true,
     attributes: true,
     attributeFilter: ['src'],
-    characterData: false
+    characterData: true
   });
 }
 
@@ -1682,21 +1943,47 @@ function applyResultChunk(response) {
   }
 }
 
+function markElementsClassified(elems, textPreview) {
+  elems.forEach((el) => {
+    clearStreamingTextElement(el);
+    processedTextElements.add(el);
+    const elText = TU.normalizeElementText(el);
+    elementClassifiedMeta.set(el, {
+      preview: elText.substring(0, 200),
+      length: elText.length
+    });
+    trackElement(textPreview, el);
+  });
+}
+
 function acceptCohesiveTextSection(sec) {
   if (!sec || !sec.text) return null;
   const elems = Array.isArray(sec.elements) && sec.elements.length ? sec.elements : [sec.element];
-  if (elems.some((el) => !el || processedTextElements.has(el))) return null;
-  if (seenTextContent.has(sec.text)) return null;
-
-  seenTextContent.add(sec.text);
-  elems.forEach((el) => processedTextElements.add(el));
+  if (elems.some((el) => isTextElementBlocked(el))) {
+    return null;
+  }
 
   const textPreview = sec.text.substring(0, 500);
   if (itemResults.has(textPreview)) {
-    elems.forEach((el) => trackElement(textPreview, el));
+    markElementsClassified(elems, textPreview);
     applyStylesForItem(textPreview);
     return null;
   }
+
+  if (pendingItemIds.has(textPreview)) {
+    markElementsClassified(elems, textPreview);
+    if (elems.some((el) => isElementInViewport(el))) {
+      ext.runtime.sendMessage({
+        type: 'BOOST_ITEMS',
+        pageId: currentPageId,
+        itemIds: [textPreview]
+      }).catch(() => {});
+    }
+    return null;
+  }
+
+  seenTextContent.add(sec.text);
+  markElementsClassified(elems, textPreview);
   return sec;
 }
 
@@ -1704,30 +1991,18 @@ function extractLongText() {
   if (!hasActiveModality('text')) return [];
   try {
     if (typeof TU.extractCohesiveTextSections === 'function') {
-      const candidates = TU.extractCohesiveTextSections(
-        document,
-        getMinTextLength(),
-        (el) => processedTextElements.has(el),
-        null
-      );
-      const sections = [];
-      candidates.forEach((sec) => {
-        const accepted = acceptCohesiveTextSection(sec);
-        if (accepted) sections.push(accepted);
-      });
-      return sections;
+      return extractSectionsFromScope(document, []);
     }
 
     const nodes = Array.from(document.querySelectorAll(TU.TEXT_SELECTORS));
     const sections = [];
     nodes.forEach((el) => {
-      if (processedTextElements.has(el)) return;
+      if (isTextElementBlocked(el)) return;
       const text = getEligibleTextForElement(el);
       if (!text) return;
-      if (seenTextContent.has(text)) return;
-      seenTextContent.add(text);
-      processedTextElements.add(el);
-      sections.push(TU.buildTextSection(el, sections.length, text, [el]));
+      const sec = TU.buildTextSection(el, sections.length, text, [el]);
+      const accepted = acceptCohesiveTextSection(sec);
+      if (accepted) sections.push(accepted);
     });
     return sections;
   } catch (e) {
@@ -1842,6 +2117,15 @@ function startDynamicDetection() {
         clearTimeout(mutationFlushTimer);
         mutationFlushTimer = null;
         pendingMutations = [];
+      } else if (!scanPaused && settings.enabled) {
+        if (hasActiveModality('image')) {
+          const imgs = scanAllImages();
+          if (imgs.length > 0) scheduleClassification(imgs);
+        }
+        if (hasActiveModality('text')) {
+          const txts = extractLongText();
+          if (txts.length > 0) scheduleTextClassification(txts);
+        }
       }
       updateHoverHandlerAttachment();
     });
@@ -1851,9 +2135,17 @@ function startDynamicDetection() {
   scanIntervalId = setInterval(() => {
     if (scanPaused) return;
     cleanupStaleEntries();
-    const newImages = scanAllImages();
-    if (newImages.length > 0) {
-      scheduleClassification(newImages);
+    if (hasActiveModality('image')) {
+      const newImages = scanAllImages();
+      if (newImages.length > 0) {
+        scheduleClassification(newImages);
+      }
+    }
+    if (hasActiveModality('text')) {
+      const newText = extractLongText();
+      if (newText.length > 0) {
+        scheduleTextClassification(newText);
+      }
     }
   }, PERIODIC_SCAN_MS);
 }
@@ -2255,6 +2547,7 @@ function resetObservers() {
     mutationFlushTimer = null;
   }
   pendingMutations = [];
+  clearAllStreamingTextElements();
   if (timingFlushTimer) {
     clearTimeout(timingFlushTimer);
     timingFlushTimer = null;
@@ -2280,6 +2573,8 @@ function resetState() {
   elementToItemId = new WeakMap();
   processedImages = new WeakSet();
   processedTextElements = new WeakSet();
+  clearAllStreamingTextElements();
+  elementClassifiedMeta = new WeakMap();
   seenTextContent.clear();
   seenImageUrls.clear();
   pendingClassification = [];

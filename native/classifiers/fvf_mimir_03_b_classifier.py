@@ -23,7 +23,9 @@ try:
     from .mimir_extractor import (
         MIMIR03_TAB_COLS,
         RuntimeLMScorer,
+        create_ort_session_with_warmup,
         extract_mimir03_tab_vector,
+        provider_to_hardware_info,
         sanitize_text,
     )
 except Exception:
@@ -40,7 +42,9 @@ except Exception:
     _ext_spec.loader.exec_module(_ext_mod)
     MIMIR03_TAB_COLS = _ext_mod.MIMIR03_TAB_COLS
     RuntimeLMScorer = _ext_mod.RuntimeLMScorer
+    create_ort_session_with_warmup = _ext_mod.create_ort_session_with_warmup
     extract_mimir03_tab_vector = _ext_mod.extract_mimir03_tab_vector
+    provider_to_hardware_info = _ext_mod.provider_to_hardware_info
     sanitize_text = _ext_mod.sanitize_text
 
 
@@ -119,41 +123,20 @@ class FvfMimir03BClassifier(BaseClassifier):
             return False, f"Failed reading Mímir 03 B metadata: {exc}"
 
         try:
-            import onnxruntime as ort
             from transformers import AutoTokenizer
 
-            available = ort.get_available_providers()
-            preferred = [
-                ep
-                for ep in (
-                    "DmlExecutionProvider",
-                    "CUDAExecutionProvider",
-                    "CoreMLExecutionProvider",
-                    "OpenVINOExecutionProvider",
-                    "QNNExecutionProvider",
-                )
-                if ep in available
-            ] + ["CPUExecutionProvider"]
-
-            try:
-                self._ort_session = ort.InferenceSession(str(ckpt_path), providers=preferred)
-            except Exception as ep_err:
-                self._log_to_stderr(f"[FvfMimir03B] Accelerator fallback to CPUExecutionProvider ({ep_err})")
-                self._ort_session = ort.InferenceSession(str(ckpt_path), providers=["CPUExecutionProvider"])
-
-            active_prov = self._ort_session.get_providers()[0]
-            if "Dml" in active_prov:
-                self._device_info = {"device": "dml", "name": "DirectML GPU/NPU", "backend": "DirectML"}
-            elif "CUDA" in active_prov:
-                self._device_info = {"device": "cuda", "name": "NVIDIA CUDA GPU", "backend": "CUDA"}
-            elif "CoreML" in active_prov:
-                self._device_info = {"device": "coreml", "name": "Apple Silicon CoreML", "backend": "CoreML"}
-            elif "OpenVINO" in active_prov:
-                self._device_info = {"device": "openvino", "name": "Intel OpenVINO", "backend": "OpenVINO"}
-            elif "QNN" in active_prov:
-                self._device_info = {"device": "qnn", "name": "Qualcomm Hexagon NPU", "backend": "QNN"}
-            else:
-                self._device_info = {"device": "cpu", "name": "CPU (INT8 Quantized)", "backend": "ONNX-INT8"}
+            warmup_feed = {
+                "input_ids": np.ones((1, 8), dtype=np.int64),
+                "attention_mask": np.ones((1, 8), dtype=np.int64),
+                "tab_features": np.zeros((1, len(MIMIR03_TAB_COLS)), dtype=np.float32),
+            }
+            self._ort_session, active_prov = create_ort_session_with_warmup(
+                ckpt_path,
+                warmup_feed,
+                log_prefix="[FvfMimir03B]",
+            )
+            dev_code, dev_name, dev_backend = provider_to_hardware_info(active_prov)
+            self._device_info = {"device": dev_code, "name": dev_name, "backend": dev_backend}
 
             tok_dir = classifiers_dir / "mimir_03_tokenizer"
             backbone_id = str(self._meta.get("backbone", "google/electra-base-discriminator"))
@@ -243,32 +226,43 @@ class FvfMimir03BClassifier(BaseClassifier):
             "w2": w2_payload,
         }, valid_indices
 
+    def _run_ort(self, feeds: Dict[str, Any]) -> np.ndarray:
+        try:
+            return np.asarray(self._ort_session.run(["logits"], feeds)[0])
+        except Exception as run_err:
+            if self._ort_session.get_providers()[0] == "CPUExecutionProvider":
+                raise
+            self._log_to_stderr(f"[FvfMimir03B] Runtime EP failed ({run_err}); switching to CPUExecutionProvider")
+            import onnxruntime as ort
+            sess_options = ort.SessionOptions()
+            sess_options.log_severity_level = 3
+            self._ort_session = ort.InferenceSession(
+                str(self.model_path), sess_options=sess_options, providers=["CPUExecutionProvider"]
+            )
+            dev_code, dev_name, dev_backend = provider_to_hardware_info("CPUExecutionProvider")
+            self._device_info = {"device": dev_code, "name": dev_name, "backend": dev_backend}
+            return np.asarray(self._ort_session.run(["logits"], feeds)[0])
+
     def classify_batch(self, batch_tensor: Any) -> List[float]:
         if not batch_tensor or self._ort_session is None:
             return []
 
-        logits = np.asarray(
-            self._ort_session.run(
-                ["logits"],
-                {
-                    "input_ids": batch_tensor["input_ids"],
-                    "attention_mask": batch_tensor["attention_mask"],
-                    "tab_features": batch_tensor["tab_features"],
-                },
-            )[0]
+        logits = self._run_ort(
+            {
+                "input_ids": batch_tensor["input_ids"],
+                "attention_mask": batch_tensor["attention_mask"],
+                "tab_features": batch_tensor["tab_features"],
+            }
         ).reshape(-1).astype(np.float64)
 
         w2 = batch_tensor.get("w2")
         if w2 is not None:
-            logits2 = np.asarray(
-                self._ort_session.run(
-                    ["logits"],
-                    {
-                        "input_ids": w2["input_ids"],
-                        "attention_mask": w2["attention_mask"],
-                        "tab_features": w2["tab_features"],
-                    },
-                )[0]
+            logits2 = self._run_ort(
+                {
+                    "input_ids": w2["input_ids"],
+                    "attention_mask": w2["attention_mask"],
+                    "tab_features": w2["tab_features"],
+                }
             ).reshape(-1).astype(np.float64)
             for pos, val in zip(w2["positions"], logits2):
                 logits[pos] = 0.5 * (logits[pos] + val)

@@ -67,6 +67,15 @@ body {
 }
 
 /* Default Pop-up Mode (compact for extension popup window) */
+@media (max-width: 679px) {
+  html,
+  body {
+    width: 420px;
+    min-width: 420px;
+    max-width: 420px;
+  }
+}
+
 .popup-root {
   padding: 14px 14px 20px;
   width: 100%;

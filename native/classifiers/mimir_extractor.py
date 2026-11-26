@@ -16,6 +16,10 @@ import math
 import os
 import re
 import sys
+
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 from collections import Counter
 from pathlib import Path
 from statistics import mean, pstdev
@@ -368,6 +372,60 @@ def extract_stylometric_features(text: str) -> Dict[str, float]:
     }
 
 
+def create_ort_session_with_warmup(
+    onnx_path: Path,
+    warmup_feed: Dict[str, Any],
+    log_prefix: str = "[Mimir ONNX]",
+    exclude_providers: Tuple[str, ...] = (),
+) -> Tuple[Any, str]:
+    """Create an ONNX Runtime session and run a tiny warmup pass before accepting a hardware EP."""
+    import onnxruntime as ort
+
+    sess_options = ort.SessionOptions()
+    sess_options.log_severity_level = 3
+
+    available = ort.get_available_providers()
+    excluded = set(exclude_providers)
+    providers_to_try = [
+        ep
+        for ep in (
+            "DmlExecutionProvider",
+            "CUDAExecutionProvider",
+            "CoreMLExecutionProvider",
+            "OpenVINOExecutionProvider",
+            "QNNExecutionProvider",
+        )
+        if ep in available and ep not in excluded
+    ]
+
+    for ep in providers_to_try:
+        try:
+            sess = ort.InferenceSession(str(onnx_path), sess_options=sess_options, providers=[ep, "CPUExecutionProvider"])
+            sess.run(["logits"], warmup_feed)
+            return sess, sess.get_providers()[0]
+        except Exception as ep_err:
+            print(f"{log_prefix} {ep} failed warmup; trying fallback ({ep_err})", file=sys.stderr)
+
+    sess = ort.InferenceSession(str(onnx_path), sess_options=sess_options, providers=["CPUExecutionProvider"])
+    sess.run(["logits"], warmup_feed)
+    return sess, sess.get_providers()[0]
+
+
+def provider_to_hardware_info(active_prov: str) -> Tuple[str, str, str]:
+    """Map an active ONNX Runtime ExecutionProvider name to (device, name, backend)."""
+    if "Dml" in active_prov:
+        return "dml", "DirectML GPU/NPU (AMD/Intel/Qualcomm)", "DirectML"
+    if "CUDA" in active_prov:
+        return "cuda", "NVIDIA CUDA GPU", "CUDA"
+    if "CoreML" in active_prov:
+        return "coreml", "Apple Silicon Neural Engine (CoreML)", "CoreML"
+    if "OpenVINO" in active_prov:
+        return "openvino", "Intel OpenVINO", "OpenVINO"
+    if "QNN" in active_prov:
+        return "qnn", "Qualcomm Hexagon NPU", "QNN"
+    return "cpu", "CPU (INT8 Quantized)", "ONNX-INT8"
+
+
 class RuntimeLMScorer:
     """Universal Hardware-Accelerated Causal LM Scorer.
     
@@ -408,42 +466,15 @@ class RuntimeLMScorer:
         # 1. First, check if ONNX Runtime with hardware execution provider is viable
         if self.onnx_model_path and self.onnx_model_path.exists():
             try:
-                import onnxruntime as ort
-                available_providers = ort.get_available_providers()
-                
-                # Preferred provider priority: DirectML (AMD/Intel/Qualcomm) -> CUDA (NVIDIA) -> CoreML (Apple) -> CPU
-                providers_to_try = []
-                if "DmlExecutionProvider" in available_providers:
-                    providers_to_try.append("DmlExecutionProvider")
-                if "CUDAExecutionProvider" in available_providers:
-                    providers_to_try.append("CUDAExecutionProvider")
-                if "CoreMLExecutionProvider" in available_providers:
-                    providers_to_try.append("CoreMLExecutionProvider")
-                if "OpenVINOExecutionProvider" in available_providers:
-                    providers_to_try.append("OpenVINOExecutionProvider")
-                if "QNNExecutionProvider" in available_providers:
-                    providers_to_try.append("QNNExecutionProvider")
-                providers_to_try.append("CPUExecutionProvider")
-
-                try:
-                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=providers_to_try)
-                except Exception as ep_err:
-                    print(f"[Mimir RuntimeLMScorer] Accelerator EP fallback to ONNX CPU INT8 ({ep_err})", file=sys.stderr)
-                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=["CPUExecutionProvider"])
-                active_prov = self._ort_session.get_providers()[0]
-                
-                if "Dml" in active_prov:
-                    self._backend = "DirectML"
-                    self._device_name = "DirectML GPU/NPU (AMD/Intel/Qualcomm)"
-                elif "CUDA" in active_prov:
-                    self._backend = "CUDA"
-                    self._device_name = "NVIDIA CUDA GPU"
-                elif "CoreML" in active_prov:
-                    self._backend = "CoreML"
-                    self._device_name = "Apple Silicon Neural Engine (CoreML)"
-                else:
-                    self._backend = "ONNX-INT8"
-                    self._device_name = "CPU (INT8 Quantized)"
+                warmup_feed = {"input_ids": np.ones((1, 8), dtype=np.int64)}
+                self._ort_session, active_prov = create_ort_session_with_warmup(
+                    self.onnx_model_path,
+                    warmup_feed,
+                    log_prefix="[Mimir RuntimeLMScorer]",
+                    # GPT-2 INT8 node_view Reshape faults DirectML's shared D3D12 device
+                    exclude_providers=("DmlExecutionProvider",),
+                )
+                _, self._device_name, self._backend = provider_to_hardware_info(active_prov)
 
                 # Load Tokenizer
                 from transformers import AutoTokenizer
@@ -529,7 +560,20 @@ class RuntimeLMScorer:
 
         # Forward pass via ONNX Runtime or PyTorch
         if self._ort_session is not None:
-            ort_out = self._ort_session.run(["logits"], {"input_ids": input_ids_np})
+            try:
+                ort_out = self._ort_session.run(["logits"], {"input_ids": input_ids_np})
+            except Exception as run_err:
+                if self._ort_session.get_providers()[0] == "CPUExecutionProvider":
+                    raise
+                print(f"[Mimir RuntimeLMScorer] Runtime EP failed ({run_err}); switching to CPUExecutionProvider", file=sys.stderr)
+                import onnxruntime as ort
+                sess_options = ort.SessionOptions()
+                sess_options.log_severity_level = 3
+                self._ort_session = ort.InferenceSession(
+                    str(self.onnx_model_path), sess_options=sess_options, providers=["CPUExecutionProvider"]
+                )
+                _, self._device_name, self._backend = provider_to_hardware_info("CPUExecutionProvider")
+                ort_out = self._ort_session.run(["logits"], {"input_ids": input_ids_np})
             logits_np = ort_out[0][0, :-1, :]  # [seq_len - 1, vocab]
             targets_np = input_ids_np[0, 1:]    # [seq_len - 1]
             return self._compute_metrics_numpy(logits_np, targets_np, text=cleaned)
@@ -818,38 +862,16 @@ class RuntimeTextEncoder:
         """Initialize the Channel 1 Encoder using ONNX Runtime INT8 or PyTorch."""
         if self.onnx_model_path and self.onnx_model_path.exists():
             try:
-                import onnxruntime as ort
-                available = ort.get_available_providers()
-                providers_to_try = [
-                    ep for ep in (
-                        "DmlExecutionProvider",
-                        "CUDAExecutionProvider",
-                        "CoreMLExecutionProvider",
-                        "OpenVINOExecutionProvider",
-                        "QNNExecutionProvider",
-                    )
-                    if ep in available
-                ] + ["CPUExecutionProvider"]
-
-                try:
-                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=providers_to_try)
-                except Exception as ep_err:
-                    print(f"[Mimir RuntimeTextEncoder] Accelerator EP fallback to ONNX CPU INT8 ({ep_err})", file=sys.stderr)
-                    self._ort_session = ort.InferenceSession(str(self.onnx_model_path), providers=["CPUExecutionProvider"])
-
-                active_prov = self._ort_session.get_providers()[0]
-                if "Dml" in active_prov:
-                    self._backend, self._device_name = "DirectML", "DirectML GPU/NPU (AMD/Intel/Qualcomm)"
-                elif "CUDA" in active_prov:
-                    self._backend, self._device_name = "CUDA", "NVIDIA CUDA GPU"
-                elif "CoreML" in active_prov:
-                    self._backend, self._device_name = "CoreML", "Apple Silicon Neural Engine (CoreML)"
-                elif "OpenVINO" in active_prov:
-                    self._backend, self._device_name = "OpenVINO", "Intel OpenVINO"
-                elif "QNN" in active_prov:
-                    self._backend, self._device_name = "QNN", "Qualcomm Hexagon NPU"
-                else:
-                    self._backend, self._device_name = "ONNX-INT8", "CPU (INT8 Quantized)"
+                warmup_feed = {
+                    "input_ids": np.ones((1, 8), dtype=np.int64),
+                    "attention_mask": np.ones((1, 8), dtype=np.int64),
+                }
+                self._ort_session, active_prov = create_ort_session_with_warmup(
+                    self.onnx_model_path,
+                    warmup_feed,
+                    log_prefix="[Mimir RuntimeTextEncoder]",
+                )
+                _, self._device_name, self._backend = provider_to_hardware_info(active_prov)
 
                 self._tokenizer = self._load_tokenizer()
                 print(f"[Mimir RuntimeTextEncoder] Initialized ONNX INT8 session on {self._device_name} ({active_prov})", file=sys.stderr)
@@ -893,10 +915,21 @@ class RuntimeTextEncoder:
         attention_mask = tokens["attention_mask"].astype(np.int64)
 
         if self._ort_session is not None:
-            ort_out = self._ort_session.run(
-                ["logits"],
-                {"input_ids": input_ids, "attention_mask": attention_mask},
-            )
+            feeds = {"input_ids": input_ids, "attention_mask": attention_mask}
+            try:
+                ort_out = self._ort_session.run(["logits"], feeds)
+            except Exception as run_err:
+                if self._ort_session.get_providers()[0] == "CPUExecutionProvider":
+                    raise
+                print(f"[Mimir RuntimeTextEncoder] Runtime EP failed ({run_err}); switching to CPUExecutionProvider", file=sys.stderr)
+                import onnxruntime as ort
+                sess_options = ort.SessionOptions()
+                sess_options.log_severity_level = 3
+                self._ort_session = ort.InferenceSession(
+                    str(self.onnx_model_path), sess_options=sess_options, providers=["CPUExecutionProvider"]
+                )
+                _, self._device_name, self._backend = provider_to_hardware_info("CPUExecutionProvider")
+                ort_out = self._ort_session.run(["logits"], feeds)
             return float(np.asarray(ort_out[0]).reshape(-1)[0])
 
         if self._torch_model is not None and self._torch is not None:

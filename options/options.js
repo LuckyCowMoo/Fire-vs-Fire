@@ -372,7 +372,14 @@ function updateClassifierRateLabels() {
 
 function stabilizePopupWidth() {
   const html = document.documentElement;
-  const measured = html.clientWidth;
+  const winW = window.innerWidth || html.clientWidth || 0;
+  if (winW >= 680) {
+    html.style.width = '';
+    html.style.minWidth = '';
+    lockedPopupWidth = 0;
+    return;
+  }
+  const measured = Math.max(html.clientWidth || 0, 420);
   if (measured > lockedPopupWidth) {
     lockedPopupWidth = measured;
     html.style.width = `${lockedPopupWidth}px`;
@@ -1795,6 +1802,16 @@ function renderCategoryPanel(index, classifierNamesById) {
     appendSliderToRow(blurRow, blurRange);
     categoryPanelEl.appendChild(blurRow);
 
+    const underlineMode = textStyles.underlineMode || (textStyles.applyUnderline === true ? 'hover' : 'off');
+    const underlineRow = createIconModeControl('Underline', underlineMode, (value) => {
+      ensemble.styles = ensemble.styles || {};
+      ensemble.styles.text = ensemble.styles.text || {};
+      ensemble.styles.text.underlineMode = value;
+      saveEnsembles();
+      onPreviewUpdate();
+    });
+    categoryPanelEl.appendChild(underlineRow);
+
     const strikeMode =
       textStyles.strikethroughMode || (textStyles.applyStrikethrough === false ? 'off' : 'hover');
     const strikeRow = createIconModeControl('Strikethrough', strikeMode, (value) => {
@@ -1806,35 +1823,15 @@ function renderCategoryPanel(index, classifierNamesById) {
     });
     categoryPanelEl.appendChild(strikeRow);
 
+    const lineColor = textStyles.strikethroughColor || textStyles.underlineColor || '#ff0064';
     categoryPanelEl.appendChild(
       createColorSliders(
-        'Strike color',
-        textStyles.strikethroughColor || '#ff0064',
+        'Line color',
+        lineColor,
         onColorChange((value) => {
           ensemble.styles = ensemble.styles || {};
           ensemble.styles.text = ensemble.styles.text || {};
           ensemble.styles.text.strikethroughColor = value;
-        })
-      )
-    );
-
-    const underlineMode = textStyles.underlineMode || (textStyles.applyUnderline === true ? 'hover' : 'off');
-    const underlineRow = createIconModeControl('Underline', underlineMode, (value) => {
-      ensemble.styles = ensemble.styles || {};
-      ensemble.styles.text = ensemble.styles.text || {};
-      ensemble.styles.text.underlineMode = value;
-      saveEnsembles();
-      onPreviewUpdate();
-    });
-    categoryPanelEl.appendChild(underlineRow);
-
-    categoryPanelEl.appendChild(
-      createColorSliders(
-        'Underline color',
-        textStyles.underlineColor || '#ff0064',
-        onColorChange((value) => {
-          ensemble.styles = ensemble.styles || {};
-          ensemble.styles.text = ensemble.styles.text || {};
           ensemble.styles.text.underlineColor = value;
         })
       )
@@ -2032,8 +2029,144 @@ function createNewEnsemble(modality = 'image') {
   };
 }
 
+const UI_SNAPSHOT_CACHE_KEY = 'fvf_options_snapshot_v1';
+
+function readUiSnapshotCache() {
+  try {
+    const raw = window.localStorage && window.localStorage.getItem(UI_SNAPSHOT_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeUiSnapshotCache() {
+  try {
+    if (!window.localStorage) return;
+    const snapshot = {
+      enabled: Boolean(enabledInput?.checked),
+      altTextOnly: Boolean(altTextOnlyInput?.checked),
+      ignoreSmallImages: Boolean(ignoreSmallImagesInput?.checked),
+      investigator: Boolean(investigatorInput?.checked),
+      minImageDimension: parseInt(minImageDimensionInput?.value || '80', 10) || 80,
+      pauseOnBattery: Boolean(pauseOnBatteryInput?.checked),
+      pauseBelowThreshold: Boolean(pauseBelowThresholdInput?.checked),
+      batteryThreshold: String(batteryThresholdSelect?.value || '20'),
+      classificationDelay: parseInt(classificationDelayInput?.value || '100', 10) || 100,
+      imageCaptureQuality: parseFloat(imageCaptureQualityInput?.value || '1') || 1,
+      verboseLogs: Boolean(verboseLogsInput?.checked),
+      lazyLoad: Boolean(lazyLoadInput?.checked),
+      disableUpdateNotifications: Boolean(disableUpdateNotifications),
+      minTextLength: parseInt(minTextLengthInput?.value || '250', 10) || 250,
+      ensembleConfigsV2: ensembleConfigs,
+      classifierTimings,
+      availableClassifiers,
+      latestUpdateStatus
+    };
+    window.localStorage.setItem(UI_SNAPSHOT_CACHE_KEY, JSON.stringify(snapshot));
+  } catch (_) {}
+}
+
+function applySettingsToUI(res, { render = true } = {}) {
+  if (!res || typeof res !== 'object') return false;
+
+  if (typeof res.enabled === 'boolean') enabledInput.checked = res.enabled;
+  if (typeof res.altTextOnly === 'boolean') {
+    altTextOnlyInput.checked = res.altTextOnly;
+  } else if (!settingsLoaded) {
+    altTextOnlyInput.checked = true;
+  }
+  if (ignoreSmallImagesInput) {
+    if (typeof res.ignoreSmallImages === 'boolean') {
+      ignoreSmallImagesInput.checked = res.ignoreSmallImages;
+    } else if (!settingsLoaded) {
+      ignoreSmallImagesInput.checked = true;
+    }
+  }
+  if (investigatorInput) {
+    if (typeof res.investigator === 'boolean') {
+      investigatorInput.checked = res.investigator;
+    } else if (!settingsLoaded) {
+      investigatorInput.checked = true;
+    }
+  }
+  if (minImageDimensionInput) {
+    if (typeof res.minImageDimension === 'number') {
+      minImageDimensionInput.value = res.minImageDimension;
+    }
+    if (ignoreSmallImagesInput) {
+      minImageDimensionInput.disabled = !ignoreSmallImagesInput.checked;
+    }
+  }
+  if (pauseOnBatteryInput && typeof res.pauseOnBattery === 'boolean') {
+    pauseOnBatteryInput.checked = res.pauseOnBattery;
+  }
+  if (pauseBelowThresholdInput && typeof res.pauseBelowThreshold === 'boolean') {
+    pauseBelowThresholdInput.checked = res.pauseBelowThreshold;
+  }
+  if (batteryThresholdSelect && (typeof res.batteryThreshold === 'number' || typeof res.batteryThreshold === 'string')) {
+    batteryThresholdSelect.value = String(res.batteryThreshold);
+  }
+  if (typeof res.classificationDelay === 'number') {
+    classificationDelayInput.value = res.classificationDelay;
+  }
+  if (typeof res.imageCaptureQuality === 'number') {
+    imageCaptureQualityInput.value = res.imageCaptureQuality;
+  } else if (imageCaptureQualityInput && !settingsLoaded) {
+    imageCaptureQualityInput.value = '1';
+  }
+  if (typeof res.verboseLogs === 'boolean') verboseLogsInput.checked = res.verboseLogs;
+  if (typeof res.lazyLoad === 'boolean') lazyLoadInput.checked = res.lazyLoad;
+  if (typeof res.disableUpdateNotifications === 'boolean') {
+    disableUpdateNotifications = res.disableUpdateNotifications;
+  }
+  if (disableUpdateNotificationsInput) {
+    disableUpdateNotificationsInput.checked = disableUpdateNotifications;
+  }
+  if (typeof res.minTextLength === 'number') minTextLengthInput.value = res.minTextLength;
+
+  if (Array.isArray(res.availableClassifiers) && res.availableClassifiers.length) {
+    availableClassifiers = res.availableClassifiers;
+  }
+  if (res.classifierTimings && typeof res.classifierTimings === 'object') {
+    classifierTimings = res.classifierTimings;
+  }
+  if (res.latestUpdateStatus && !disableUpdateNotifications) {
+    latestUpdateStatus = res.latestUpdateStatus;
+    renderUpdateBanner(latestUpdateStatus);
+  } else if (disableUpdateNotifications) {
+    renderUpdateBanner(null);
+  }
+
+  let ensemblesChanged = false;
+  if (Array.isArray(res.ensembleConfigsV2)) {
+    const prevStr = JSON.stringify(ensembleConfigs);
+    const nextStr = JSON.stringify(res.ensembleConfigsV2);
+    if (prevStr !== nextStr) {
+      ensembleConfigs = res.ensembleConfigsV2;
+      ensemblesChanged = true;
+    }
+  }
+
+  updateDisplays();
+  if (render) {
+    renderEnsembles();
+  }
+  return ensemblesChanged;
+}
+
+let hasHydratedFromSnapshot = false;
+const initialSnapshot = readUiSnapshotCache();
+if (initialSnapshot) {
+  applySettingsToUI(initialSnapshot, { render: true });
+  hasHydratedFromSnapshot = true;
+}
+
 async function load() {
   try {
+    const prevUiSignature = JSON.stringify({ ensembleConfigs, availableClassifiers });
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
     const res = storageArea && storageArea.get
       ? await storageArea.get([
@@ -2051,77 +2184,28 @@ async function load() {
           'lazyLoad',
           'disableUpdateNotifications',
           'minTextLength',
+          'classifierTimings',
           'ensembleConfigsV2'
         ])
       : {};
 
-    if (res && typeof res.enabled === 'boolean') enabledInput.checked = res.enabled;
-    if (res && typeof res.altTextOnly === 'boolean') {
-      altTextOnlyInput.checked = res.altTextOnly;
-    } else {
-      altTextOnlyInput.checked = true; // Default true on first install
-    }
-    if (ignoreSmallImagesInput) {
-      if (res && typeof res.ignoreSmallImages === 'boolean') {
-        ignoreSmallImagesInput.checked = res.ignoreSmallImages;
-      } else {
-        ignoreSmallImagesInput.checked = true; // Default true on first install
-      }
-    }
-    if (investigatorInput) {
-      if (res && typeof res.investigator === 'boolean') {
-        investigatorInput.checked = res.investigator;
-      } else {
-        investigatorInput.checked = true; // Default true on first install
-      }
-    }
-    if (minImageDimensionInput) {
-      if (res && typeof res.minImageDimension === 'number') {
-        minImageDimensionInput.value = res.minImageDimension;
-      }
-      if (ignoreSmallImagesInput) {
-        minImageDimensionInput.disabled = !ignoreSmallImagesInput.checked;
-      }
-    }
-    if (pauseOnBatteryInput && res && typeof res.pauseOnBattery === 'boolean') {
-      pauseOnBatteryInput.checked = res.pauseOnBattery;
-    }
-    if (pauseBelowThresholdInput && res && typeof res.pauseBelowThreshold === 'boolean') {
-      pauseBelowThresholdInput.checked = res.pauseBelowThreshold;
-    }
-    if (batteryThresholdSelect && res && (typeof res.batteryThreshold === 'number' || typeof res.batteryThreshold === 'string')) {
-      batteryThresholdSelect.value = String(res.batteryThreshold);
-    }
-    if (res && typeof res.classificationDelay === 'number') {
-      classificationDelayInput.value = res.classificationDelay;
-    }
-    if (res && typeof res.imageCaptureQuality === 'number') {
-      imageCaptureQualityInput.value = res.imageCaptureQuality;
-    } else if (imageCaptureQualityInput) {
-      imageCaptureQualityInput.value = '1';
-    }
-    if (res && typeof res.verboseLogs === 'boolean') verboseLogsInput.checked = res.verboseLogs;
-    if (res && typeof res.lazyLoad === 'boolean') lazyLoadInput.checked = res.lazyLoad;
-    disableUpdateNotifications = Boolean(res && res.disableUpdateNotifications);
-    if (disableUpdateNotificationsInput) {
-      disableUpdateNotificationsInput.checked = disableUpdateNotifications;
-    }
+    applySettingsToUI(res || {}, { render: false });
     settingsLoaded = true;
-    if (res && typeof res.minTextLength === 'number') minTextLengthInput.value = res.minTextLength;
 
-    if (res && Array.isArray(res.ensembleConfigsV2) && res.ensembleConfigsV2.length) {
-      ensembleConfigs = res.ensembleConfigsV2;
-    } else {
-      ensembleConfigs = [];
-      await saveEnsembles();
+    if (!res || !Array.isArray(res.ensembleConfigsV2) || !res.ensembleConfigsV2.length) {
+      if (!res || !Array.isArray(res.ensembleConfigsV2)) {
+        ensembleConfigs = [];
+        await saveEnsembles();
+      } else {
+        ensembleConfigs = [];
+      }
     }
 
-    if (res && res.classifierTimings && typeof res.classifierTimings === 'object') {
-      classifierTimings = res.classifierTimings;
+    const nextUiSignature = JSON.stringify({ ensembleConfigs, availableClassifiers });
+    if (!hasHydratedFromSnapshot || prevUiSignature !== nextUiSignature) {
+      renderEnsembles();
     }
-
-    updateDisplays();
-    renderEnsembles();
+    writeUiSnapshotCache();
   } catch {
     // Ignore load errors for missing storage values.
   }
@@ -2463,10 +2547,14 @@ async function fetchModels({ forceUpdateCheck = false } = {}) {
     if (!resp || resp.ok !== true) throw new Error(resp?.error || 'Failed to list models');
     const models = Array.isArray(resp.models) ? resp.models : [];
     const rawClassifiers = resp.raw && Array.isArray(resp.raw.classifiers) ? resp.raw.classifiers : [];
-    availableClassifiers = rawClassifiers.length
+    const nextClassifiers = rawClassifiers.length
       ? rawClassifiers
       : models.map((id) => ({ id, name: id, label: 'AI generated', modalities: [] }));
-    renderEnsembles();
+    const classifiersChanged = JSON.stringify(availableClassifiers) !== JSON.stringify(nextClassifiers);
+    availableClassifiers = nextClassifiers;
+    if (classifiersChanged || (categoryPanelEl && !categoryPanelEl.hidden && categoryPanelEl.childElementCount === 0)) {
+      renderEnsembles();
+    }
     setModelStatus(models.length ? `${models.length} model(s) loaded` : 'No models found');
 
     if (!disableUpdateNotifications && resp.updates) {
@@ -2475,10 +2563,12 @@ async function fetchModels({ forceUpdateCheck = false } = {}) {
     } else if (disableUpdateNotifications) {
       renderUpdateBanner(null);
     }
+    writeUiSnapshotCache();
   } catch (err) {
     console.warn('LIST_MODELS failed', err);
-    availableClassifiers = [];
-    renderEnsembles();
+    if (!availableClassifiers.length) {
+      renderEnsembles();
+    }
     setModelStatus(err.message || 'Failed to list models', 'error');
   }
 }
@@ -2511,40 +2601,84 @@ window.addEventListener('focus', () => {
 // ============================================================================
 
 function initFloatingEmbers() {
+  if (prefersReducedMotion) return;
   const canvas = document.getElementById('ember-webgl-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  let width = (canvas.width = window.innerWidth);
-  let height = (canvas.height = window.innerHeight);
+  const isPopup = (window.innerWidth || 0) < 680;
+  let width = (canvas.width = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0, isPopup ? 420 : 680));
+  let height = (canvas.height = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 580));
+
+  function spawnEmberParticle(p, initial = false) {
+    const target = p || {};
+    target.maxLife = 220 + Math.floor(Math.random() * 240);
+    target.vx = 0.2 + Math.random() * 0.6;
+    target.vy = -0.3 - Math.random() * 0.6;
+    target.r = 1.2 + Math.random() * 2.5;
+    target.baseAlpha = 0.18 + Math.random() * 0.55;
+    target.hue = 14 + Math.random() * 32;
+
+    if (initial) {
+      target.x = Math.random() * width;
+      target.y = Math.random() * height;
+      target.age = Math.floor((0.12 + Math.random() * 0.76) * target.maxLife);
+    } else {
+      if (Math.random() < 0.65) {
+        target.x = -10 + Math.random() * width;
+        target.y = height + 4 + Math.random() * 14;
+      } else {
+        target.x = -4 - Math.random() * 14;
+        target.y = Math.random() * (height + 10);
+      }
+      target.age = 0;
+    }
+    return target;
+  }
+
+  const embers = Array.from({ length: 48 }, () => spawnEmberParticle({}, true));
 
   window.addEventListener('resize', () => {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
+    const newWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0, 1);
+    const newHeight = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 1);
+    if (width > 0 && height > 0 && (newWidth !== width || newHeight !== height)) {
+      const scaleX = newWidth / width;
+      const scaleY = newHeight / height;
+      for (const p of embers) {
+        p.x *= scaleX;
+        p.y *= scaleY;
+      }
+    }
+    width = canvas.width = newWidth;
+    height = canvas.height = newHeight;
   });
 
-  const embers = Array.from({ length: 48 }, () => ({
-    x: Math.random() * width,
-    y: Math.random() * height,
-    vx: 0.2 + Math.random() * 0.6,
-    vy: -0.3 - Math.random() * 0.6,
-    r: 1.2 + Math.random() * 2.5,
-    alpha: 0.18 + Math.random() * 0.55,
-    hue: 14 + Math.random() * 32
-  }));
-
-  function renderEmbers() {
+  function drawEmbersFrame(advance = true) {
     ctx.clearRect(0, 0, width, height);
     for (const p of embers) {
-      p.x += p.vx;
-      p.y += p.vy;
-      if (p.x > width + 20) p.x = -10;
-      if (p.y < -20) p.y = height + 10;
+      if (advance) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.age += 1;
+        if (p.age >= p.maxLife || p.x > width + 20 || p.y < -20) {
+          spawnEmberParticle(p, false);
+        }
+      }
+
+      const lifeRatio = p.age / Math.max(1, p.maxLife);
+      let lifeFade = 1;
+      if (lifeRatio < 0.12) {
+        lifeFade = lifeRatio / 0.12;
+      } else if (lifeRatio > 0.82) {
+        lifeFade = Math.max(0, (1 - lifeRatio) / 0.18);
+      }
+      const alpha = p.baseAlpha * lifeFade;
+      if (alpha <= 0.01) continue;
 
       const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 4.2);
-      grad.addColorStop(0, `hsla(${p.hue}, 100%, 72%, ${p.alpha})`);
-      grad.addColorStop(0.45, `hsla(${p.hue - 6}, 100%, 54%, ${p.alpha * 0.45})`);
+      grad.addColorStop(0, `hsla(${p.hue}, 100%, 72%, ${alpha})`);
+      grad.addColorStop(0.45, `hsla(${p.hue - 6}, 100%, 54%, ${alpha * 0.45})`);
       grad.addColorStop(1, 'hsla(10, 100%, 40%, 0)');
 
       ctx.fillStyle = grad;
@@ -2552,9 +2686,24 @@ function initFloatingEmbers() {
       ctx.arc(p.x, p.y, p.r * 4.2, 0, Math.PI * 2);
       ctx.fill();
     }
-    requestAnimationFrame(renderEmbers);
   }
-  requestAnimationFrame(renderEmbers);
+
+  let rafId = null;
+  function renderLoop() {
+    rafId = null;
+    if (document.hidden) return;
+    drawEmbersFrame(true);
+    rafId = requestAnimationFrame(renderLoop);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && rafId === null) {
+      rafId = requestAnimationFrame(renderLoop);
+    }
+  });
+
+  drawEmbersFrame(false);
+  rafId = requestAnimationFrame(renderLoop);
 }
 
 // ============================================================================

@@ -61,7 +61,11 @@ class ModelRegistry:
 
         print(f"[Model Registry] Auto-installing missing dependencies for {classifier_class.__name__}: {missing}", file=sys.stderr)
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "--default-timeout=1000", *missing])
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--default-timeout=1000", *missing],
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
             print(f"[Model Registry] Successfully installed {missing}", file=sys.stderr)
             return True
         except Exception as e:

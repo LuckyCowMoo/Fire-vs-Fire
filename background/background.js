@@ -823,6 +823,13 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
   const threshold = typeof customThreshold === 'number'
     ? Math.max(0.05, Math.min(0.99, customThreshold))
     : 0.75;
+  const resolveModelThreshold = (m) => {
+    const raw = m && (typeof m.suggested_threshold === 'number' ? m.suggested_threshold : m.default_threshold);
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1) {
+      return Math.round(raw * 100) / 100;
+    }
+    return threshold;
+  };
 
   const modalities = ['image', 'text', 'audio', 'video'];
   const newEnsembles = [];
@@ -866,7 +873,7 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
       name: newestModel.name || newestModel.category_name || `AI ${mod}`,
       modality: mod,
       enabled: true,
-      threshold, // 75%
+      threshold: resolveModelThreshold(newestModel),
       classifiers: [newestModel.id],
       weights: [1],
       styles: mod === 'text'
@@ -914,7 +921,7 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
       name: m.category_name || m.name || 'Object Detector',
       modality: 'image',
       enabled: true,
-      threshold, // 75%
+      threshold: resolveModelThreshold(m),
       classifiers: [m.id],
       weights: [1],
       styles: {

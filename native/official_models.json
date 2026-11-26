@@ -146,7 +146,7 @@
       "is_ai_detector": true,
       "category_name": "FvF Heimdall 04 B",
       "label": "AI generated",
-      "default_threshold": 0.7,
+      "default_threshold": 0.75,
       "default_color": "#FF0055",
       "size_mb": 198.3,
       "architecture": "Quad-Stream 24-Ch FFT + ForensicNeXt + Intrinsic Structural Grouping + AFPL Loss",
@@ -217,6 +217,71 @@
       "ram_size": "450 MB VRAM / RAM"
     },
     {
+      "id": "fvf_mimir_03_b",
+      "name": "FvF Mímir 03 B",
+      "version": "3.0.0",
+      "modality": "text",
+      "status": "available",
+      "is_ai_detector": true,
+      "category_name": "FvF Mímir 03 B",
+      "label": "AI text",
+      "default_threshold": 0.5,
+      "default_color": "#FF6218",
+      "size_mb": 259.6,
+      "architecture": "Unified 3-Branch ELECTRA + Vocabulary-Debiased LM Curvature + 32 Normalized Stylometrics (Weight-Only INT8 ONNX, AFPL + Within-Class GroupDRO)",
+      "tagline": "Unified Multi-LLM Generalist AI Text Classifier",
+      "description": "Single unified neural detection head combining ELECTRA-base discourse semantics, 22 vocabulary-rarity-debiased distilgpt2 curvature signals, and 32 length-normalized Mindner/discourse stylometrics. Trained across diverse human domains and frontier LLM families using AFPL false-positive suppression and within-class GroupDRO.",
+      "files": [
+        {
+          "type": "classifier_py",
+          "relative_path": "native/classifiers/fvf_mimir_03_b_classifier.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_mimir_03_b_classifier.py",
+          "required": true
+        },
+        {
+          "type": "support_py",
+          "relative_path": "native/classifiers/mimir_extractor.py",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/mimir_extractor.py",
+          "required": true
+        },
+        {
+          "type": "meta_json",
+          "relative_path": "native/classifiers/fvf_mimir_03_b_meta.json",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/fvf_mimir_03_b_meta.json",
+          "required": true
+        },
+        {
+          "type": "tokenizer_json",
+          "relative_path": "native/classifiers/mimir_03_tokenizer/tokenizer.json",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/mimir_03_tokenizer/tokenizer.json",
+          "required": false
+        },
+        {
+          "type": "tokenizer_config",
+          "relative_path": "native/classifiers/mimir_03_tokenizer/tokenizer_config.json",
+          "url": "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/classifiers/mimir_03_tokenizer/tokenizer_config.json",
+          "required": false
+        },
+        {
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/fvf_mimir_03_b_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_03_b_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_03_b_int8.onnx",
+          "required": true
+        },
+        {
+          "type": "weights_onnx_int8",
+          "relative_path": "native/classifiers/fvf_mimir_backbone_int8.onnx",
+          "url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_backbone_int8.onnx",
+          "fallback_url": "https://github.com/LuckyCowMoo/Fire-vs-Fire/releases/download/v2.0/fvf_mimir_backbone_int8.onnx",
+          "required": false
+        }
+      ],
+      "download_size": "260 MB",
+      "ram_size": "380 MB RAM",
+      "recommended": true
+    },
+    {
       "id": "fvf_mimir_02",
       "name": "Mimir 02 B",
       "version": "2.2.0",
@@ -280,7 +345,7 @@
       ],
       "download_size": "167 MB",
       "ram_size": "420 MB RAM",
-      "recommended": true
+      "recommended": false
     },
     {
       "id": "fvf_huginn_01",
@@ -323,8 +388,8 @@
       "ram_size": "500 MB RAM"
     }
   ],
-  "host_version": "2.2.0",
-  "release_notes": "FvF v2.2.0: Automatic Native Host & classifier update scanning, atomic self-updates, hover P0 priority, and Mímir 02 B support.",
+  "host_version": "2.3.0",
+  "release_notes": "FvF v2.3.0: Unified FvF Mímir 03 B text classifier (Weight-Only INT8 ONNX), per-classifier suggested category thresholds, and context-aware feed vs. article DOM grouping.",
   "host_files": [
     "native/echo_host_V2.py",
     "native/model_registry.py",

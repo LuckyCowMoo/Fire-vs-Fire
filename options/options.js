@@ -1426,6 +1426,7 @@ function renderClassifierPicker(classifierNamesById) {
           const newEnsemble = createNewEnsemble(modality);
           newEnsemble.classifiers = [model.id];
           newEnsemble.name = model.name || model.id;
+          newEnsemble.threshold = resolveSuggestedThreshold(model);
           ensembleConfigs.push(newEnsemble);
           selectedCategoryIndex = ensembleConfigs.length - 1;
           await saveEnsembles();
@@ -1925,6 +1926,18 @@ function renderEnsembles(options = {}) {
   });
 }
 
+function resolveSuggestedThreshold(model) {
+  const raw = model && (
+    typeof model.suggested_threshold === 'number'
+      ? model.suggested_threshold
+      : (typeof model.default_threshold === 'number' ? model.default_threshold : null)
+  );
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1) {
+    return Math.round(raw * 100) / 100;
+  }
+  return 0.75;
+}
+
 function createNewEnsemble(modality = 'image') {
   const id = generateEnsembleId(modality);
   if (modality === 'image') {
@@ -1997,7 +2010,7 @@ function createNewEnsemble(modality = 'image') {
     id,
     modality,
     enabled: true,
-    threshold: 0.5,
+    threshold: 0.75,
     classifiers: [],
     weights: null,
     styles: {

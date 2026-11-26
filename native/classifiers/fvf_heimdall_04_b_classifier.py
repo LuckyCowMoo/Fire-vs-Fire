@@ -87,6 +87,9 @@ class FvfHeimdall04BClassifier(BaseClassifier):
     def get_label(self) -> str:
         return "AI generated"
 
+    def get_suggested_threshold(self) -> Optional[float]:
+        return 0.75
+
     def get_device_info(self) -> Dict[str, Any]:
         if not self._is_loaded:
             return {"device": "unknown", "name": "Not loaded", "backend": "N/A"}

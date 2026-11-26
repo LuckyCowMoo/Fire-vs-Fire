@@ -340,6 +340,7 @@ def build_ensemble_results(
                 "model": ",".join(clf_ids),
                 "durationMs": duration_ms,
                 "cached": cached,
+                "notes": "classifier_unavailable",
             })
     return out
 
@@ -607,6 +608,7 @@ class ModelMemoryManager:
         # Check checkpoint availability BEFORE evicting warm models
         find_ckpt = getattr(classifier, "_find_checkpoint", None)
         if callable(find_ckpt) and find_ckpt() is None:
+            log(f"[MemoryManager] Classifier '{clf_id}' checkpoint missing on disk; skipping load")
             return None
 
         # Need to load `classifier`. Check if hardware memory requires evicting an older loaded model.
@@ -1493,7 +1495,13 @@ def _normalize_ensembles(model_config: Dict[str, Any], modality: str) -> List[Di
             'weights': model_config.get('weights', None),
         }]
 
-    default_clfs = ['fvf_heimdall04'] if modality == 'image' else ['fvf_mimir_02']
+    if modality == 'image':
+        default_clfs = ['fvf_heimdall04']
+    else:
+        reg = get_registry()
+        c03 = reg.get_classifier('fvf_mimir_03_b', lazy_load=True)
+        has_03 = c03 is not None and callable(getattr(c03, '_find_checkpoint', None)) and c03._find_checkpoint() is not None
+        default_clfs = ['fvf_mimir_03_b'] if has_03 else ['fvf_mimir_02']
     return [{
         'id': f'default_{modality}',
         'classifiers': default_clfs,
@@ -1749,7 +1757,7 @@ def list_models(
 # Catalog & Release-Diff Updater Helpers
 # ============================================================================
 
-HOST_VERSION = "2.2.0"
+HOST_VERSION = "2.3.0"
 GITHUB_RELEASE_LATEST_API = "https://api.github.com/repos/LuckyCowMoo/Fire-vs-Fire/releases/latest"
 GITHUB_RELEASES_API = "https://api.github.com/repos/LuckyCowMoo/Fire-vs-Fire/releases"
 OFFICIAL_CATALOG_URL = "https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json"
@@ -2384,6 +2392,9 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
         if matched_id:
             m = models_by_id[matched_id]
             m["installed"] = weights_ready
+            if detail.get("suggested_threshold") is not None:
+                m["suggested_threshold"] = detail["suggested_threshold"]
+                m["default_threshold"] = detail["suggested_threshold"]
         elif weights_ready and detail.get("weight_path"):
             modality = (detail.get("modalities") or ["image"])[0]
             label = detail.get("label", "AI generated")
@@ -2418,7 +2429,8 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
                 "is_ai_detector": is_ai,
                 "category_name": name,
                 "label": label,
-                "default_threshold": 0.75,
+                "default_threshold": detail["suggested_threshold"] if detail.get("suggested_threshold") is not None else 0.75,
+                "suggested_threshold": detail.get("suggested_threshold"),
                 "default_color": "#FF1744" if "04" in cid else ("#FF2E00" if "03" in cid else "#FF5722"),
                 "size_mb": detail.get("size_mb", 0.0),
                 "download_size": detail.get("download_size", "Local"),

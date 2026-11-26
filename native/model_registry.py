@@ -183,6 +183,7 @@ class ModelRegistry:
             modalities = []
             name = classifier_class.__name__
             label = 'AI generated'
+            suggested_threshold: Optional[float] = None
             doc = (classifier_class.__doc__ or '').strip()
             version = getattr(classifier_class, 'VERSION', '1.0.0-local')
             py_path = self._classifier_sources.get(classifier_id)
@@ -198,6 +199,12 @@ class ModelRegistry:
                 modalities = sorted(list(instance.get_supported_modalities()))
                 name = instance.get_model_name()
                 label = instance.get_label()
+                thresh_fn = getattr(instance, 'get_suggested_threshold', None)
+                if callable(thresh_fn):
+                    raw_thresh = thresh_fn()
+                    if isinstance(raw_thresh, (int, float)) and not isinstance(raw_thresh, bool):
+                        if 0.0 <= float(raw_thresh) <= 1.0:
+                            suggested_threshold = round(float(raw_thresh), 4)
 
                 # Check weights
                 mpath = getattr(instance, 'model_path', None)
@@ -225,6 +232,7 @@ class ModelRegistry:
                 'id': classifier_id,
                 'name': name,
                 'label': label or 'AI generated',
+                'suggested_threshold': suggested_threshold,
                 'modalities': modalities or ['image'],
                 'weights_ready': weights_ready,
                 'weight_path': weight_path,
@@ -253,6 +261,11 @@ class ModelRegistry:
         "fvf_mimir02": "fvf_mimir",
         "mimir": "fvf_mimir",
         "text": "fvf_mimir",
+        "fvf_mimir_03": "fvf_mimir_03_b",
+        "fvf_mimir03": "fvf_mimir_03_b",
+        "fvf_mimir_03_b": "fvf_mimir_03_b",
+        "fvf_mimir03_b": "fvf_mimir_03_b",
+        "fvf_mimir03b": "fvf_mimir_03_b",
     }
 
     def _resolve_classifier_id(self, classifier_id: str) -> Optional[str]:

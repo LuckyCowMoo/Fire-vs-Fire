@@ -70,6 +70,53 @@ _COMMON_VERBS = frozenset({
 
 _ADJECTIVE_SUFFIXES = ("ous", "ful", "able", "ible", "ive", "al", "ish", "ic", "ent", "ant")
 
+_CONTRACTION_RE = re.compile(r"\b[A-Za-z]+'[A-Za-z]{1,3}\b")
+_TRANSITION_OPENER_RE = re.compile(
+    r"^\s*(?:furthermore|moreover|additionally|consequently|however|nevertheless|nonetheless|"
+    r"notably|importantly|overall|ultimately|essentially|interestingly|meanwhile|"
+    r"conversely|similarly|specifically|in\s+conclusion|in\s+summary|in\s+addition|"
+    r"for\s+instance|for\s+example|on\s+the\s+other\s+hand|that\s+said|as\s+a\s+result)\b",
+    re.IGNORECASE,
+)
+_HEDGE_BOOSTER_WORDS = frozenset({
+    "crucial", "essential", "significant", "significantly", "nuanced", "multifaceted",
+    "delve", "delves", "delving", "underscore", "underscores", "underscoring",
+    "pivotal", "testament", "tapestry", "realm", "landscape", "vibrant",
+    "foster", "fosters", "fostering", "leverage", "leveraging", "seamless", "seamlessly",
+    "comprehensive", "notable", "notably", "typically", "generally", "various",
+    "overall", "furthermore", "moreover", "additionally", "ultimately",
+    "intricate", "dynamic", "holistic", "paramount", "indispensable",
+})
+_BE_AUXILIARIES = frozenset({"be", "am", "is", "are", "was", "were", "been", "being"})
+_STRUCTURAL_PUNCT_RE = re.compile(r"[;:\(\)\[\]\u2014]")
+_ENTROPY_PUNCT_CHARS = (",", ";", ":", "-", "\u2014", "(", ")", "?", "!")
+
+MIMIR03_LM_COLS: Tuple[str, ...] = (
+    "lm_ppl_global", "lm_mean_nll", "lm_entropy_mean", "lm_ppl_norm",
+    "lm_logprob_mean", "lm_logprob_std", "lm_logprob_skew", "lm_logprob_kurtosis",
+    "lm_top1_frac", "lm_top5_frac", "lm_top10_frac", "lm_top100_frac",
+    "lm_tail_frac", "lm_sent_ppl_mean", "lm_sent_ppl_std", "lm_sent_ppl_range_ratio",
+    "lm_curvature_discrepancy",
+    "lm_nll_lexical_residual", "lm_nll_iqr", "lm_nll_autocorr_lag1",
+    "lm_entropy_cv", "lm_high_surprise_burst_ratio",
+)
+
+MIMIR03_STYLO_COLS: Tuple[str, ...] = (
+    "stylo_words_per_sentence_mean", "stylo_ttr", "stylo_yules_k", "stylo_simpson_d",
+    "stylo_flesch_reading_ease", "stylo_flesch_kincaid_grade", "stylo_ari",
+    "stylo_syllables_per_word", "stylo_determiner_density", "stylo_preposition_density",
+    "stylo_conjunction_density", "stylo_pronoun_3rd_density", "stylo_all_pronoun_density",
+    "stylo_verb_density", "stylo_adverb_density", "stylo_adjective_density",
+    "stylo_comma_density", "stylo_punct_density", "stylo_pacing_std",
+    "stylo_mattr_50", "stylo_honore_r", "stylo_sentence_length_cv_clean",
+    "stylo_sentence_length_iqr_norm", "stylo_adj_sent_diff_norm", "stylo_clause_length_cv",
+    "stylo_transition_opener_density", "stylo_hedge_booster_density", "stylo_passive_aux_ratio",
+    "stylo_contraction_density", "stylo_punct_entropy", "stylo_structural_punct_density",
+    "stylo_para_length_cv",
+)
+
+MIMIR03_TAB_COLS: Tuple[str, ...] = MIMIR03_LM_COLS + MIMIR03_STYLO_COLS
+
 
 def sanitize_text(text: str) -> str:
     """Normalize raw text and remove detokenizer artifacts."""
@@ -147,7 +194,7 @@ def compute_readability(words: List[str], sentences: List[str], syllables: int) 
 def extract_stylometric_features(text: str) -> Dict[str, float]:
     raw = text.strip()
     if not raw:
-        return {
+        empty = {
             "stylo_word_count": 0.0, "stylo_sentence_count": 0.0,
             "stylo_words_per_sentence_mean": 0.0, "stylo_words_per_sentence_std": 0.0,
             "stylo_sentence_length_cv": 0.0, "stylo_ttr": 0.0,
@@ -161,7 +208,14 @@ def extract_stylometric_features(text: str) -> Dict[str, float]:
             "stylo_adverb_density": 0.0, "stylo_adjective_density": 0.0,
             "stylo_comma_density": 0.0, "stylo_punct_density": 0.0,
             "stylo_pacing_std": 0.0,
+            "stylo_mattr_50": 0.0, "stylo_honore_r": 0.0, "stylo_sentence_length_cv_clean": 0.0,
+            "stylo_sentence_length_iqr_norm": 0.0, "stylo_adj_sent_diff_norm": 0.0,
+            "stylo_clause_length_cv": 0.0, "stylo_transition_opener_density": 0.0,
+            "stylo_hedge_booster_density": 0.0, "stylo_passive_aux_ratio": 0.0,
+            "stylo_contraction_density": 0.0, "stylo_punct_entropy": 0.0,
+            "stylo_structural_punct_density": 0.0, "stylo_para_length_cv": 0.0,
         }
+        return empty
     sentences = [s.strip() for s in _SENTENCE_RE.split(raw) if s.strip()] or [raw]
     words = [m.group(0).lower() for m in _WORD_RE.finditer(raw)]
     n_words = len(words)
@@ -172,7 +226,8 @@ def extract_stylometric_features(text: str) -> Dict[str, float]:
     w_cv = _safe_div(w_std, w_mean) if len(sent_word_counts) > 1 else np.nan
     syllables = sum(count_syllables(w) for w in words)
     syllables_per_word = _safe_div(syllables, n_words)
-    ttr = _safe_div(len(set(words)), n_words)
+    unique_words = len(set(words))
+    ttr = _safe_div(unique_words, n_words)
     yules_k, simpson_d = compute_yules_k_and_simpson(words)
     flesch_re, fk_grade, ari = compute_readability(words, sentences, syllables)
     det_count = sum(1 for w in words if w in _DETERMINERS)
@@ -190,6 +245,86 @@ def extract_stylometric_features(text: str) -> Dict[str, float]:
     punct_splits = _PUNCT_RE.split(raw)
     seg_lengths = [len(_WORD_RE.findall(seg)) for seg in punct_splits if seg.strip()]
     pacing_std = pstdev(seg_lengths) if len(seg_lengths) > 1 else np.nan
+
+    # Length- and bias-normalized Mímir 03 stylometric signals
+    if n_words <= 50:
+        mattr_50 = ttr
+    else:
+        win = 50
+        w_counts = Counter(words[:win])
+        distinct = len(w_counts)
+        ttr_sum = distinct / float(win)
+        for idx_w in range(win, n_words):
+            out_w = words[idx_w - win]
+            in_w = words[idx_w]
+            w_counts[out_w] -= 1
+            if w_counts[out_w] == 0:
+                distinct -= 1
+            if w_counts[in_w] == 0:
+                distinct += 1
+            w_counts[in_w] += 1
+            ttr_sum += distinct / float(win)
+        mattr_50 = ttr_sum / float(n_words - win + 1)
+
+    word_freqs = Counter(words)
+    hapax_v1 = sum(1 for c in word_freqs.values() if c == 1)
+    honore_denom = max(1.0 - (hapax_v1 / max(unique_words, 1)), 0.05)
+    honore_r = min(5.0, max(0.0, (0.1 * math.log(max(n_words, 2))) / honore_denom))
+
+    if len(sent_word_counts) > 1:
+        swc_arr = np.asarray(sent_word_counts, dtype=np.float32)
+        sent_cv_clean = float(np.std(swc_arr) / max(float(np.mean(swc_arr)), 1.0))
+        med_swc = float(np.median(swc_arr))
+        iqr_swc = float(np.percentile(swc_arr, 75) - np.percentile(swc_arr, 25))
+        sent_iqr_norm = iqr_swc / max(med_swc, 1.0)
+        adj_diffs = np.abs(np.diff(swc_arr))
+        adj_sent_diff_norm = float(np.mean(adj_diffs) / max(float(np.mean(swc_arr)), 1.0))
+    else:
+        sent_cv_clean = 0.0
+        sent_iqr_norm = 0.0
+        adj_sent_diff_norm = 0.0
+
+    if len(seg_lengths) > 1:
+        seg_arr = np.asarray(seg_lengths, dtype=np.float32)
+        clause_length_cv = float(np.std(seg_arr) / max(float(np.mean(seg_arr)), 1.0))
+    else:
+        clause_length_cv = 0.0
+
+    trans_openers = sum(1 for s in sentences if _TRANSITION_OPENER_RE.match(s))
+    transition_opener_density = _safe_div(trans_openers, n_sents)
+    hedge_count = sum(1 for w in words if w in _HEDGE_BOOSTER_WORDS)
+    hedge_booster_density = _safe_div(hedge_count, n_words)
+
+    passive_hits = 0
+    for idx_w in range(len(words) - 1):
+        if words[idx_w] in _BE_AUXILIARIES and words[idx_w + 1].endswith(("ed", "en")):
+            passive_hits += 1
+    passive_aux_ratio = _safe_div(passive_hits, max(verb_count, 1))
+
+    contraction_count = len(_CONTRACTION_RE.findall(raw))
+    contraction_density = _safe_div(contraction_count, n_words)
+
+    punct_hist = [raw.count(ch) for ch in _ENTROPY_PUNCT_CHARS]
+    punct_tot = sum(punct_hist)
+    if punct_tot > 0:
+        h_val = 0.0
+        for c_p in punct_hist:
+            if c_p > 0:
+                p_p = c_p / float(punct_tot)
+                h_val -= p_p * math.log(p_p)
+        punct_entropy = float(h_val / math.log(len(_ENTROPY_PUNCT_CHARS)))
+    else:
+        punct_entropy = 0.0
+
+    struct_punct_count = len(_STRUCTURAL_PUNCT_RE.findall(raw))
+    structural_punct_density = _safe_div(struct_punct_count, n_words)
+
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", raw) if p.strip()]
+    if len(paragraphs) > 1:
+        p_wc = np.asarray([len(_WORD_RE.findall(p)) for p in paragraphs], dtype=np.float32)
+        para_length_cv = float(np.std(p_wc) / max(float(np.mean(p_wc)), 1.0))
+    else:
+        para_length_cv = 0.0
 
     return {
         "stylo_word_count": float(n_words),
@@ -217,6 +352,19 @@ def extract_stylometric_features(text: str) -> Dict[str, float]:
         "stylo_comma_density": float(_safe_div(comma_count, n_words)),
         "stylo_punct_density": float(_safe_div(punct_count, n_words)),
         "stylo_pacing_std": float(pacing_std),
+        "stylo_mattr_50": float(mattr_50),
+        "stylo_honore_r": float(honore_r),
+        "stylo_sentence_length_cv_clean": float(sent_cv_clean),
+        "stylo_sentence_length_iqr_norm": float(sent_iqr_norm),
+        "stylo_adj_sent_diff_norm": float(adj_sent_diff_norm),
+        "stylo_clause_length_cv": float(clause_length_cv),
+        "stylo_transition_opener_density": float(transition_opener_density),
+        "stylo_hedge_booster_density": float(hedge_booster_density),
+        "stylo_passive_aux_ratio": float(passive_aux_ratio),
+        "stylo_contraction_density": float(contraction_density),
+        "stylo_punct_entropy": float(punct_entropy),
+        "stylo_structural_punct_density": float(structural_punct_density),
+        "stylo_para_length_cv": float(para_length_cv),
     }
 
 
@@ -240,8 +388,10 @@ class RuntimeLMScorer:
         max_length: int = 512,
     ):
         self.model_name = model_name
-        self.onnx_model_path = onnx_model_path or (
-            Path(__file__).resolve().parent / "fvf_mimir_backbone_int8.onnx"
+        self.onnx_model_path = (
+            Path(onnx_model_path)
+            if onnx_model_path is not None
+            else (Path(__file__).resolve().parent / "fvf_mimir_backbone_int8.onnx")
         )
         self.max_length = max_length
         self._requested_device = device
@@ -314,7 +464,7 @@ class RuntimeLMScorer:
 
             # Hardware Device Discovery
             if self._requested_device is not None:
-                self._device = self._requested_device
+                self._device = torch.device(self._requested_device) if isinstance(self._requested_device, str) else self._requested_device
                 self._backend = str(self._device)
                 self._device_name = str(self._device)
             elif torch.cuda.is_available():
@@ -382,7 +532,7 @@ class RuntimeLMScorer:
             ort_out = self._ort_session.run(["logits"], {"input_ids": input_ids_np})
             logits_np = ort_out[0][0, :-1, :]  # [seq_len - 1, vocab]
             targets_np = input_ids_np[0, 1:]    # [seq_len - 1]
-            return self._compute_metrics_numpy(logits_np, targets_np)
+            return self._compute_metrics_numpy(logits_np, targets_np, text=cleaned)
         
         elif self._torch_model is not None:
             torch = self._torch
@@ -404,11 +554,73 @@ class RuntimeLMScorer:
                 ranks_np = ranks.detach().cpu().numpy()
                 logprobs_np = target_log_probs.detach().cpu().numpy()
 
-            return self._assemble_features(nll_np, ent_np, ranks_np, logprobs_np, input_ids_np[0, 1:])
+            return self._assemble_features(nll_np, ent_np, ranks_np, logprobs_np, input_ids_np[0, 1:], text=cleaned)
 
         return self._empty()
 
-    def _compute_metrics_numpy(self, logits: np.ndarray, targets: np.ndarray) -> Dict[str, float]:
+    def score_batch(self, texts: List[str], batch_size: int = 32) -> List[Dict[str, float]]:
+        """Fast batched LM scoring on PyTorch CUDA/CPU or ONNX Runtime."""
+        if not texts:
+            return []
+        if self._ort_session is None and self._torch_model is None:
+            if not self.probe_hardware_and_load():
+                return [self._empty() for _ in texts]
+
+        # On ONNX Runtime, run sequential single-item calls (variable sequence padding skews logits without mask)
+        if self._torch_model is None:
+            return [self.score(t) for t in texts]
+
+        torch = self._torch
+        out: List[Dict[str, float]] = [self._empty() for _ in texts]
+        for start in range(0, len(texts), batch_size):
+            chunk = [t.strip() if isinstance(t, str) else "" for t in texts[start : start + batch_size]]
+            non_empty_pos = [i for i, t in enumerate(chunk) if t]
+            if not non_empty_pos:
+                continue
+            batch_texts = [chunk[i] for i in non_empty_pos]
+            tok = self._tokenizer(
+                batch_texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=self.max_length,
+            )
+            input_ids = tok["input_ids"].to(self._device, non_blocking=True)
+            attn = tok["attention_mask"].to(self._device, non_blocking=True)
+
+            with torch.no_grad():
+                use_bf16 = "cuda" in str(self._device).lower()
+                with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=use_bf16):
+                    outputs = self._torch_model(input_ids=input_ids, attention_mask=attn)
+                    logits_all = outputs.logits
+                valid_lens = attn[:, 1:].sum(dim=-1).cpu().tolist()
+                targets_all = input_ids[:, 1:]
+
+                for b_i, orig_rel_i in enumerate(non_empty_pos):
+                    L = int(valid_lens[b_i])
+                    if L < 2:
+                        continue
+                    lg = logits_all[b_i, :L, :].float()
+                    tg = targets_all[b_i, :L]
+                    log_probs = torch.log_softmax(lg, dim=-1)
+                    target_lp = log_probs.gather(-1, tg.unsqueeze(-1)).squeeze(-1)
+                    nll = -target_lp
+                    probs = torch.exp(log_probs)
+                    entropy = -(probs * log_probs).sum(dim=-1)
+                    target_logits = lg.gather(-1, tg.unsqueeze(-1)).squeeze(-1)
+                    ranks = (lg > target_logits.unsqueeze(-1)).sum(dim=-1) + 1
+
+                    out[start + orig_rel_i] = self._assemble_features(
+                        nll.detach().cpu().numpy(),
+                        entropy.detach().cpu().numpy(),
+                        ranks.detach().cpu().numpy(),
+                        target_lp.detach().cpu().numpy(),
+                        tg.detach().cpu().numpy(),
+                        text=batch_texts[b_i],
+                    )
+        return out
+
+    def _compute_metrics_numpy(self, logits: np.ndarray, targets: np.ndarray, text: str = "") -> Dict[str, float]:
         """Compute stable log_softmax, NLL, entropy, and ranks purely in NumPy."""
         # Log-Sum-Exp for numerically stable log_softmax
         max_logits = np.max(logits, axis=-1, keepdims=True)
@@ -429,7 +641,7 @@ class RuntimeLMScorer:
         # Ranks: count of elements greater than target logit + 1
         ranks = np.sum(logits > target_logits[:, None], axis=-1) + 1
 
-        return self._assemble_features(nll, entropy, ranks, target_log_probs, targets)
+        return self._assemble_features(nll, entropy, ranks, target_log_probs, targets, text=text)
 
     def _assemble_features(
         self,
@@ -438,6 +650,7 @@ class RuntimeLMScorer:
         ranks_np: np.ndarray,
         logprobs_np: np.ndarray,
         target_tokens: np.ndarray,
+        text: str = "",
     ) -> Dict[str, float]:
         n_tokens = float(len(nll_np))
         if n_tokens == 0:
@@ -482,6 +695,36 @@ class RuntimeLMScorer:
         sent_ppl_range = float(sent_ppl_max / max(sent_ppl_min, 1e-4)) if len(sent_ppls) > 1 else np.nan
         curv_disc = float(np.mean(np.abs(nll_np - ent_np)))
 
+        # Vocabulary-rarity-residualized LM curvature metrics (Mímir 03)
+        if text:
+            txt_words = _WORD_RE.findall(text)
+            mean_word_chars = float(np.mean([len(w) for w in txt_words])) if txt_words else 4.7
+        else:
+            mean_word_chars = 4.7
+        nll_lexical_residual = float(mean_nll - (1.8 + 0.35 * mean_word_chars))
+        nll_iqr = float(np.percentile(nll_np, 75) - np.percentile(nll_np, 25)) if len(nll_np) >= 2 else 0.0
+        if len(nll_np) >= 4 and lp_std >= 1e-6:
+            a0 = nll_np[:-1] - mean_nll
+            a1 = nll_np[1:] - mean_nll
+            denom = float(math.sqrt(float(np.sum(a0 * a0) * np.sum(a1 * a1))))
+            nll_autocorr_lag1 = float(np.sum(a0 * a1) / denom) if denom > 1e-9 else 0.0
+        else:
+            nll_autocorr_lag1 = 0.0
+        entropy_cv = float(np.std(ent_np) / max(mean_entropy, 1e-4))
+        if len(nll_np) >= 4:
+            p90 = float(np.percentile(nll_np, 90))
+            hi = nll_np >= p90
+            hi_count = int(np.sum(hi))
+            if hi_count > 0:
+                adj_hi = np.zeros_like(hi, dtype=bool)
+                adj_hi[1:] |= hi[:-1]
+                adj_hi[:-1] |= hi[1:]
+                high_surprise_burst_ratio = float(np.sum(hi & adj_hi) / float(hi_count))
+            else:
+                high_surprise_burst_ratio = 0.0
+        else:
+            high_surprise_burst_ratio = 0.0
+
         return {
             "lm_ppl_global": ppl_global, "lm_mean_nll": mean_nll,
             "lm_entropy_mean": mean_entropy, "lm_ppl_norm": ppl_norm,
@@ -492,6 +735,11 @@ class RuntimeLMScorer:
             "lm_tail_frac": tail_frac, "lm_sent_ppl_mean": sent_ppl_mean,
             "lm_sent_ppl_std": sent_ppl_std, "lm_sent_ppl_range_ratio": sent_ppl_range,
             "lm_curvature_discrepancy": curv_disc,
+            "lm_nll_lexical_residual": nll_lexical_residual,
+            "lm_nll_iqr": nll_iqr,
+            "lm_nll_autocorr_lag1": nll_autocorr_lag1,
+            "lm_entropy_cv": entropy_cv,
+            "lm_high_surprise_burst_ratio": high_surprise_burst_ratio,
         }
 
     def _empty(self) -> Dict[str, float]:
@@ -502,7 +750,32 @@ class RuntimeLMScorer:
             "lm_top5_frac": 0.0, "lm_top10_frac": 0.0, "lm_top100_frac": 0.0,
             "lm_tail_frac": 0.0, "lm_sent_ppl_mean": 0.0, "lm_sent_ppl_std": 0.0,
             "lm_sent_ppl_range_ratio": 0.0, "lm_curvature_discrepancy": 0.0,
+            "lm_nll_lexical_residual": 0.0, "lm_nll_iqr": 0.0,
+            "lm_nll_autocorr_lag1": 0.0, "lm_entropy_cv": 0.0,
+            "lm_high_surprise_burst_ratio": 0.0,
         }
+
+
+def extract_mimir03_tab_vector(
+    text: str,
+    lm_scorer: Optional[RuntimeLMScorer] = None,
+    lm_feats: Optional[Dict[str, float]] = None,
+    sty_feats: Optional[Dict[str, float]] = None,
+) -> np.ndarray:
+    """Return a clean finite 54-d float32 vector (22 LM curvature + 32 length-normalized stylometrics)."""
+    lm_d = lm_feats if lm_feats is not None else (lm_scorer.score(text) if lm_scorer is not None else {})
+    st_d = sty_feats if sty_feats is not None else extract_stylometric_features(text)
+    merged = {**lm_d, **st_d}
+    vec = np.zeros(len(MIMIR03_TAB_COLS), dtype=np.float32)
+    for i, col in enumerate(MIMIR03_TAB_COLS):
+        val = merged.get(col, 0.0)
+        if val is None:
+            continue
+        fval = float(val)
+        if not math.isfinite(fval):
+            continue
+        vec[i] = float(np.clip(fval, -1e4, 1e4))
+    return vec
 
 
 class RuntimeTextEncoder:

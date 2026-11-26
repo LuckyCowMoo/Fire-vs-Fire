@@ -663,11 +663,16 @@ function dispatchSingleImageItem(imgObj, modelConfig) {
 function dispatchSingleTextItem(section, modelConfig) {
   if (!section || !section.text) return;
   const itemId = section.text.substring(0, 500);
-  trackElement(itemId, section.element);
+  const elements = Array.isArray(section.elements) && section.elements.length
+    ? section.elements
+    : [section.element];
+  elements.forEach((el) => {
+    if (el) trackElement(itemId, el);
+  });
   pendingItemIds.add(itemId);
   updateHoverHandlerAttachment();
 
-  const inViewport = isElementInViewport(section.element);
+  const inViewport = elements.some((el) => isElementInViewport(el));
 
   ext.runtime.sendMessage({
     type: 'CLASSIFY_SINGLE_ITEM',
@@ -780,11 +785,6 @@ function processMutationBatch(mutations) {
       if (!node.querySelectorAll) return;
 
       try {
-        if (hasText && node.tagName && TU.isTextTagName(node.tagName.toLowerCase())) {
-          const text = processTextElement(node);
-          if (text) newText.push(text);
-        }
-
         if (hasImages && node.querySelector('img')) {
           node.querySelectorAll('img').forEach((el) => {
             const img = processImageElement(el);
@@ -792,11 +792,22 @@ function processMutationBatch(mutations) {
           });
         }
 
-        if (hasText && node.querySelector(TU.TEXT_SELECTORS)) {
-          node.querySelectorAll(TU.TEXT_SELECTORS).forEach((el) => {
-            const text = processTextElement(el);
-            if (text) newText.push(text);
-          });
+        if (hasText) {
+          const isSelfText = node.tagName && TU.isTextTagName(node.tagName.toLowerCase());
+          if (isSelfText || node.querySelector(TU.TEXT_SELECTORS)) {
+            const candidates = typeof TU.extractCohesiveTextSections === 'function'
+              ? TU.extractCohesiveTextSections(
+                  node,
+                  getMinTextLength(),
+                  (el) => processedTextElements.has(el),
+                  null
+                )
+              : [];
+            candidates.forEach((sec) => {
+              const accepted = acceptCohesiveTextSection(sec);
+              if (accepted) newText.push(accepted);
+            });
+          }
         }
       } catch (_) {}
     });
@@ -1671,12 +1682,44 @@ function applyResultChunk(response) {
   }
 }
 
+function acceptCohesiveTextSection(sec) {
+  if (!sec || !sec.text) return null;
+  const elems = Array.isArray(sec.elements) && sec.elements.length ? sec.elements : [sec.element];
+  if (elems.some((el) => !el || processedTextElements.has(el))) return null;
+  if (seenTextContent.has(sec.text)) return null;
+
+  seenTextContent.add(sec.text);
+  elems.forEach((el) => processedTextElements.add(el));
+
+  const textPreview = sec.text.substring(0, 500);
+  if (itemResults.has(textPreview)) {
+    elems.forEach((el) => trackElement(textPreview, el));
+    applyStylesForItem(textPreview);
+    return null;
+  }
+  return sec;
+}
+
 function extractLongText() {
   if (!hasActiveModality('text')) return [];
   try {
+    if (typeof TU.extractCohesiveTextSections === 'function') {
+      const candidates = TU.extractCohesiveTextSections(
+        document,
+        getMinTextLength(),
+        (el) => processedTextElements.has(el),
+        null
+      );
+      const sections = [];
+      candidates.forEach((sec) => {
+        const accepted = acceptCohesiveTextSection(sec);
+        if (accepted) sections.push(accepted);
+      });
+      return sections;
+    }
+
     const nodes = Array.from(document.querySelectorAll(TU.TEXT_SELECTORS));
     const sections = [];
-
     nodes.forEach((el) => {
       if (processedTextElements.has(el)) return;
       const text = getEligibleTextForElement(el);
@@ -1684,9 +1727,8 @@ function extractLongText() {
       if (seenTextContent.has(text)) return;
       seenTextContent.add(text);
       processedTextElements.add(el);
-      sections.push(TU.buildTextSection(el, sections.length, text));
+      sections.push(TU.buildTextSection(el, sections.length, text, [el]));
     });
-
     return sections;
   } catch (e) {
     console.error('[Extension] Error extracting long text:', e);

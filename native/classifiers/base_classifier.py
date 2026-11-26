@@ -34,6 +34,9 @@ OPTIONAL EXTENSIONS:
 - get_label() -> str:
   Badge text shown in the browser UI (e.g. "AI generated", "Spider", "Deepfake").
   Defaults to "AI generated".
+- get_suggested_threshold() -> Optional[float]:
+  Optional default threshold in [0.0, 1.0] (e.g. 0.50 or 0.75) used when creating
+  a new category with this classifier. Defaults to None (UI uses 75%).
 - REQUIRED_PACKAGES: List[str]:
   PyPI packages needed by this classifier (e.g. ["onnxruntime-directml>=1.18.0"]).
   The Native Host checks these on load and can auto-install missing packages.
@@ -159,6 +162,17 @@ class BaseClassifier(ABC):
             without needing any code changes.
         """
         return "AI generated"
+
+    def get_suggested_threshold(self) -> Optional[float]:
+        """
+        Get the suggested detection threshold in [0.0, 1.0] when creating a
+        new category with this classifier.
+
+        Returns:
+            Float in [0.0, 1.0] (e.g., 0.50 for 50%, 0.75 for 75%), or None
+            if no suggestion is provided (the UI defaults to 0.75 / 75%).
+        """
+        return None
     
     def is_loaded(self) -> bool:
         """Check if model is loaded and ready for inference."""

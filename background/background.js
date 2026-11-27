@@ -681,6 +681,9 @@ ext.storage.local.get(['pauseOnBattery', 'pauseBelowThreshold', 'batteryThreshol
 }).catch(() => {});
 
 ext.storage.onChanged.addListener((changes, area) => {
+  if (changes.enableManualBlurContextMenu) {
+    syncBlurContextMenu().catch(() => {});
+  }
   if (area === 'local') {
     if (changes.pauseOnBattery) powerSettings.pauseOnBattery = Boolean(changes.pauseOnBattery.newValue);
     if (changes.pauseBelowThreshold) powerSettings.pauseBelowThreshold = Boolean(changes.pauseBelowThreshold.newValue);
@@ -904,7 +907,7 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     const borderColor = newestModel.default_color || (mod === 'image' ? '#FF1744' : '#FF6218');
     const ensemble = {
       id: `auto_${mod}_${newestModel.id}`,
-      name: newestModel.name || newestModel.category_name || `AI ${mod}`,
+      name: newestModel.label || (mod === 'text' ? 'AI text' : 'AI generated'),
       modality: mod,
       enabled: true,
       threshold: resolveModelThreshold(newestModel),
@@ -952,7 +955,7 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
     const borderColor = m.default_color || '#FFB020';
     newEnsembles.push({
       id: `auto_image_${m.id}`,
-      name: m.category_name || m.name || 'Object Detector',
+      name: m.label || m.category_name || m.name || 'Object Detector',
       modality: 'image',
       enabled: true,
       threshold: resolveModelThreshold(m),
@@ -1014,17 +1017,7 @@ ext.runtime.onInstalled.addListener((details) => {
   console.log('Extension installed:', details && details.reason);
   updateToolbarState();
   syncCommunityReportContextMenu().catch(() => {});
-  if (ext.contextMenus && ext.contextMenus.create) {
-    try {
-      ext.contextMenus.create({
-        id: 'toggle-blur',
-        title: 'Toggle AI blur',
-        contexts: ['image', 'page']
-      });
-    } catch (e) {
-      console.warn('Context menu create failed:', e);
-    }
-  }
+  syncBlurContextMenu().catch(() => {});
 
   if (!details || details.reason === 'install') {
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
@@ -1390,7 +1383,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message && message.type === 'UPDATE_CONTEXT_MENU') {
-    if (ext.contextMenus && ext.contextMenus.update) {
+    if (manualBlurContextMenuEnabled && ext.contextMenus && ext.contextMenus.update) {
       let title;
       if (message.hasAiTags) {
         const label = message.label || 'tag';
@@ -1531,11 +1524,11 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const modality = message.modality === 'text' ? 'text' : 'image';
       const q = encodeURIComponent(String(message.prompt || '').trim());
       const sourceEngine = String(message.engine || (modality === 'image' ? 'google_images' : 'reddit'));
-      let targetUrl = `https://www.google.com/search?tbm=isch&q=${q}`;
+      let targetUrl = `https://www.google.com/search?tbm=isch&q=${q}#fvf_bellows_collector=1`;
       if (modality === 'text') {
-        if (sourceEngine === 'wikipedia') targetUrl = `https://en.wikipedia.org/w/index.php?search=${q}`;
-        else if (sourceEngine === 'google') targetUrl = `https://www.google.com/search?q=${q}`;
-        else targetUrl = `https://www.reddit.com/search/?q=${q}&type=comment`;
+        if (sourceEngine === 'wikipedia') targetUrl = `https://en.wikipedia.org/w/index.php?search=${q}#fvf_bellows_collector=1`;
+        else if (sourceEngine === 'google') targetUrl = `https://www.google.com/search?q=${q}#fvf_bellows_collector=1`;
+        else targetUrl = `https://www.reddit.com/search/?q=${q}&type=comment#fvf_bellows_collector=1`;
       }
       const tab = await ext.tabs.create({ url: targetUrl, active: true });
       const state = { jobId: message.jobId, modality, prompt: message.prompt || '', counts: message.counts || { positives: 0, hard_negatives: 0, base_negatives: 0 }, sourceTabId: sender?.tab?.id ?? null };
@@ -1605,7 +1598,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const color = mod === 'text' ? '#10b981' : '#ff6218';
         list.push({
           id: `bellows_${cid}`,
-          name: message.modelName || cid,
+          name: message.label || message.modelName || cid,
           modality: mod,
           enabled: true,
           threshold: thr,
@@ -1638,14 +1631,26 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ok: true,
         ...sanitized,
         hasToken: Boolean(stored?.communityHfToken && stored?.communityHfUsername),
-        username: stored?.communityHfUsername || ''
+        username: stored?.communityHfUsername || '',
+        hfRepoUrl: 'https://huggingface.co/datasets/' + COMMUNITY_REPORTS_HF_REPO
       });
     })().catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
     return true;
   }
 
   if (message && message.type === 'SUBMIT_COMMUNITY_REPORT') {
-    submitCommunityReportToHf(message.report)
+    const tabId = sender?.tab?.id;
+    const reportId = message.reportId || '';
+    submitCommunityReportToHf(message.report, (percent, stage) => {
+      if (tabId != null) {
+        ext.tabs.sendMessage(tabId, {
+          type: 'COMMUNITY_REPORT_PROGRESS',
+          reportId,
+          percent,
+          stage
+        }).catch(() => {});
+      }
+    })
       .then((res) => sendResponse(res))
       .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
     return true;
@@ -1699,8 +1704,8 @@ async function syncCommunityReportContextMenu() {
     try {
       ext.contextMenus.create({
         id: 'report-misclassification',
-        title: 'Report incorrect FvF classification…',
-        contexts: ['image']
+        title: 'Report incorrect FvF classification',
+        contexts: ['all']
       });
     } catch (e) {
       console.warn('[CommunityReport] Context menu create failed:', e);
@@ -1708,10 +1713,52 @@ async function syncCommunityReportContextMenu() {
   }
 }
 
+let manualBlurContextMenuEnabled = false;
+
+async function syncBlurContextMenu() {
+  if (!ext.contextMenus || !ext.contextMenus.create) return;
+  let enabled = false;
+  try {
+    const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
+    if (storageArea && storageArea.get) {
+      const res = await storageArea.get(['enableManualBlurContextMenu']);
+      enabled = Boolean(res?.enableManualBlurContextMenu);
+    }
+  } catch (_) {}
+  manualBlurContextMenuEnabled = enabled;
+
+  try {
+    await new Promise((resolve) => {
+      try {
+        const p = ext.contextMenus.remove('toggle-blur', () => {
+          void ext.runtime.lastError;
+          resolve();
+        });
+        if (p && typeof p.then === 'function') p.then(resolve).catch(resolve);
+      } catch (_) {
+        resolve();
+      }
+    });
+  } catch (_) {}
+
+  if (enabled) {
+    try {
+      ext.contextMenus.create({
+        id: 'toggle-blur',
+        title: 'Toggle AI blur',
+        contexts: ['all']
+      });
+    } catch (e) {
+      console.warn('Context menu create failed:', e);
+    }
+  }
+}
+
 syncCommunityReportContextMenu().catch(() => {});
+syncBlurContextMenu().catch(() => {});
 
 function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const chunkSize = 0x8000;
   let binary = '';
   for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -1842,7 +1889,17 @@ async function sanitizeImageForCommunityReport(srcUrl, maxDim = 1024, quality = 
 
 async function verifyCommunityHfToken(token) {
   const clean = String(token || '').trim();
+  const clearVerifiedUser = async (keepToken = true) => {
+    try {
+      if (keepToken && clean) {
+        await ext.storage.local.set({ communityHfToken: clean });
+      }
+      await ext.storage.local.remove(keepToken && clean ? ['communityHfUsername'] : ['communityHfToken', 'communityHfUsername']);
+    } catch (_) {}
+  };
+
   if (!clean || !clean.startsWith('hf_')) {
+    await clearVerifiedUser(Boolean(clean));
     return { ok: false, error: 'Token must start with hf_' };
   }
   const resp = await fetch('https://huggingface.co/api/whoami-v2', {
@@ -1850,22 +1907,25 @@ async function verifyCommunityHfToken(token) {
     headers: { Authorization: `Bearer ${clean}` }
   });
   if (!resp.ok) {
+    await clearVerifiedUser(true);
     return { ok: false, error: `Hugging Face rejected token (HTTP ${resp.status})` };
   }
   const data = await resp.json();
   const username = data && typeof data.name === 'string' ? data.name.trim() : '';
   if (!username) {
+    await clearVerifiedUser(true);
     return { ok: false, error: 'Could not read Hugging Face username from token' };
   }
   const accessToken = data?.auth?.accessToken;
-  const role = String(accessToken?.role || '').toLowerCase();
+  const role = String(accessToken?.role || data?.scope?.role || '').toLowerCase();
   if (role === 'read') {
+    await clearVerifiedUser(true);
     return {
       ok: false,
-      error: 'Read-only tokens cannot submit community PRs. Use a Write token or enable Discussions/PRs write access.'
+      error: 'Read-only token (no write permission). Use a Write token or enable "Write access to discussions and pull requests".'
     };
   }
-  if (role === 'finegrained' && accessToken?.fineGrained) {
+  if ((role === 'finegrained' || role === 'fine-grained') && accessToken?.fineGrained) {
     const fg = accessToken.fineGrained;
     const globalPerms = Array.isArray(fg.global) ? fg.global : [];
     const hasGlobalWrite = globalPerms.includes('discussion.write') || globalPerms.includes('repo.write');
@@ -1877,20 +1937,44 @@ async function verifyCommunityHfToken(token) {
       return canWrite && (entityName === COMMUNITY_REPORTS_HF_REPO || entityName === 'LuckyCow');
     });
     if (!hasGlobalWrite && !hasScopedTarget) {
+      await clearVerifiedUser(true);
       return {
         ok: false,
-        error: 'Fine-grained token lacks "Write access to discussions and pull requests" permission.'
+        error: 'Fine-grained token lacks write permission ("Write access to discussions and pull requests").'
       };
     }
   }
+
+  // Dry-run permission probe against the target dataset PR preupload endpoint (stateless, creates no PR)
+  const probeResp = await fetch(
+    `https://huggingface.co/api/datasets/${COMMUNITY_REPORTS_HF_REPO}/preupload/main?create_pr=1`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${clean}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        files: [{ path: 'reports/_probe/check.json', size: 2, sample: 'e30=' }]
+      })
+    }
+  );
+  if (probeResp.status === 401 || probeResp.status === 403) {
+    await clearVerifiedUser(true);
+    return {
+      ok: false,
+      error: 'This token does not have write/PR permission. Use a Write token or enable "Write access to discussions and pull requests".'
+    };
+  }
+
   await ext.storage.local.set({
     communityHfToken: clean,
     communityHfUsername: username
   });
-  return { ok: true, username };
+  return { ok: true, username, permission: role || 'write' };
 }
 
-async function submitCommunityReportToHf(reportInput) {
+async function submitCommunityReportToHf(reportInput, onProgress) {
   const stored = await ext.storage.local.get(['communityReportingEnabled', 'communityHfToken', 'communityHfUsername']);
   if (!stored?.communityReportingEnabled) {
     return { ok: false, error: 'Opt-in community reporting is disabled in Options.' };
@@ -1898,7 +1982,7 @@ async function submitCommunityReportToHf(reportInput) {
   const token = String(stored?.communityHfToken || '').trim();
   const username = String(stored?.communityHfUsername || '').trim();
   if (!token || !username) {
-    return { ok: false, error: 'Verify your Hugging Face token in Options → Advanced first.' };
+    return { ok: false, error: 'Verify your Hugging Face token in Options first.' };
   }
 
   const sanitizedDataUrl = String(reportInput?.sanitizedDataUrl || '');
@@ -1934,7 +2018,8 @@ async function submitCommunityReportToHf(reportInput) {
 
   const jsonStr = JSON.stringify(reportObj, null, 2);
   const jsonBytes = new TextEncoder().encode(jsonStr);
-  const imgSampleB64 = arrayBufferToBase64(imgBytes.slice(0, 512).buffer);
+
+  onProgress?.(15, 'Preparing Hugging Face pull request…');
 
   const preResp = await fetch(
     `https://huggingface.co/api/datasets/${COMMUNITY_REPORTS_HF_REPO}/preupload/main?create_pr=1`,
@@ -1946,7 +2031,8 @@ async function submitCommunityReportToHf(reportInput) {
       },
       body: JSON.stringify({
         files: [
-          { path: imgPath, size: imgBytes.byteLength, sample: imgSampleB64 }
+          { path: imgPath, size: imgBytes.byteLength, sample: arrayBufferToBase64(imgBytes.slice(0, 512)) },
+          { path: jsonPath, size: jsonBytes.byteLength, sample: arrayBufferToBase64(jsonBytes.slice(0, 512)) }
         ]
       })
     }
@@ -1959,7 +2045,10 @@ async function submitCommunityReportToHf(reportInput) {
     };
   }
   const preJson = await preResp.json();
-  const imgMode = preJson?.files?.[0]?.uploadMode || 'regular';
+  const imgFilePre = (preJson?.files || []).find((f) => f.path === imgPath) || preJson?.files?.[0];
+  const imgMode = imgFilePre?.uploadMode || 'regular';
+
+  onProgress?.(40, 'Uploading image to Hugging Face…');
 
   let imgOpLine = null;
   if (imgMode === 'lfs') {
@@ -2021,9 +2110,11 @@ async function submitCommunityReportToHf(reportInput) {
   } else {
     imgOpLine = JSON.stringify({
       key: 'file',
-      value: { path: imgPath, content: arrayBufferToBase64(imgBytes.buffer), encoding: 'base64' }
+      value: { path: imgPath, content: arrayBufferToBase64(imgBytes), encoding: 'base64' }
     });
   }
+
+  onProgress?.(75, 'Creating Hugging Face pull request…');
 
   const headerLine = JSON.stringify({
     key: 'header',
@@ -2034,7 +2125,7 @@ async function submitCommunityReportToHf(reportInput) {
   });
   const jsonOpLine = JSON.stringify({
     key: 'file',
-    value: { path: jsonPath, content: arrayBufferToBase64(jsonBytes.buffer), encoding: 'base64' }
+    value: { path: jsonPath, content: arrayBufferToBase64(jsonBytes), encoding: 'base64' }
   });
 
   const commitResp = await fetch(
@@ -2045,16 +2136,14 @@ async function submitCommunityReportToHf(reportInput) {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/x-ndjson'
       },
-      body: `${headerLine}
-${imgOpLine}
-${jsonOpLine}
-`
+      body: [headerLine, imgOpLine, jsonOpLine].join('\n')
     }
   );
   if (!commitResp.ok) {
     const errText = await commitResp.text().catch(() => '');
     return { ok: false, error: `Hugging Face commit PR failed (HTTP ${commitResp.status}): ${errText.slice(0, 180)}` };
   }
+  onProgress?.(100, 'Submitted');
   const commitJson = await commitResp.json().catch(() => ({}));
   return {
     ok: true,

@@ -17,26 +17,15 @@
   <body>
     <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
 
-    <div class="site-shell">
-      <nav class="top-nav bellows-nav">
-        <div class="bellows-brand">
-          <img src="./assets/icon-red.svg" alt="Fire vs Fire" width="28" height="28" />
-          <span>FvF Bellows</span>
-          <span class="bellows-pill-badge">Local Classifier Forge</span>
-        </div>
-        <button type="button" class="btn-ember-outline" id="bellows-back-hub-btn" style="padding: 8px 16px; font-size: 0.85rem;">
-          ← Back to Classifiers
-        </button>
-      </nav>
-
+    <div class="site-shell bellows-shell">
       <!-- ================================================================
            STEP 1: PRE-FLIGHT WARNINGS, POWER GATE & HARDWARE INSPECTOR
            ================================================================ -->
       <section class="wizard-screen active" id="bellows-screen-1">
         <div class="screen-header">
-          <h1 class="display-title">Forge Your Own Local AI</h1>
+          <h1 class="display-title">Forge Your Own Classifier</h1>
           <p class="lead-subtitle">
-            Before starting <strong>FvF Bellows</strong>, please review what training an AI on your own hardware involves.
+            Before starting <strong>FvF Bellows</strong>, please read what training a classification AI on your own hardware involves.
           </p>
         </div>
 
@@ -121,44 +110,35 @@
            STEP 2: CHOOSE MODALITY, FILTER PROMPT & ETHICAL GATEKEEPER
            ================================================================ -->
       <section class="wizard-screen" id="bellows-screen-2">
-        <div class="screen-header">
-          <h1 class="display-title">What Should Your AI Filter Out?</h1>
-          <p class="lead-subtitle">
-            Choose Images or Text, describe what you want to detect (like <em>spiders</em>, <em>clowns</em>, or <em>deep oceans</em>), and run our local ethical check.
-          </p>
+        <div class="screen-header bellows-step2-header">
+          <h1 class="display-title">What Do You Want Your Classifier to Filter Out?</h1>
         </div>
 
-        <div class="bellows-grid-2">
-          <div class="glass-card-3d bellows-card">
-            <h2 class="bellows-h2">1. Select Modality</h2>
-            <div class="bellows-modality-row">
+        <div class="bellows-step2-grand">
+          <div class="glass-card-3d bellows-card bellows-step2-card">
+            <div class="bellows-modality-row is-grand">
               <button type="button" class="bellows-mod-card active" data-mod="image">
-                <img src="./assets/modality-image.png" alt="Images" width="44" height="44" />
-                <div>
-                  <strong>Images</strong>
-                  <span>Photos, thumbnails, illustrations &amp; web visuals</span>
-                </div>
+                <img src="./assets/modality-image.png" alt="Images" width="88" height="88" />
+                <strong>Images</strong>
               </button>
               <button type="button" class="bellows-mod-card" data-mod="text">
-                <img src="./assets/modality-text.png" alt="Text" width="44" height="44" />
-                <div>
-                  <strong>Text</strong>
-                  <span>Paragraphs, posts, comments &amp; articles</span>
-                </div>
+                <img src="./assets/modality-text.png" alt="Text" width="88" height="88" />
+                <strong>Text</strong>
               </button>
             </div>
 
-            <h2 class="bellows-h2" style="margin-top: 22px;">2. Describe What You Want to Filter Out</h2>
-            <input
-              type="text"
-              id="bellows-prompt-input"
-              class="bellows-input"
-              placeholder="e.g., spiders, clowns, deep ocean underwater, needles, gambling ads..."
-              maxlength="140"
-            />
-            <p class="bellows-muted" style="margin-top: 8px;">
-              Works great for phobias, animals, sensory triggers, brands, clickbait, NSFW, gore, self-harm, or hate speech. Note: if search engines don't show graphic topics cleanly, you can supply your own dataset files in the next step.
-            </p>
+            <div class="bellows-prompt-grand-card">
+              <label for="bellows-prompt-input" class="bellows-prompt-grand-label">
+                Describe What You Want to Filter Out
+              </label>
+              <input
+                type="text"
+                id="bellows-prompt-input"
+                class="bellows-input is-grand"
+                placeholder="e.g., spiders, clowns, deep ocean underwater, needles, gambling ads..."
+                maxlength="140"
+              />
+            </div>
 
             <div id="ethics-status-box" class="bellows-alert" hidden></div>
 
@@ -170,13 +150,15 @@
             </div>
           </div>
 
-          <div class="glass-card-3d bellows-card">
-            <h2 class="bellows-h2">Ethical Policy (Applies to Images &amp; Text)</h2>
-            <p class="bellows-muted" style="margin-bottom: 12px;">
-              Your computer downloads a compact local guard model (<code>DeBERTa-v3-zeroshot</code>, ~370 MB) to check your prompt offline and unloads it immediately from RAM/VRAM afterwards. FvF Bellows blocks creating filters targeting:
-            </p>
-            <ul class="bellows-policy-list" id="policy-rules-list"></ul>
-          </div>
+          <details class="glass-card-3d bellows-policy-dropdown">
+            <summary>Ethical Policy — View Prohibited Filter Targets</summary>
+            <div class="bellows-policy-dropdown-body">
+              <p class="bellows-muted" style="margin-bottom: 12px;">
+                FvF Bellows does not permit creating classifiers targeting:
+              </p>
+              <ul class="bellows-policy-list" id="policy-rules-list"></ul>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -211,7 +193,7 @@
           <div class="glass-card-3d bellows-card">
             <h2 class="bellows-h2">Option 1 — Collect Examples in Your Browser</h2>
             <p class="bellows-muted" style="margin-bottom: 14px;" id="collector-desc-text">
-              Opens a real search tab inside <strong>FvF Dataset Gathering Mode</strong> (green embers). Left-click items to capture them as targets (hidden behind a blue blur), right-click lookalikes as <strong>Hard Negatives</strong>, drag boxes, or click <strong>Select All Visible</strong>.
+              Opens a real search tab inside <strong>FvF Dataset Gathering Mode</strong> (green embers). Left-click items to capture them as targets (hidden behind a green blur), right-click lookalikes as <strong>Hard Negatives</strong> (red), drag boxes, or click <strong>Select All Visible</strong>.
             </p>
 
             <div id="text-collector-source-row" class="bellows-btn-row" hidden style="margin-bottom: 12px;">
@@ -357,6 +339,11 @@
           <p class="lead-subtitle" id="train-hero-sub">
             Training runs in the background Native Host service—you can safely close this tab and reopen it from Fire vs Fire Options anytime.
           </p>
+          <div id="train-failed-actions" hidden style="margin-top: 14px;">
+            <button type="button" class="btn-bellows-primary" id="train-retry-btn">
+              ↻ Retry Training with Saved Dataset
+            </button>
+          </div>
         </div>
 
         <div class="glass-card-3d bellows-card" style="margin-bottom: 20px;">
@@ -367,23 +354,50 @@
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
               <span class="bellows-badge" id="train-eta-badge">ETA: Calculating…</span>
-              <button type="button" class="btn-ember-outline" id="train-stop-btn" style="border-color: rgba(248, 113, 113, 0.55); color: #fca5a5;">
-                Save Best &amp; Stop Early
+              <button type="button" class="btn-happy-emerald" id="train-stop-btn" style="padding: 7px 15px; border-radius: 9px; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 6px;">
+                <span>✓</span> I'm Happy with This — Stop &amp; Use Best Model
               </button>
             </div>
           </div>
           <div class="bellows-bar-track" style="margin-top: 14px; height: 14px;">
             <div class="bellows-bar-fill" id="train-progress-fill" style="width: 0%;"></div>
           </div>
+
+          <!-- Epoch Happy / Pattern Discovered Prompt -->
+          <div id="epoch-happy-banner" hidden style="margin-top: 14px; padding: 12px 16px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 1.3rem;">🎯</span>
+              <div>
+                <div style="font-weight: 700; color: #6ee7b7;" id="epoch-happy-title">Epoch Pattern Discovered!</div>
+                <div class="bellows-muted" style="font-size: 0.88rem;" id="epoch-happy-desc">
+                  Validation accuracy reached 94.2%. If you are happy that the AI has already found the pattern, you can stop now and use this model immediately.
+                </div>
+              </div>
+            </div>
+            <button type="button" class="btn-happy-emerald" id="epoch-happy-stop-btn" style="padding: 7px 14px; font-size: 0.88rem; border-radius: 8px; white-space: nowrap;">
+              ✓ Happy with This Epoch — Finish Now
+            </button>
+          </div>
+
+          <!-- Stopping / Exporting Notification Banner -->
+          <div id="stopping-progress-banner" hidden style="margin-top: 14px; padding: 12px 16px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 10px; display: flex; align-items: center; gap: 12px;">
+            <div class="bellows-spinner"></div>
+            <div style="color: #fbbf24; font-weight: 600; font-size: 0.92rem;" id="stopping-progress-text">
+              Stopping early and saving best model checkpoint… Generating ONNX and activating your classifier!
+            </div>
+          </div>
         </div>
 
         <div class="bellows-grid-2">
           <!-- Loss / Accuracy Curve Canvas -->
           <div class="glass-card-3d bellows-card">
-            <h2 class="bellows-h2">Learning Curve Over Time</h2>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;">
+              <h2 class="bellows-h2" style="margin: 0;">Learning Curve Over Time</h2>
+              <span class="bellows-muted" style="font-size: 0.78rem; color: #94a3b8;" id="chart-update-rate-badge">● Updates live every ~10s</span>
+            </div>
             <p class="bellows-muted" style="margin-bottom: 10px;">
               <span style="color: #34d399;">● Validation Accuracy</span> &nbsp;•&nbsp;
-              <span style="color: #ff6218;">● Train Loss</span> &nbsp;•&nbsp;
+              <span style="color: #ff6218;">● Live Train Loss</span> &nbsp;•&nbsp;
               <span style="color: #60a5fa;">● Validation Loss</span>
             </p>
             <canvas id="train-chart-canvas" width="560" height="250" style="width: 100%; height: 240px; border-radius: 12px; background: rgba(0,0,0,0.35);"></canvas>
@@ -422,6 +436,26 @@
         <!-- Educational Section: How AIs Are Made -->
         <div class="glass-card-3d bellows-card" style="margin-top: 20px;">
           <h2 class="bellows-h2">How Your AI Is Being Made</h2>
+          <div class="bellows-edu-story">
+            <p>
+              Traditionally, computer programs were made by human developers writing instructions, telling the computer step by step how to perform a task. Computers would follow these instructions to the letter, and most of the time it would work—and when it did not, it would glitch and fail to perform the task. However, some tasks are impossible to write down in code: explaining exactly how to handle every scenario a program would need to adapt to in order to speak English or draw a picture of a cute cat simply cannot be written as fixed rules.
+            </p>
+            <p>
+              Programmers and scientists have always wanted to make computers perform any task they envision. They realized that whilst they did not know how to explicitly program a computer to speak English, they already knew of a computer that does: the human brain. They reasoned that they knew enough about biological brains to try building a conventional computer program that models something close enough to a brain, and then teach that simulated brain how to perform tasks that are impossible to program directly.
+            </p>
+            <p>
+              The human brain is a collection of very small, simple cells called neurons. These cells communicate with each other through many connections that carry electrical signals between them. We still do not understand every detail of how neurons communicate—they do not talk like a conventional computer, as the messages between neurons are capable of representing far more than just a one or a zero while still relying on electricity as the base communication method. Furthermore, we do not fully understand how an individual neuron takes in information and what criteria it uses to process it in order to collectively create consciousness and high-level thought.
+            </p>
+            <p>
+              When programmers design an AI, they do not build an exact simulation of a human brain—just as engineers design aeroplanes that are clearly inspired by birds, yet are bigger, use jet engines, and have wings that don't flap. Instead, programmers model the connections between neurons as numbers, and the processing within each neuron as a mathematical function performed on those numbers—for example, multiplying an incoming signal by a weight between -1 and 1. This model, called Artificial Intelligence (AI), is close enough to how biological brains work that it is capable of complex pattern recognition and reasoning. However, a modeled AI brain is far simpler than a biological one, and using current technology it requires far more energy to think and far more effort to train than a human brain.
+            </p>
+            <p>
+              When a programmer builds an AI to complete a specific task—as you are doing right now with your classifier—they start with a simulated brain whose neurons are initialized with starting numbers. On its own for your new task, this brain is like a baby outputting random signals that mean nothing. When we show it an example of content from the internet, the simulated brain processes the signals and produces a guess. In order to make the AI do what we want, we show it many examples of the content we want to classify, compare its guesses against the answers we want, and gently tweak the numbers inside the neurons so the AI becomes more likely to output the right classifications next time. The exact internal thought process of how the AI decides what is or isn't your target remains intangible to a human—however, that does not matter, because we can keep nudging those numbers until we arrive at a set of model weights that reliably differentiates between the content you want to filter out and everything else.
+            </p>
+            <p>
+              In this interface, you can see how accurate your AI is becoming as we show it all the examples of content that you have gathered. Over time, we will tweak the neurons in its brain to find a set of numbers that work for your desired classifier. The specific shape of the brain of the AI you are training right now is called <strong id="edu-arch-name">EfficientNet-B0</strong>, and it has <strong id="edu-neuron-count">4,008,829</strong> neurons.
+            </p>
+          </div>
           <div class="bellows-edu-grid">
             <div class="edu-card">
               <strong>1. Feature Extraction</strong>
@@ -430,10 +464,6 @@
             <div class="edu-card">
               <strong>2. Backpropagation &amp; AFPL</strong>
               <p>Each batch measures how wrong the prediction was. False alarms on normal web pages receive extra penalty so your classifier stays conservative while browsing.</p>
-            </div>
-            <div class="edu-card">
-              <strong>3. Held-Out Validation</strong>
-              <p>18% of your examples are hidden during gradient updates and tested after every epoch—preventing memorization and picking the checkpoint with the best real-world accuracy.</p>
             </div>
           </div>
         </div>

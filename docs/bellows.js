@@ -13,6 +13,40 @@ const bellowsState = {
   finalizedCategory: false
 };
 
+const BELLOWS_PROMPT_PLACEHOLDERS = {
+  image: 'e.g., spiders, clowns, deep ocean underwater, needles, gambling ads...',
+  text: 'e.g., hate speech, graphic gore, spoilers for a specific show, gambling promotions...'
+};
+
+const ARCH_NEURON_INFO = {
+  image: {
+    swift: { arch: 'MobileNetV3-Small', neurons: '1,518,881' },
+    balanced: { arch: 'EfficientNet-B0', neurons: '4,008,829' },
+    thorough: { arch: 'ConvNeXt-Tiny', neurons: '27,820,897' }
+  },
+  text: {
+    swift: { arch: 'ELECTRA-Small', neurons: '13,549,057' },
+    balanced: { arch: 'MiniLM-L6', neurons: '22,713,601' },
+    thorough: { arch: 'DistilRoBERTa-Base', neurons: '82,119,169' }
+  }
+};
+
+function updatePromptPlaceholder() {
+  const input = document.getElementById('bellows-prompt-input');
+  if (!input) return;
+  input.placeholder = BELLOWS_PROMPT_PLACEHOLDERS[bellowsState.modality] || BELLOWS_PROMPT_PLACEHOLDERS.image;
+}
+
+function updateEduArchitectureSummary(modality, tier) {
+  const mod = modality === 'text' ? 'text' : 'image';
+  const t = tier && ARCH_NEURON_INFO[mod][tier] ? tier : 'balanced';
+  const info = ARCH_NEURON_INFO[mod][t];
+  const archEl = document.getElementById('edu-arch-name');
+  const neuronEl = document.getElementById('edu-neuron-count');
+  if (archEl) archEl.textContent = info.arch;
+  if (neuronEl) neuronEl.textContent = info.neurons;
+}
+
 const pendingBridge = new Map();
 
 function sendBridge(action, payload = {}, timeoutMs = 15000) {
@@ -111,7 +145,7 @@ function handleBridgePush(msg) {
       if (box) {
         box.hidden = false;
         box.className = 'bellows-alert';
-        box.textContent = p.message || 'Checking prompt…';
+        box.textContent = 'Inspecting, this may take a minute…';
       }
     } else if (p.stage === 'base_dataset') {
       const fill = document.getElementById('base-dataset-progress-fill');
@@ -232,7 +266,7 @@ async function handleEthicsCheck() {
   btn.disabled = true;
   box.hidden = false;
   box.className = 'bellows-alert';
-  box.textContent = 'Inspecting filter target with local ethical guard…';
+  box.textContent = 'Inspecting, this may take a minute…';
 
   const res = await sendBridge('BELLOWS_CHECK_ETHICS', { modality: bellowsState.modality, prompt }, 240000);
   btn.disabled = false;
@@ -407,11 +441,28 @@ async function igniteTraining() {
   }
 
   bellowsState.finalizedCategory = false;
+  const stopBtn = document.getElementById('train-stop-btn');
+  if (stopBtn) {
+    stopBtn.hidden = false;
+    stopBtn.disabled = false;
+    stopBtn.innerHTML = '<span>✓</span> I\'m Happy with This — Stop &amp; Use Best Model';
+  }
+  const epochStopBtn = document.getElementById('epoch-happy-stop-btn');
+  if (epochStopBtn) {
+    epochStopBtn.disabled = false;
+    epochStopBtn.innerHTML = '✓ Happy with This Epoch — Finish Now';
+  }
+  const stoppingBanner = document.getElementById('stopping-progress-banner');
+  if (stoppingBanner) stoppingBanner.hidden = true;
+  const epochHappyBanner = document.getElementById('epoch-happy-banner');
+  if (epochHappyBanner) epochHappyBanner.hidden = true;
+
+  updateEduArchitectureSummary(bellowsState.modality, bellowsState.tier);
   goBellowsStep(5);
   startStatusPolling();
 }
 
-function drawTrainingChart(history) {
+function drawTrainingChart(history, lossHistory, totalSteps, totalEpochs) {
   const canvas = document.getElementById('train-chart-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -419,42 +470,252 @@ function drawTrainingChart(history) {
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  const padL = 46;
+  const padR = 26;
+  const padT = 28;
+  const padB = 30;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+
+  // Background horizontal grid lines (0%, 25%, 50%, 75%, 100%)
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
   ctx.lineWidth = 1;
-  for (let i = 1; i <= 4; i++) {
-    const y = (h / 5) * i;
+
+  const numGridLines = 4;
+  for (let i = 0; i <= numGridLines; i++) {
+    const y = padT + (plotH / numGridLines) * i;
     ctx.beginPath();
-    ctx.moveTo(32, y);
-    ctx.lineTo(w - 16, y);
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
     ctx.stroke();
   }
 
-  if (!Array.isArray(history) || history.length === 0) {
+  const hist = Array.isArray(history) ? history : [];
+  const lossHist = Array.isArray(lossHistory) ? lossHistory : [];
+  const epochs = Math.max(1, totalEpochs || (hist.length > 0 ? hist[hist.length - 1].epoch : 1));
+  const steps = Math.max(1, totalSteps || (lossHist.length > 0 ? lossHist[lossHist.length - 1].step : 100));
+
+  // Vertical epoch dividers
+  if (epochs > 1) {
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    for (let e = 1; e <= epochs; e++) {
+      const ex = padL + (e / epochs) * plotW;
+      ctx.beginPath();
+      ctx.moveTo(ex, padT);
+      ctx.lineTo(ex, h - padB);
+      ctx.stroke();
+
+      // Epoch label centered in slice
+      const midX = padL + ((e - 0.5) / epochs) * plotW;
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`Ep ${e}`, midX, h - padB + 14);
+    }
+    ctx.setLineDash([]);
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Epoch 1 Progress', padL + plotW / 2, h - padB + 14);
+  }
+
+  // Calculate maximum loss for auto-scaling
+  let maxLoss = 1.0;
+  for (const p of lossHist) {
+    if (typeof p.loss === 'number' && p.loss > maxLoss) maxLoss = p.loss;
+  }
+  for (const hItem of hist) {
+    if (typeof hItem.train_loss === 'number' && hItem.train_loss > maxLoss) maxLoss = hItem.train_loss;
+    if (typeof hItem.val_loss === 'number' && hItem.val_loss > maxLoss) maxLoss = hItem.val_loss;
+  }
+  maxLoss = Math.ceil(maxLoss * 10) / 10;
+
+  // Y-axis labels
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.font = '10px Inter, sans-serif';
+  ctx.fillText(maxLoss.toFixed(1), padL - 8, padT);
+  ctx.fillText((maxLoss * 0.5).toFixed(1), padL - 8, padT + plotH * 0.5);
+  ctx.fillText('0.0', padL - 8, h - padB);
+
+  // Right Y-axis labels for Accuracy
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(52, 211, 153, 0.55)';
+  ctx.fillText('100%', w - padR + 5, padT);
+  ctx.fillText('50%', w - padR + 5, padT + plotH * 0.5);
+  ctx.fillText('0%', w - padR + 5, h - padB);
+
+  // If no data points at all yet
+  if (lossHist.length === 0 && hist.length === 0) {
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = '13px Inter, sans-serif';
-    ctx.fillText('Metrics curve will plot as Epoch 1 finishes…', 44, h / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('Live training loss curve starts streaming in ~10s…', padL + plotW / 2, padT + plotH / 2);
     return;
   }
 
-  const maxLoss = Math.max(1.0, ...history.map((d) => Math.max(d.train_loss || 0, d.val_loss || 0)));
-  const xStep = (w - 60) / Math.max(1, history.length - 1);
-
-  const plotLine = (vals, maxV, color) => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    vals.forEach((v, i) => {
-      const x = 36 + (history.length === 1 ? (w - 60) / 2 : i * xStep);
-      const y = h - 22 - Math.min(1, Math.max(0, v / maxV)) * (h - 44);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+  // Helper to map step to X
+  const getX = (step) => {
+    return padL + Math.min(1.0, Math.max(0.0, step / steps)) * plotW;
   };
 
-  plotLine(history.map((d) => d.train_loss || 0), maxLoss, '#ff6218');
-  plotLine(history.map((d) => d.val_loss || 0), maxLoss, '#60a5fa');
-  plotLine(history.map((d) => d.val_acc || 0), 1.0, '#34d399');
+  // Helper to map loss to Y
+  const getLossY = (loss) => {
+    return (h - padB) - Math.min(1.0, Math.max(0.0, loss / maxLoss)) * plotH;
+  };
+
+  // Helper to map acc to Y (0 to 1)
+  const getAccY = (acc) => {
+    return (h - padB) - Math.min(1.0, Math.max(0.0, acc)) * plotH;
+  };
+
+  // 1. Draw continuous Orange Training Loss Curve (streaming every 10s)
+  if (lossHist.length > 0) {
+    const firstX = getX(lossHist[0].step);
+    const firstY = getLossY(lossHist[0].loss);
+
+    // Area fill under loss curve
+    ctx.beginPath();
+    ctx.moveTo(firstX, h - padB);
+    ctx.lineTo(firstX, firstY);
+
+    for (let i = 1; i < lossHist.length; i++) {
+      const px = getX(lossHist[i].step);
+      const py = getLossY(lossHist[i].loss);
+      ctx.lineTo(px, py);
+    }
+    const lastX = getX(lossHist[lossHist.length - 1].step);
+    ctx.lineTo(lastX, h - padB);
+    ctx.closePath();
+
+    const grad = ctx.createLinearGradient(0, padT, 0, h - padB);
+    grad.addColorStop(0, 'rgba(255, 98, 24, 0.22)');
+    grad.addColorStop(1, 'rgba(255, 98, 24, 0.0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Stroke line
+    ctx.strokeStyle = '#ff6218';
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(firstX, firstY);
+    for (let i = 1; i < lossHist.length; i++) {
+      ctx.lineTo(getX(lossHist[i].step), getLossY(lossHist[i].loss));
+    }
+    ctx.stroke();
+
+    // Pulse dot at the latest live loss point
+    const latest = lossHist[lossHist.length - 1];
+    const lx = getX(latest.step);
+    const ly = getLossY(latest.loss);
+
+    ctx.beginPath();
+    ctx.arc(lx, ly, 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 98, 24, 0.35)';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(lx, ly, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff6218';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(lx, ly, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+
+    // Live loss badge in canvas header
+    ctx.font = '11px JetBrains Mono, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ff884d';
+    ctx.fillText(`Live Train Loss: ${latest.loss.toFixed(4)} (Step ${latest.step}/${steps})`, padL + 4, padT - 10);
+  }
+
+  // 2. Draw Blue Validation Loss (at epoch boundaries)
+  if (hist.length > 0) {
+    ctx.strokeStyle = '#60a5fa';
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    hist.forEach((d, idx) => {
+      const ex = padL + (d.epoch / epochs) * plotW;
+      const ey = getLossY(d.val_loss || 0);
+      if (idx === 0) ctx.moveTo(ex, ey);
+      else ctx.lineTo(ex, ey);
+    });
+    ctx.stroke();
+
+    // Validation Loss dots
+    hist.forEach((d) => {
+      const ex = padL + (d.epoch / epochs) * plotW;
+      const ey = getLossY(d.val_loss || 0);
+      ctx.beginPath();
+      ctx.arc(ex, ey, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#60a5fa';
+      ctx.fill();
+    });
+
+    // 3. Draw Green Validation Accuracy Line & Dots
+    ctx.strokeStyle = '#34d399';
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    hist.forEach((d, idx) => {
+      const ex = padL + (d.epoch / epochs) * plotW;
+      const ey = getAccY(d.val_acc || 0);
+      if (idx === 0) ctx.moveTo(ex, ey);
+      else ctx.lineTo(ex, ey);
+    });
+    ctx.stroke();
+
+    // Validation Accuracy dots and percentage labels
+    hist.forEach((d) => {
+      const ex = padL + (d.epoch / epochs) * plotW;
+      const ey = getAccY(d.val_acc || 0);
+
+      ctx.beginPath();
+      ctx.arc(ex, ey, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#34d399';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(ex, ey, 2, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+
+      // Label above dot
+      const pct = `${Math.round((d.val_acc || 0) * 100)}%`;
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillStyle = '#6ee7b7';
+      ctx.textAlign = 'center';
+      ctx.fillText(pct, ex, Math.max(padT - 6, ey - 9));
+    });
+  }
+}
+
+async function handleStopEarly() {
+  const stopBtn = document.getElementById('train-stop-btn');
+  const epochStopBtn = document.getElementById('epoch-happy-stop-btn');
+  if (stopBtn) {
+    stopBtn.disabled = true;
+    stopBtn.innerHTML = '<span>⏳</span> Stopping &amp; Saving Best Model…';
+  }
+  if (epochStopBtn) {
+    epochStopBtn.disabled = true;
+    epochStopBtn.innerHTML = '<span>⏳</span> Stopping &amp; Saving Best Model…';
+  }
+  const stoppingBanner = document.getElementById('stopping-progress-banner');
+  if (stoppingBanner) stoppingBanner.hidden = false;
+  const phaseDetail = document.getElementById('train-phase-detail');
+  if (phaseDetail) phaseDetail.textContent = 'Stopping training early — saving best model checkpoint and exporting…';
+
+  await sendBridge('BELLOWS_STOP_TRAINING', { jobId: bellowsState.jobId }, 8000);
 }
 
 function startStatusPolling() {
@@ -463,6 +724,7 @@ function startStatusPolling() {
     const res = await sendBridge('BELLOWS_GET_STATUS', { jobId: bellowsState.jobId }, 8000);
     if (!res || !res.ok || !res.status) return;
     const st = res.status;
+    updateEduArchitectureSummary(st.modality || bellowsState.modality, st.tier || bellowsState.tier);
 
     document.getElementById('train-phase-detail').textContent = st.phase_detail || st.phase || 'Training…';
     const pwr = res.power || st.power_status || {};
@@ -484,7 +746,27 @@ function startStatusPolling() {
       }
     }
 
-    drawTrainingChart(st.history || []);
+    drawTrainingChart(st.history || [], st.loss_history || [], st.total_steps || 1, st.total_epochs || 1);
+
+    const hist = Array.isArray(st.history) ? st.history : [];
+    const happyBanner = document.getElementById('epoch-happy-banner');
+    if (happyBanner) {
+      if (hist.length > 0 && st.state === 'running') {
+        happyBanner.hidden = false;
+        const lastEp = hist[hist.length - 1];
+        const accPct = Math.round((lastEp.val_acc || 0) * 100);
+        const titleEl = document.getElementById('epoch-happy-title');
+        if (titleEl) {
+          titleEl.textContent = `Epoch ${lastEp.epoch}/${st.total_epochs || hist.length} Complete — ${accPct}% Validation Accuracy!`;
+        }
+        const descEl = document.getElementById('epoch-happy-desc');
+        if (descEl) {
+          descEl.textContent = `Target Recall: ${(lastEp.val_tpr * 100).toFixed(1)}% • False Alarms: ${(lastEp.val_fpr * 100).toFixed(1)}%. If you are happy that the AI has found the pattern, you can stop now and use this model immediately.`;
+        }
+      } else {
+        happyBanner.hidden = true;
+      }
+    }
 
     const cm = st.confusion_matrix;
     if (cm) {
@@ -499,17 +781,28 @@ function startStatusPolling() {
       clearInterval(bellowsState.pollTimer);
       bellowsState.pollTimer = null;
       document.getElementById('train-stop-btn').hidden = true;
+      if (happyBanner) happyBanner.hidden = true;
+      const stoppingBanner = document.getElementById('stopping-progress-banner');
+      if (stoppingBanner) stoppingBanner.hidden = true;
 
       if (st.state === 'failed') {
         document.getElementById('train-hero-title').textContent = 'Training Failed';
         document.getElementById('train-hero-sub').textContent = st.error || st.phase_detail;
+        const failedActions = document.getElementById('train-failed-actions');
+        if (failedActions) failedActions.hidden = false;
+        bellowsState.lastStatus = st;
         return;
       }
 
       document.getElementById('train-hero-title').textContent =
-        st.state === 'stopped_low_battery' ? 'Saved Best Checkpoint (Low Battery)' : 'Classifier Ready!';
+        st.state === 'stopped_low_battery'
+          ? 'Saved Best Checkpoint (Low Battery)'
+          : st.state === 'stopped_early'
+          ? 'Classifier Ready! (Stopped Early at Best Checkpoint)'
+          : 'Classifier Ready!';
       document.getElementById('train-complete-panel').hidden = false;
-      document.getElementById('complete-summary-text').textContent = `${st.model_name} (${st.classifier_id}) was exported locally and activated as a new Fire vs Fire category at ${Math.round((st.suggested_threshold || 0.75) * 100)}% threshold.`;
+      const bestAcc = st.best_metrics?.acc ? ` (Validation Accuracy: ${(st.best_metrics.acc * 100).toFixed(1)}%)` : '';
+      document.getElementById('complete-summary-text').textContent = `${st.model_name} (${st.classifier_id}) was exported locally and activated as a new Fire vs Fire category at ${Math.round((st.suggested_threshold || 0.75) * 100)}% threshold${bestAcc}.`;
       document.getElementById('cleanup-size-text').textContent = `Bellows is currently using ~${res.cache_size_mb || 0} MB for its cached gatekeeper & Hugging Face base dataset (+ ~${res.jobs_size_mb || 0} MB raw training samples). Keep them or delete them now?`;
 
       if (!bellowsState.finalizedCategory && st.classifier_id) {
@@ -517,6 +810,7 @@ function startStatusPolling() {
         await sendBridge('BELLOWS_FINALIZE_CATEGORY', {
           classifierId: st.classifier_id,
           modelName: st.model_name,
+          label: st.label,
           modality: st.modality,
           threshold: st.suggested_threshold
         }, 10000);
@@ -575,6 +869,7 @@ function initBellows() {
     bellowsState.modality = initMod;
     document.querySelectorAll('.bellows-mod-card').forEach((c) => c.classList.toggle('active', c.dataset.mod === initMod));
   }
+  updatePromptPlaceholder();
 
   document.getElementById('bellows-back-hub-btn')?.addEventListener('click', () => {
     window.location.href = './index.html?screen=2';
@@ -594,6 +889,7 @@ function initBellows() {
     card.addEventListener('click', () => {
       bellowsState.modality = card.dataset.mod;
       document.querySelectorAll('.bellows-mod-card').forEach((c) => c.classList.toggle('active', c === card));
+      updatePromptPlaceholder();
     });
   });
 
@@ -641,9 +937,54 @@ function initBellows() {
   });
 
   document.getElementById('ignite-training-btn')?.addEventListener('click', igniteTraining);
-  document.getElementById('train-stop-btn')?.addEventListener('click', () => {
-    sendBridge('BELLOWS_STOP_TRAINING', { jobId: bellowsState.jobId }, 8000);
+  document.getElementById('train-retry-btn')?.addEventListener('click', async () => {
+    const st = bellowsState.lastStatus || {};
+    const jobId = bellowsState.jobId || st.job_id;
+    if (!jobId) return;
+    const retryBtn = document.getElementById('train-retry-btn');
+    if (retryBtn) retryBtn.disabled = true;
+    const res = await sendBridge('BELLOWS_START_TRAINING', {
+      jobId,
+      modality: st.modality || bellowsState.modality,
+      prompt: st.prompt || bellowsState.prompt,
+      tier: st.tier || bellowsState.tier,
+      modelName: st.model_name,
+      label: st.label,
+      suggestedThreshold: st.suggested_threshold,
+      autoThreshold: st.auto_threshold
+    }, 20000);
+    if (retryBtn) retryBtn.disabled = false;
+    if (!res || !res.ok) {
+      document.getElementById('train-hero-sub').textContent = res?.error || 'Could not restart training worker.';
+      return;
+    }
+    const failedActions = document.getElementById('train-failed-actions');
+    if (failedActions) failedActions.hidden = true;
+    document.getElementById('train-stop-btn').hidden = false;
+    const stopBtn = document.getElementById('train-stop-btn');
+    if (stopBtn) {
+      stopBtn.disabled = false;
+      stopBtn.innerHTML = '<span>✓</span> I\'m Happy with This — Stop &amp; Use Best Model';
+    }
+    const epochStopBtn = document.getElementById('epoch-happy-stop-btn');
+    if (epochStopBtn) {
+      epochStopBtn.disabled = false;
+      epochStopBtn.innerHTML = '✓ Happy with This Epoch — Finish Now';
+    }
+    const stoppingBanner = document.getElementById('stopping-progress-banner');
+    if (stoppingBanner) stoppingBanner.hidden = true;
+    const epochHappyBanner = document.getElementById('epoch-happy-banner');
+    if (epochHappyBanner) epochHappyBanner.hidden = true;
+
+    document.getElementById('train-hero-title').textContent = 'Forging Your Classifier…';
+    document.getElementById('train-hero-sub').textContent =
+      'Training runs in the background Native Host service—you can safely close this tab and reopen it from Fire vs Fire Options anytime.';
+    bellowsState.finalizedCategory = false;
+    updateEduArchitectureSummary(st.modality || bellowsState.modality, st.tier || bellowsState.tier);
+    startStatusPolling();
   });
+  document.getElementById('train-stop-btn')?.addEventListener('click', handleStopEarly);
+  document.getElementById('epoch-happy-stop-btn')?.addEventListener('click', handleStopEarly);
 
   document.getElementById('keep-cache-btn')?.addEventListener('click', () => {
     document.getElementById('cleanup-prompt-box').innerHTML = '<strong style="color:#6ee7b7;">✓ Kept Bellows cache &amp; base datasets for faster future runs.</strong>';
@@ -654,11 +995,35 @@ function initBellows() {
   });
 
   runPreflight().then(() => {
-    if (params.get('resume') === '1' || bellowsState.preflight?.active_job?.state === 'running') {
-      bellowsState.jobId = params.get('jobId') || bellowsState.preflight?.active_job?.job_id;
+    const activeJob = bellowsState.preflight?.active_job;
+    const activeStates = ['initializing', 'downloading_backbone', 'unpacking_dataset', 'running', 'exporting'];
+    if (params.get('resume') === '1' || (activeJob && activeStates.includes(activeJob.state))) {
+      bellowsState.jobId = params.get('jobId') || activeJob?.job_id;
       if (bellowsState.jobId) {
         goBellowsStep(5);
         startStatusPolling();
+      }
+    } else if (activeJob && activeJob.state === 'failed' && activeJob.job_id) {
+      const blocker = document.getElementById('preflight-blocker-msg');
+      if (blocker && blocker.hidden) {
+        blocker.hidden = false;
+        blocker.innerHTML = '';
+        blocker.appendChild(
+          document.createTextNode(
+            `Previous training job “${activeJob.model_name || activeJob.job_id}” failed with its dataset still saved. `
+          )
+        );
+        const resumeFailedBtn = document.createElement('button');
+        resumeFailedBtn.type = 'button';
+        resumeFailedBtn.className = 'btn-ember-outline';
+        resumeFailedBtn.style.marginLeft = '10px';
+        resumeFailedBtn.textContent = 'Open & Retry Failed Job →';
+        resumeFailedBtn.addEventListener('click', () => {
+          bellowsState.jobId = activeJob.job_id;
+          goBellowsStep(5);
+          startStatusPolling();
+        });
+        blocker.appendChild(resumeFailedBtn);
       }
     }
   });

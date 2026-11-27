@@ -1011,6 +1011,69 @@ h1, h2, h3, strong {
   font-size: 13px;
 }
 
+.hf-token-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+.hf-token-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.hf-token-toggle-btn {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.hf-token-instructions {
+  margin: 0 0 12px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 130, 50, 0.48);
+  background: rgba(255, 98, 24, 0.12);
+}
+
+.hf-token-instructions[hidden] {
+  display: none;
+}
+
+.hf-token-instructions-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #ffb38a;
+  margin-bottom: 4px;
+}
+
+.hf-token-instructions-title a {
+  color: #ffd0b5;
+  font-size: 11.5px;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.hf-token-instructions-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  font-weight: 300;
+}
+
+.hf-token-instructions-body strong {
+  font-weight: 500;
+  color: #ffffff;
+}
+
 .select-styled {
   cursor: pointer;
 }
@@ -1076,6 +1139,16 @@ h1, h2, h3, strong {
   height: auto;
   object-fit: contain;
   margin: 0 auto;
+}
+
+.preview-caption {
+  margin: 6px 2px 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  font-weight: 300;
+  text-align: center;
+  opacity: 0.8;
 }
 
 .preview-text {

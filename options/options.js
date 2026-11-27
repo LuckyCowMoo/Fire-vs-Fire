@@ -5,7 +5,7 @@ const ENS = globalThis.FVFEnsembles;
 
 const PREVIEW_IMAGE_PATH = 'options/preview-fire.jpg';
 const LOREM =
-  'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore.';
+  "The crowd was quiet, rather pleased than otherwise; whew'd and whistled when the breeze came as if to encourage it: 'there's a flare-up (what we call shine) for the House o' Lords.'—'A judgment for the Poor-Law Bill!'—'There go their hacts' (acts)! Such exclamations seemed to be the prevailing ones. A man sorry I did not anywhere see.";
 
 const MODE_ICONS = {
   off:
@@ -28,6 +28,7 @@ const imageCaptureQualityValue = document.getElementById('imageCaptureQualityVal
 const verboseLogsInput = document.getElementById('verboseLogs');
 const lazyLoadInput = document.getElementById('lazyLoad');
 const disableUpdateNotificationsInput = document.getElementById('disableUpdateNotifications');
+const enableManualBlurContextMenuInput = document.getElementById('enableManualBlurContextMenu');
 const minTextLengthInput = document.getElementById('minTextLength');
 
 const pauseOnBatteryInput = document.getElementById('pauseOnBattery');
@@ -746,6 +747,17 @@ function createLivePreview(ensemble) {
   refresh();
   wrap.appendChild(stage);
 
+  const caption = document.createElement('p');
+  caption.className = 'preview-caption';
+  if ((ensemble.modality || 'image') === 'image') {
+    caption.textContent =
+      '“The Burning of the Houses of Lords and Commons, October 16, 1834” by real human J. M. W. Turner';
+  } else {
+    caption.textContent =
+      'Eyewitness account by Thomas Carlyle (1834) of the Houses of Parliament burning.';
+  }
+  wrap.appendChild(caption);
+
   return { element: wrap, refresh };
 }
 
@@ -959,23 +971,28 @@ function getDefaultEnsembleName(index) {
   return `Category ${index + 1}`;
 }
 
-function getCategoryLabelForSelection(selectedClassifiers, classifierNamesById, index) {
+function getCategoryLabelForSelection(selectedClassifiers, classifierLookup, index, modality = 'image') {
   if (selectedClassifiers.length === 1) {
-    return classifierNamesById.get(selectedClassifiers[0]) || selectedClassifiers[0];
+    const cid = selectedClassifiers[0];
+    const fromLookup = classifierLookup && classifierLookup.get(cid);
+    if (fromLookup) return fromLookup;
+    return modality === 'text' ? 'AI text' : 'AI generated';
   }
   return getDefaultEnsembleName(index);
 }
 
-function getCategoryDisplayName(ensemble, index, classifierNamesById) {
+function getCategoryDisplayName(ensemble, index) {
   const selectedClassifiers = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
-  const autoLabel = getCategoryLabelForSelection(selectedClassifiers, classifierNamesById, index);
-  if (selectedClassifiers.length >= 2 && typeof ensemble.name === 'string' && ensemble.name.trim()) {
-    return ensemble.name.trim();
-  }
   if (typeof ensemble.name === 'string' && ensemble.name.trim()) {
     return ensemble.name.trim();
   }
-  return autoLabel;
+  const labelsMap = new Map();
+  availableClassifiers.forEach((m) => {
+    if (m && m.id && typeof m.label === 'string' && m.label.trim()) {
+      labelsMap.set(m.id, m.label.trim());
+    }
+  });
+  return getCategoryLabelForSelection(selectedClassifiers, labelsMap, index, ensemble.modality || 'image');
 }
 
 async function saveEnsembles() {
@@ -1445,7 +1462,10 @@ function renderClassifierPicker(classifierNamesById) {
         if (isCreate) {
           const newEnsemble = createNewEnsemble(modality);
           newEnsemble.classifiers = [model.id];
-          newEnsemble.name = model.name || model.id;
+          const suggestedLabel = typeof model.label === 'string' && model.label.trim()
+            ? model.label.trim()
+            : (modality === 'text' ? 'AI text' : 'AI generated');
+          newEnsemble.name = suggestedLabel;
           newEnsemble.threshold = resolveSuggestedThreshold(model);
           ensembleConfigs.push(newEnsemble);
           selectedCategoryIndex = ensembleConfigs.length - 1;
@@ -1535,30 +1555,24 @@ function renderCategoryPanel(index, classifierNamesById) {
   header.className = 'category-detail-header';
 
   const selectedClassifiers = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
-  const categoryLabel = getCategoryLabelForSelection(selectedClassifiers, classifierNamesById, index);
+  const suggestedModel = selectedClassifiers.length === 1
+    ? availableClassifiers.find((m) => m && m.id === selectedClassifiers[0])
+    : null;
+  const suggestedLabel = (suggestedModel && typeof suggestedModel.label === 'string' && suggestedModel.label.trim())
+    ? suggestedModel.label.trim()
+    : getCategoryLabelForSelection(selectedClassifiers, null, index, ensemble.modality || 'image');
 
-  if (selectedClassifiers.length !== 1) {
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'input-text';
-    nameInput.value = typeof ensemble.name === 'string' ? ensemble.name : '';
-    nameInput.placeholder = categoryLabel;
-    nameInput.addEventListener('input', () => {
-      ensemble.name = nameInput.value.trim();
-      scheduleSaveEnsembles();
-      renderCategoryStrip(classifierNamesById);
-    });
-    header.appendChild(nameInput);
-  } else {
-    if (ensemble.name !== categoryLabel) {
-      ensemble.name = categoryLabel;
-      saveEnsembles();
-    }
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'style-row-label';
-    nameSpan.textContent = categoryLabel;
-    header.appendChild(nameSpan);
-  }
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'input-text';
+  nameInput.value = typeof ensemble.name === 'string' && ensemble.name.trim() ? ensemble.name : suggestedLabel;
+  nameInput.placeholder = suggestedLabel;
+  nameInput.addEventListener('input', () => {
+    ensemble.name = nameInput.value.trim();
+    scheduleSaveEnsembles();
+    renderCategoryStrip();
+  });
+  header.appendChild(nameInput);
 
   // Modality display badge (display only, not dropdown)
   const modalityBadge = document.createElement('span');
@@ -1902,8 +1916,12 @@ function renderEnsembles(options = {}) {
   const scrollY = getDocumentScrollY();
 
   const classifierNamesById = new Map();
+  const classifierLabelsById = new Map();
   availableClassifiers.forEach((m) => {
     classifierNamesById.set(m.id, m.name || m.id);
+    if (typeof m.label === 'string' && m.label.trim()) {
+      classifierLabelsById.set(m.id, m.label.trim());
+    }
   });
 
   let ensemblesDirty = false;
@@ -1912,7 +1930,25 @@ function renderEnsembles(options = {}) {
       ensemble.id = generateEnsembleId(ensemble.modality || 'image');
       ensemblesDirty = true;
     }
-    if (typeof ensemble.name !== 'string' || !ensemble.name.trim()) {
+    const selected = Array.isArray(ensemble.classifiers) ? ensemble.classifiers : [];
+    const curName = typeof ensemble.name === 'string' ? ensemble.name.trim() : '';
+    if (selected.length === 1) {
+      const cid = selected[0];
+      const suggestedLabel = classifierLabelsById.get(cid);
+      const rawModelName = classifierNamesById.get(cid);
+      const isLegacyModelName = !curName
+        || curName === cid
+        || (rawModelName && curName === rawModelName)
+        || /^(fvf[\s_-]+)?(heimdall|m[ií]mir|huginn|bragi)\b/i.test(curName)
+        || /^category\s+\d+$/i.test(curName);
+      if (isLegacyModelName) {
+        const nextLabel = suggestedLabel || (/^res_net50_spider$/i.test(cid) ? 'Spider' : ((ensemble.modality || 'image') === 'text' ? 'AI text' : 'AI generated'));
+        if (curName !== nextLabel) {
+          ensemble.name = nextLabel;
+          ensemblesDirty = true;
+        }
+      }
+    } else if (!curName) {
       ensemble.name = getDefaultEnsembleName(index);
       ensemblesDirty = true;
     }
@@ -2093,6 +2129,7 @@ function writeUiSnapshotCache() {
       verboseLogs: Boolean(verboseLogsInput?.checked),
       lazyLoad: Boolean(lazyLoadInput?.checked),
       disableUpdateNotifications: Boolean(disableUpdateNotifications),
+      enableManualBlurContextMenu: Boolean(enableManualBlurContextMenuInput?.checked),
       minTextLength: parseInt(minTextLengthInput?.value || '250', 10) || 250,
       ensembleConfigsV2: ensembleConfigs,
       classifierTimings,
@@ -2159,6 +2196,9 @@ function applySettingsToUI(res, { render = true } = {}) {
   if (disableUpdateNotificationsInput) {
     disableUpdateNotificationsInput.checked = disableUpdateNotifications;
   }
+  if (enableManualBlurContextMenuInput) {
+    enableManualBlurContextMenuInput.checked = Boolean(res.enableManualBlurContextMenu);
+  }
   if (typeof res.minTextLength === 'number') minTextLengthInput.value = res.minTextLength;
 
   if (Array.isArray(res.availableClassifiers) && res.availableClassifiers.length) {
@@ -2217,6 +2257,7 @@ async function load() {
           'verboseLogs',
           'lazyLoad',
           'disableUpdateNotifications',
+          'enableManualBlurContextMenu',
           'minTextLength',
           'classifierTimings',
           'ensembleConfigsV2'
@@ -2380,6 +2421,13 @@ if (disableUpdateNotificationsInput) {
     } else {
       fetchModels({ forceUpdateCheck: false }).catch(() => {});
     }
+  });
+}
+
+if (enableManualBlurContextMenuInput) {
+  enableManualBlurContextMenuInput.addEventListener('change', async () => {
+    await saveSetting('enableManualBlurContextMenu', enableManualBlurContextMenuInput.checked);
+    writeUiSnapshotCache();
   });
 }
 
@@ -3019,22 +3067,109 @@ function initNavButtonsAndHostUpdater() {
 function initCommunityReportingSettings() {
   const toggleEl = document.getElementById('communityReportingEnabled');
   const configEl = document.getElementById('community-reporting-config');
+  const instructionsEl = document.getElementById('community-hf-token-instructions');
   const tokenEl = document.getElementById('communityHfToken');
+  const toggleTokenVisBtn = document.getElementById('toggle-community-hf-token-btn');
   const verifyBtn = document.getElementById('verify-community-hf-btn');
   const statusEl = document.getElementById('community-hf-status');
   if (!toggleEl || !configEl || !tokenEl || !verifyBtn || !statusEl) return;
 
-  function renderStatus(username, errText = '') {
+  let verifySeq = 0;
+  let autoVerifyTimer = null;
+  let lastVerifiedToken = '';
+
+  function setInstructionsVisible(visible) {
+    if (instructionsEl) {
+      instructionsEl.hidden = !visible;
+    }
+  }
+
+  function renderStatus(username, errText = '', infoText = '') {
     if (errText) {
       statusEl.textContent = errText;
       statusEl.style.color = '#f87171';
+      setInstructionsVisible(true);
+    } else if (infoText) {
+      statusEl.textContent = infoText;
+      statusEl.style.color = '#fbbf24';
     } else if (username) {
-      statusEl.textContent = `✓ Connected as @${username}`;
+      statusEl.textContent = `✓ Write permission verified — connected as @${username}`;
       statusEl.style.color = '#34d399';
+      setInstructionsVisible(false);
     } else {
       statusEl.textContent = 'Not connected';
       statusEl.style.color = 'var(--text-muted)';
+      setInstructionsVisible(true);
     }
+  }
+
+  async function runTokenVerification(tokenValue) {
+    const seq = ++verifySeq;
+    const token = String(tokenValue || '').trim();
+    if (!token) {
+      lastVerifiedToken = '';
+      await ext.storage.local.remove(['communityHfToken', 'communityHfUsername']).catch(() => {});
+      if (seq === verifySeq) {
+        renderStatus('');
+      }
+      return;
+    }
+    if (!token.startsWith('hf_')) {
+      lastVerifiedToken = '';
+      await ext.storage.local.set({ communityHfToken: token }).catch(() => {});
+      await ext.storage.local.remove(['communityHfUsername']).catch(() => {});
+      if (seq === verifySeq) {
+        renderStatus('', 'Token must start with hf_ (make sure you use a Write token)');
+      }
+      return;
+    }
+    if (token.length < 10) {
+      lastVerifiedToken = '';
+      if (seq === verifySeq) {
+        renderStatus('', '', 'Finish pasting your Hugging Face token…');
+      }
+      return;
+    }
+
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Checking…';
+    if (seq === verifySeq) {
+      renderStatus('', '', 'Checking Hugging Face token write permissions…');
+    }
+
+    try {
+      const resp = await ext.runtime.sendMessage({
+        type: 'VERIFY_COMMUNITY_HF_TOKEN',
+        token
+      });
+      if (seq !== verifySeq) return;
+      if (resp && resp.ok && resp.username) {
+        lastVerifiedToken = token;
+        renderStatus(resp.username);
+      } else {
+        lastVerifiedToken = '';
+        renderStatus('', resp?.error || 'Invalid Hugging Face token or missing write permission');
+      }
+    } catch (err) {
+      if (seq !== verifySeq) return;
+      lastVerifiedToken = '';
+      renderStatus('', err?.message || 'Verification failed');
+    } finally {
+      if (seq === verifySeq) {
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Check Token';
+      }
+    }
+  }
+
+  if (toggleTokenVisBtn) {
+    toggleTokenVisBtn.addEventListener('click', () => {
+      const revealing = tokenEl.type === 'password';
+      tokenEl.type = revealing ? 'text' : 'password';
+      toggleTokenVisBtn.textContent = revealing ? 'Hide' : 'Show';
+      toggleTokenVisBtn.setAttribute('aria-label', revealing ? 'Hide token' : 'Show token');
+      toggleTokenVisBtn.setAttribute('aria-pressed', revealing ? 'true' : 'false');
+    });
   }
 
   ext.storage.local
@@ -3043,10 +3178,19 @@ function initCommunityReportingSettings() {
       const enabled = Boolean(res?.communityReportingEnabled);
       toggleEl.checked = enabled;
       configEl.hidden = !enabled;
-      if (typeof res?.communityHfToken === 'string') {
-        tokenEl.value = res.communityHfToken;
+      const savedToken = typeof res?.communityHfToken === 'string' ? res.communityHfToken.trim() : '';
+      const savedUser = typeof res?.communityHfUsername === 'string' ? res.communityHfUsername.trim() : '';
+      if (savedToken) {
+        tokenEl.value = savedToken;
       }
-      renderStatus(res?.communityHfUsername || '');
+      if (savedToken && savedUser) {
+        lastVerifiedToken = savedToken;
+        renderStatus(savedUser);
+      } else if (savedToken) {
+        runTokenVerification(savedToken);
+      } else {
+        renderStatus('');
+      }
     })
     .catch(() => {});
 
@@ -3058,33 +3202,37 @@ function initCommunityReportingSettings() {
     } catch (_) {}
   });
 
-  verifyBtn.addEventListener('click', async () => {
-    const token = (tokenEl.value || '').trim();
-    if (!token) {
-      await ext.storage.local.remove(['communityHfToken', 'communityHfUsername']).catch(() => {});
-      renderStatus('', 'Enter a Hugging Face token (hf_...) first');
+  tokenEl.addEventListener('input', () => {
+    if (autoVerifyTimer) {
+      clearTimeout(autoVerifyTimer);
+      autoVerifyTimer = null;
+    }
+    const current = (tokenEl.value || '').trim();
+    if (!current) {
+      verifySeq += 1;
+      lastVerifiedToken = '';
+      ext.storage.local.remove(['communityHfToken', 'communityHfUsername']).catch(() => {});
+      renderStatus('');
       return;
     }
-    verifyBtn.disabled = true;
-    verifyBtn.textContent = 'Verifying…';
-    statusEl.textContent = 'Checking Hugging Face account…';
-    statusEl.style.color = '#fbbf24';
-    try {
-      const resp = await ext.runtime.sendMessage({
-        type: 'VERIFY_COMMUNITY_HF_TOKEN',
-        token
-      });
-      if (resp && resp.ok && resp.username) {
-        renderStatus(resp.username);
-      } else {
-        renderStatus('', resp?.error || 'Invalid Hugging Face token');
+    if (current !== lastVerifiedToken) {
+      setInstructionsVisible(true);
+      if (current.startsWith('hf_') && current.length >= 10) {
+        renderStatus('', '', 'Checking Hugging Face token write permissions…');
       }
-    } catch (err) {
-      renderStatus('', err?.message || 'Verification failed');
-    } finally {
-      verifyBtn.disabled = false;
-      verifyBtn.textContent = 'Verify Account';
     }
+    autoVerifyTimer = setTimeout(() => {
+      autoVerifyTimer = null;
+      runTokenVerification(tokenEl.value);
+    }, 400);
+  });
+
+  verifyBtn.addEventListener('click', () => {
+    if (autoVerifyTimer) {
+      clearTimeout(autoVerifyTimer);
+      autoVerifyTimer = null;
+    }
+    runTokenVerification(tokenEl.value);
   });
 }
 

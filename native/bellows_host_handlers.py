@@ -81,6 +81,15 @@ def _read_latest_status(job_id: Optional[str] = None) -> Optional[Dict[str, Any]
         return None
 
     st["job_dir"] = str(target_dir)
+    cfg_path = target_dir / "config.json"
+    if cfg_path.is_file():
+        try:
+            cfg_data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            st.setdefault("prompt", cfg_data.get("prompt"))
+            st.setdefault("suggested_threshold", cfg_data.get("suggested_threshold"))
+            st.setdefault("auto_threshold", cfg_data.get("auto_threshold"))
+        except Exception:
+            pass
     if st.get("state") in ACTIVE_JOB_STATES and not _pid_alive(st.get("pid")):
         st["state"] = "failed"
         st["phase"] = "failed"
@@ -521,7 +530,15 @@ def bellows_start_training(
         return {"ok": False, "error": "Bellows dataset session not found.", **({"requestId": request_id} if request_id else {})}
 
     job_dir = JOBS_DIR / job_id
-    modality = "text" if str(msg.get("modality") or "image").lower() == "text" else "image"
+    existing_cfg: Dict[str, Any] = {}
+    cfg_file = job_dir / "config.json"
+    if cfg_file.is_file():
+        try:
+            existing_cfg = json.loads(cfg_file.read_text(encoding="utf-8"))
+        except Exception:
+            existing_cfg = {}
+
+    modality = "text" if str(msg.get("modality") or existing_cfg.get("modality") or "image").lower() == "text" else "image"
     counts = _count_job_samples(job_dir, modality)
     if counts["positives"] < 15 and not bool(msg.get("_allowSmallSmoke", False)):
         return {
@@ -530,29 +547,35 @@ def bellows_start_training(
             **({"requestId": request_id} if request_id else {}),
         }
 
-    model_name = str(msg.get("modelName") or "My Bellows Filter").strip()[:60]
-    label = str(msg.get("label") or msg.get("prompt") or "Custom filter").strip()[:40]
+    model_name = str(msg.get("modelName") or existing_cfg.get("model_name") or "My Bellows Filter").strip()[:60]
+    label = str(msg.get("label") or existing_cfg.get("label") or msg.get("prompt") or existing_cfg.get("prompt") or "Custom filter").strip()[:40]
     slug = re.sub(r"[^a-z0-9]+", "_", model_name.lower()).strip("_")[:36] or "custom"
     # Avoid colliding with an older model unless intended
     if (REPO_ROOT / "native" / "classifiers" / f"bellows_{slug}_classifier.py").exists():
         slug = f"{slug}_{int(time.time()) % 10000}"
 
-    tier = str(msg.get("tier") or "balanced").lower()
+    tier = str(msg.get("tier") or existing_cfg.get("tier") or "balanced").lower()
     if tier not in ("swift", "balanced", "thorough"):
         tier = "balanced"
-    thresh = float(msg.get("suggestedThreshold", 0.75))
+    raw_thresh = msg.get("suggestedThreshold")
+    if raw_thresh is None:
+        raw_thresh = existing_cfg.get("suggested_threshold", 0.75)
+    thresh = float(raw_thresh)
     thresh = max(0.05, min(0.95, thresh))
+    auto_thresh = msg.get("autoThreshold")
+    if auto_thresh is None:
+        auto_thresh = existing_cfg.get("auto_threshold", False)
 
     cfg = {
         "job_id": job_id,
         "modality": modality,
-        "prompt": str(msg.get("prompt") or label),
+        "prompt": str(msg.get("prompt") or existing_cfg.get("prompt") or label),
         "model_name": model_name,
         "label": label,
         "slug": slug,
         "tier": tier,
         "suggested_threshold": thresh,
-        "auto_threshold": bool(msg.get("autoThreshold", False)),
+        "auto_threshold": bool(auto_thresh),
         **({"epochs_override": int(msg["epochsOverride"])} if msg.get("epochsOverride") else {}),
     }
     (job_dir / "config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")

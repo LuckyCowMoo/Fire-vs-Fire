@@ -486,6 +486,8 @@ class {class_name}(BaseClassifier):
     def __init__(self, model_path: Optional[Path] = None):
         super().__init__(model_path=model_path)
         self._ort_session = None
+        self._torch_model = None
+        self._torch = None
         self._tokenizer = None
         self._meta: Dict[str, Any] = {{}}
         self._max_length: int = 256
@@ -494,8 +496,10 @@ class {class_name}(BaseClassifier):
 
     def _find_checkpoint(self) -> Optional[Path]:
         here = Path(__file__).resolve().parent
-        cand = here / "{onnx_filename}"
-        return cand if cand.is_file() else None
+        for cand in (here / "{onnx_filename}", here / "{pt_filename}"):
+            if cand.is_file():
+                return cand
+        return None
 
     def get_supported_modalities(self) -> Set[str]:
         return {{"text"}}
@@ -519,35 +523,56 @@ class {class_name}(BaseClassifier):
             return False, "Missing Bellows metadata JSON."
         self._meta = json.loads(meta_path.read_text(encoding="utf-8"))
         self._max_length = int(self._meta.get("max_length", 256))
-        onnx_path = here / "{onnx_filename}"
-        if not onnx_path.is_file():
-            return False, "Missing Bellows ONNX model."
 
         try:
-            import onnxruntime as ort
             from transformers import AutoTokenizer
 
             tok_dir = here / (self._meta.get("tokenizer_dir") or "{classifier_id}_tokenizer")
             self._tokenizer = AutoTokenizer.from_pretrained(str(tok_dir))
-
-            avail = ort.get_available_providers()
-            preferred = [ep for ep in BaseClassifier.get_preferred_onnx_providers() if ep in avail] or ["CPUExecutionProvider"]
-            opts = BaseClassifier.get_onnx_provider_options(preferred)
-            try:
-                self._ort_session = ort.InferenceSession(str(onnx_path), providers=preferred, provider_options=opts)
-            except Exception:
-                self._ort_session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
-            active_ep = self._ort_session.get_providers()[0]
-            self._device_info = {{
-                "device": active_ep,
-                "name": f"ONNX Runtime ({{active_ep}})",
-                "backend": active_ep.replace("ExecutionProvider", ""),
-            }}
-            self.model_path = onnx_path
-            self._is_loaded = True
-            return True, None
         except Exception as exc:
-            return False, f"Failed loading Bellows text classifier: {{exc}}"
+            return False, f"Failed loading Bellows tokenizer: {{exc}}"
+
+        onnx_path = here / "{onnx_filename}"
+        if onnx_path.is_file():
+            try:
+                import onnxruntime as ort
+
+                avail = ort.get_available_providers()
+                preferred = [ep for ep in BaseClassifier.get_preferred_onnx_providers() if ep in avail] or ["CPUExecutionProvider"]
+                opts = BaseClassifier.get_onnx_provider_options(preferred)
+                try:
+                    self._ort_session = ort.InferenceSession(str(onnx_path), providers=preferred, provider_options=opts)
+                except Exception:
+                    self._ort_session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+                active_ep = self._ort_session.get_providers()[0]
+                self._device_info = {{
+                    "device": active_ep,
+                    "name": f"ONNX Runtime ({{active_ep}})",
+                    "backend": active_ep.replace("ExecutionProvider", ""),
+                }}
+                self.model_path = onnx_path
+                self._is_loaded = True
+                return True, None
+            except Exception as exc:
+                self._log_to_stderr(f"[{classifier_id}] ONNX load warning: {{exc}}")
+
+        pt_path = here / "{pt_filename}"
+        if pt_path.is_file():
+            try:
+                import torch
+
+                self._torch = torch
+                dev = self._try_cuda_then_directml(torch) or torch.device("cpu")
+                ckpt = torch.load(str(pt_path), map_location="cpu", weights_only=False)
+                self._torch_model = ckpt.get("model") if isinstance(ckpt, dict) else ckpt
+                self._torch_model = self._torch_model.to(dev).eval()
+                self.device = dev
+                self.model_path = pt_path
+                self._is_loaded = True
+                return True, None
+            except Exception as exc:
+                return False, f"Failed loading Bellows text classifier: {{exc}}"
+        return False, "Missing Bellows model weights."
 
     def preprocess_batch(self, inputs: List[Any], modality: str) -> Tuple[Any, List[int]]:
         if modality != "text" or not self._is_loaded or self._tokenizer is None:
@@ -566,14 +591,23 @@ class {class_name}(BaseClassifier):
         }}, valid_idx
 
     def classify_batch(self, batch_tensor: Any) -> List[float]:
-        if not batch_tensor or self._ort_session is None:
+        if not batch_tensor:
             return []
-        logits = np.asarray(self._ort_session.run(None, batch_tensor)[0]).reshape(-1)
+        if self._ort_session is not None:
+            logits = np.asarray(self._ort_session.run(None, batch_tensor)[0]).reshape(-1)
+        elif self._torch_model is not None and self._torch is not None:
+            with self._torch.no_grad():
+                ids = self._torch.from_numpy(batch_tensor["input_ids"]).to(self.device)
+                mask = self._torch.from_numpy(batch_tensor["attention_mask"]).to(self.device)
+                logits = self._torch_model(ids, mask).detach().cpu().numpy().reshape(-1)
+        else:
+            return []
         logits = np.clip(logits.astype(np.float64), -30.0, 30.0)
         return [float(1.0 / (1.0 + np.exp(-x))) for x in logits]
 
     def unload_model(self) -> None:
         self._ort_session = None
+        self._torch_model = None
         self._tokenizer = None
         self._is_loaded = False
         gc.collect()
@@ -593,12 +627,10 @@ def _export_and_finalize(
     status_path: Path,
     extra_meta: Dict[str, Any],
 ) -> None:
-    import onnx
-    import onnxruntime as ort
     import torch
 
     status["phase"] = "exporting"
-    status["phase_detail"] = "Exporting quantized ONNX model & creating BaseClassifier..."
+    status["phase_detail"] = "Saving checkpoint & exporting quantized ONNX model..."
     _write_status(status_path, status)
 
     slug = cfg["slug"]
@@ -621,73 +653,117 @@ def _export_and_finalize(
     else:
         final_thresh = float(cfg.get("suggested_threshold", 0.75))
 
-    if cfg["modality"] == "image":
-        sz = int(extra_meta["img_size"])
-        dummy = torch.randn((2, 3, sz, sz), dtype=torch.float32)
-        with torch.no_grad():
-            pt_logits = cpu_model(dummy).numpy().reshape(-1)
-        torch.onnx.export(
-            cpu_model,
-            dummy,
-            str(onnx_fp32),
-            input_names=["image"],
-            output_names=["logits"],
-            dynamic_axes={"image": {0: "batch_size"}, "logits": {0: "batch_size"}},
-            opset_version=17,
-            do_constant_folding=True,
-            dynamo=False,
-        )
-        try:
-            from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
-
-            q = MatMulNBitsQuantizer(model=onnx.load(str(onnx_fp32)), bits=8, block_size=64, is_symmetric=True)
-            q.process()
-            q.model.save_model_to_file(str(onnx_final))
-            sess = ort.InferenceSession(str(onnx_final), providers=["CPUExecutionProvider"])
-            ort_out = np.asarray(sess.run(None, {"image": dummy.numpy()})[0]).reshape(-1)
-            if float(np.mean(np.abs(pt_logits - ort_out))) > 0.25:
-                raise RuntimeError("Quantization drift exceeded 0.25")
-        except Exception:
-            shutil.copyfile(onnx_fp32, onnx_final)
-    else:
+    # Save tokenizer first if text modality
+    if cfg["modality"] != "image":
         max_len = int(extra_meta["max_length"])
         tok_dir = CLASSIFIERS_DIR / f"{classifier_id}_tokenizer"
         tok_dir.mkdir(parents=True, exist_ok=True)
         tokenizer.save_pretrained(str(tok_dir))
         extra_meta["tokenizer_dir"] = tok_dir.name
 
-        bt = tokenizer(["Hello world example sample.", "This is a longer sample paragraph used to verify padded dynamic axes during trace export."], padding=True, truncation=True, max_length=max_len, return_tensors="pt")
-        with torch.no_grad():
-            pt_logits = cpu_model(bt["input_ids"], bt["attention_mask"]).numpy().reshape(-1)
-        torch.onnx.export(
-            cpu_model,
-            (bt["input_ids"], bt["attention_mask"]),
-            str(onnx_fp32),
-            input_names=["input_ids", "attention_mask"],
-            output_names=["logits"],
-            dynamic_axes={
-                "input_ids": {0: "batch_size", 1: "sequence_length"},
-                "attention_mask": {0: "batch_size", 1: "sequence_length"},
-                "logits": {0: "batch_size"},
-            },
-            opset_version=17,
-            do_constant_folding=True,
-            dynamo=False,
-        )
+    # Always save PyTorch checkpoint first so weights are never lost if ONNX export fails
+    CLASSIFIERS_DIR.mkdir(parents=True, exist_ok=True)
+    torch.save({"model": cpu_model, "state_dict": best_model_state}, str(pt_final))
+
+    # Ensure onnx package is available before export (attempt quiet install if missing)
+    try:
+        import onnx  # noqa: F401
+    except ImportError:
         try:
-            from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
-
-            q = MatMulNBitsQuantizer(model=onnx.load(str(onnx_fp32)), bits=8, block_size=64, is_symmetric=True, accuracy_level=4)
-            q.process()
-            q.model.save_model_to_file(str(onnx_final))
-            sess = ort.InferenceSession(str(onnx_final), providers=["CPUExecutionProvider"])
-            ort_out = np.asarray(sess.run(None, {"input_ids": bt["input_ids"].numpy().astype(np.int64), "attention_mask": bt["attention_mask"].numpy().astype(np.int64)})[0]).reshape(-1)
-            if float(np.mean(np.abs(pt_logits - ort_out))) > 0.25:
-                raise RuntimeError("Quantization drift exceeded 0.25")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "onnx", "--quiet"],
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+                timeout=120,
+                check=False,
+            )
         except Exception:
-            shutil.copyfile(onnx_fp32, onnx_final)
+            pass
 
-    onnx_fp32.unlink(missing_ok=True)
+    onnx_exported = False
+    try:
+        import onnx
+        import onnxruntime as ort
+
+        if cfg["modality"] == "image":
+            sz = int(extra_meta["img_size"])
+            dummy = torch.randn((2, 3, sz, sz), dtype=torch.float32)
+            with torch.no_grad():
+                pt_logits = cpu_model(dummy).numpy().reshape(-1)
+            torch.onnx.export(
+                cpu_model,
+                dummy,
+                str(onnx_fp32),
+                input_names=["image"],
+                output_names=["logits"],
+                dynamic_axes={"image": {0: "batch_size"}, "logits": {0: "batch_size"}},
+                opset_version=17,
+                do_constant_folding=True,
+                dynamo=False,
+            )
+            try:
+                from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
+
+                q = MatMulNBitsQuantizer(model=onnx.load(str(onnx_fp32)), bits=8, block_size=64, is_symmetric=True)
+                q.process()
+                q.model.save_model_to_file(str(onnx_final))
+                sess = ort.InferenceSession(str(onnx_final), providers=["CPUExecutionProvider"])
+                ort_out = np.asarray(sess.run(None, {"image": dummy.numpy()})[0]).reshape(-1)
+                if float(np.mean(np.abs(pt_logits - ort_out))) > 0.25:
+                    raise RuntimeError("Quantization drift exceeded 0.25")
+            except Exception:
+                shutil.copyfile(onnx_fp32, onnx_final)
+        else:
+            max_len = int(extra_meta["max_length"])
+            bt = tokenizer(
+                ["Hello world example sample.", "This is a longer sample paragraph used to verify padded dynamic axes during trace export."],
+                padding=True,
+                truncation=True,
+                max_length=max_len,
+                return_tensors="pt",
+            )
+            with torch.no_grad():
+                pt_logits = cpu_model(bt["input_ids"], bt["attention_mask"]).numpy().reshape(-1)
+            torch.onnx.export(
+                cpu_model,
+                (bt["input_ids"], bt["attention_mask"]),
+                str(onnx_fp32),
+                input_names=["input_ids", "attention_mask"],
+                output_names=["logits"],
+                dynamic_axes={
+                    "input_ids": {0: "batch_size", 1: "sequence_length"},
+                    "attention_mask": {0: "batch_size", 1: "sequence_length"},
+                    "logits": {0: "batch_size"},
+                },
+                opset_version=17,
+                do_constant_folding=True,
+                dynamo=False,
+            )
+            try:
+                from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
+
+                q = MatMulNBitsQuantizer(model=onnx.load(str(onnx_fp32)), bits=8, block_size=64, is_symmetric=True, accuracy_level=4)
+                q.process()
+                q.model.save_model_to_file(str(onnx_final))
+                sess = ort.InferenceSession(str(onnx_final), providers=["CPUExecutionProvider"])
+                ort_out = np.asarray(sess.run(None, {
+                    "input_ids": bt["input_ids"].numpy().astype(np.int64),
+                    "attention_mask": bt["attention_mask"].numpy().astype(np.int64),
+                })[0]).reshape(-1)
+                if float(np.mean(np.abs(pt_logits - ort_out))) > 0.25:
+                    raise RuntimeError("Quantization drift exceeded 0.25")
+            except Exception:
+                shutil.copyfile(onnx_fp32, onnx_final)
+
+        onnx_exported = onnx_final.is_file() and onnx_final.stat().st_size > 0
+    except Exception as exc:
+        print(f"[FvF Bellows] ONNX export unavailable ({exc}); keeping PyTorch .pt checkpoint.", file=sys.stderr, flush=True)
+        onnx_final.unlink(missing_ok=True)
+    finally:
+        onnx_fp32.unlink(missing_ok=True)
+
+    if onnx_exported:
+        pt_final.unlink(missing_ok=True)
 
     meta_payload = {
         "classifier_id": classifier_id,
@@ -845,8 +921,15 @@ def _run_image_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, An
     global_step = 0
     stop_reason = "completed"
     stop_flag = job_dir / "stop.flag"
+    last_chart_log_t = 0.0
 
-    status.update({"state": "running", "phase": "training", "total_epochs": epochs, "total_steps": total_steps})
+    status.update({
+        "state": "running",
+        "phase": "training",
+        "total_epochs": epochs,
+        "total_steps": total_steps,
+        "loss_history": [],
+    })
     _write_status(status_path, status)
 
     for ep in range(1, epochs + 1):
@@ -886,8 +969,24 @@ def _run_image_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, An
             ep_batches += 1
             global_step += 1
 
-            if global_step % 5 == 0 or global_step == 1:
-                elapsed = time.time() - t_start
+            now_t = time.time()
+            # Semi-constant chart update every ~10s (or at step 1)
+            is_10s_tick = (global_step == 1) or (now_t - last_chart_log_t >= 10.0)
+            if is_10s_tick:
+                last_chart_log_t = now_t
+                avg_l = round(ep_loss_sum / max(1, ep_batches), 4)
+                loss_hist = status.setdefault("loss_history", [])
+                loss_hist.append({
+                    "step": global_step,
+                    "epoch": ep,
+                    "time_sec": round(now_t - t_start, 1),
+                    "loss": avg_l,
+                })
+                if len(loss_hist) > 400:
+                    status["loss_history"] = loss_hist[::2]
+
+            if is_10s_tick or (global_step % 5 == 0):
+                elapsed = now_t - t_start
                 rate = global_step / max(0.5, elapsed)
                 eta = max(0.0, (total_steps - global_step) / max(1e-4, rate))
                 status.update({
@@ -901,8 +1000,9 @@ def _run_image_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, An
                 })
                 _write_status(status_path, status)
 
-        if stop_reason != "completed" and ep_batches == 0:
-            break
+        if stop_reason != "completed":
+            if best_score > -1.0 or ep_batches == 0:
+                break
 
         # Validation pass
         model.eval()
@@ -932,6 +1032,14 @@ def _run_image_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, An
             "val_tpr": cm["tpr"],
             "val_f1": cm["f1"],
         })
+        loss_hist = status.setdefault("loss_history", [])
+        loss_hist.append({
+            "step": global_step,
+            "epoch": ep,
+            "time_sec": round(time.time() - t_start, 1),
+            "loss": tr_loss,
+            "is_epoch_end": True,
+        })
         status["confusion_matrix"] = cm
 
         sel = cm["f1"] - 0.5 * cm["fpr"]
@@ -941,6 +1049,15 @@ def _run_image_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, An
             best_probs = v_probs
             best_labels = v_labels
             status["best_metrics"] = cm
+            try:
+                torch.save({
+                    "state_dict": best_state,
+                    "val_probs": best_probs,
+                    "val_labels": best_labels,
+                    "best_metrics": cm,
+                }, str(job_dir / "best_checkpoint.pt"))
+            except Exception:
+                pass
 
         _write_status(status_path, status)
 
@@ -951,6 +1068,17 @@ def _run_image_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, An
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+    status.update({
+        "phase": "exporting",
+        "phase_detail": (
+            "Stopped early: saving best checkpoint and forging category..."
+            if stop_reason == "stopped_early"
+            else "Exporting trained model to ONNX & registering FvF category..."
+        ),
+        "progress_pct": 98.0,
+    })
+    _write_status(status_path, status)
 
     def build_export_model():
         return timm.create_model(tier_cfg["timm_name"], pretrained=False, num_classes=1)
@@ -1106,8 +1234,15 @@ def _run_text_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, Any
     global_step = 0
     stop_reason = "completed"
     stop_flag = job_dir / "stop.flag"
+    last_chart_log_t = 0.0
 
-    status.update({"state": "running", "phase": "training", "total_epochs": epochs, "total_steps": total_steps})
+    status.update({
+        "state": "running",
+        "phase": "training",
+        "total_epochs": epochs,
+        "total_steps": total_steps,
+        "loss_history": [],
+    })
     _write_status(status_path, status)
 
     for ep in range(1, epochs + 1):
@@ -1141,8 +1276,24 @@ def _run_text_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, Any
             ep_batches += 1
             global_step += 1
 
-            if global_step % 4 == 0 or global_step == 1:
-                elapsed = time.time() - t_start
+            now_t = time.time()
+            # Semi-constant chart update every ~10s (or at step 1)
+            is_10s_tick = (global_step == 1) or (now_t - last_chart_log_t >= 10.0)
+            if is_10s_tick:
+                last_chart_log_t = now_t
+                avg_l = round(ep_loss_sum / max(1, ep_batches), 4)
+                loss_hist = status.setdefault("loss_history", [])
+                loss_hist.append({
+                    "step": global_step,
+                    "epoch": ep,
+                    "time_sec": round(now_t - t_start, 1),
+                    "loss": avg_l,
+                })
+                if len(loss_hist) > 400:
+                    status["loss_history"] = loss_hist[::2]
+
+            if is_10s_tick or (global_step % 4 == 0):
+                elapsed = now_t - t_start
                 rate = global_step / max(0.5, elapsed)
                 eta = max(0.0, (total_steps - global_step) / max(1e-4, rate))
                 status.update({
@@ -1156,8 +1307,9 @@ def _run_text_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, Any
                 })
                 _write_status(status_path, status)
 
-        if stop_reason != "completed" and ep_batches == 0:
-            break
+        if stop_reason != "completed":
+            if best_score > -1.0 or ep_batches == 0:
+                break
 
         model.eval()
         val_probs_l, val_y_l, val_losses = [], [], []
@@ -1183,6 +1335,14 @@ def _run_text_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, Any
             "val_tpr": cm["tpr"],
             "val_f1": cm["f1"],
         })
+        loss_hist = status.setdefault("loss_history", [])
+        loss_hist.append({
+            "step": global_step,
+            "epoch": ep,
+            "time_sec": round(time.time() - t_start, 1),
+            "loss": tr_loss,
+            "is_epoch_end": True,
+        })
         status["confusion_matrix"] = cm
 
         sel = cm["f1"] - 0.5 * cm["fpr"]
@@ -1192,6 +1352,15 @@ def _run_text_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, Any
             best_probs = v_probs
             best_labels = v_labels
             status["best_metrics"] = cm
+            try:
+                torch.save({
+                    "state_dict": best_state,
+                    "val_probs": best_probs,
+                    "val_labels": best_labels,
+                    "best_metrics": cm,
+                }, str(job_dir / "best_checkpoint.pt"))
+            except Exception:
+                pass
         _write_status(status_path, status)
 
         if stop_reason != "completed":
@@ -1201,6 +1370,17 @@ def _run_text_training(cfg: Dict[str, Any], job_dir: Path, status: Dict[str, Any
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+    status.update({
+        "phase": "exporting",
+        "phase_detail": (
+            "Stopped early: saving best checkpoint and forging category..."
+            if stop_reason == "stopped_early"
+            else "Exporting trained model to ONNX & registering FvF category..."
+        ),
+        "progress_pct": 98.0,
+    })
+    _write_status(status_path, status)
 
     _export_and_finalize(
         cfg=cfg,
@@ -1244,9 +1424,12 @@ def main() -> int:
         "phase": "initializing",
         "phase_detail": "Starting Bellows training worker...",
         "modality": cfg["modality"],
+        "prompt": cfg.get("prompt", cfg["label"]),
         "model_name": cfg["model_name"],
         "label": cfg["label"],
         "tier": cfg["tier"],
+        "suggested_threshold": float(cfg.get("suggested_threshold", 0.75)),
+        "auto_threshold": bool(cfg.get("auto_threshold", False)),
         "progress_pct": 0.0,
         "epoch": 0,
         "total_epochs": 1,

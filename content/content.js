@@ -9,6 +9,14 @@ const VE = globalThis.FVFVisualEffects;
 const ENS = globalThis.FVFEnsembles;
 const TU = globalThis.FVFTextUtils;
 
+if (typeof window !== 'undefined' && window.location && typeof window.location.hash === 'string' && window.location.hash.includes('fvf_bellows_collector=1')) {
+  window.__FVF_BELLOWS_COLLECTOR_ACTIVE = true;
+}
+
+function isBellowsCollectorActive() {
+  return Boolean(window.__FVF_BELLOWS_COLLECTOR_ACTIVE || (typeof bellowsCollector !== 'undefined' && bellowsCollector && bellowsCollector.active));
+}
+
 // Unique page context identifier for this page instance (used by Native Host to drop stale items on navigation)
 let currentPageId = 'page-' + Math.random().toString(16).slice(2, 10) + '-' + Date.now();
 
@@ -749,7 +757,7 @@ function scheduleClassification(images) {
    * sending in-viewport (P1) images first, yielding to the browser event loop
    * so main thread rendering is never blocked.
    */
-  if (!settings.enabled || !images || !images.length) return;
+  if (isBellowsCollectorActive() || !settings.enabled || !images || !images.length) return;
   if (!hasActiveModality('image')) return;
   const modelConfig = buildModelConfig();
 
@@ -781,7 +789,7 @@ function scheduleTextClassification(textSections) {
   /**
    * Immediately streams discovered text sections individually to the Native Host.
    */
-  if (!settings.enabled || !textSections || !textSections.length) return;
+  if (isBellowsCollectorActive() || !settings.enabled || !textSections || !textSections.length) return;
   if (!hasActiveModality('text')) return;
   const modelConfig = buildModelConfig();
 
@@ -867,7 +875,7 @@ function flushStreamingTextElement(el) {
   if (!streamingTextElements.has(el)) return;
   clearStreamingTextElement(el);
   if (!el || !el.isConnected || processedTextElements.has(el) || isEditableTextElement(el)) return;
-  if (!settings.enabled || scanPaused || !hasActiveModality('text')) return;
+  if (isBellowsCollectorActive() || !settings.enabled || scanPaused || !hasActiveModality('text')) return;
 
   const sec = buildSectionForCompletedElement(el);
   const accepted = sec ? acceptCohesiveTextSection(sec) : null;
@@ -938,7 +946,7 @@ function checkAlreadyProcessedTextMutation(block) {
 }
 
 function processMutationBatch(mutations) {
-  if (!settings.enabled || scanPaused) return;
+  if (isBellowsCollectorActive() || !settings.enabled || scanPaused) return;
 
   const hasImages = hasActiveModality('image');
   const hasText = hasActiveModality('text');
@@ -950,6 +958,10 @@ function processMutationBatch(mutations) {
   const newlyAddedNodes = [];
 
   mutations.forEach((mutation) => {
+    if (mutation.target && typeof mutation.target.closest === 'function' && mutation.target.closest('#fvf-community-report-backdrop')) {
+      return;
+    }
+
     mutation.removedNodes.forEach((node) => cleanupRemovedSubtree(node));
 
     if (hasImages && mutation.type === 'attributes' && mutation.attributeName === 'src') {
@@ -981,6 +993,10 @@ function processMutationBatch(mutations) {
     }
 
     mutation.addedNodes.forEach((node) => {
+      if (node.nodeType === 1 && (node.id === 'fvf-community-report-backdrop' || (typeof node.closest === 'function' && node.closest('#fvf-community-report-backdrop')))) {
+        return;
+      }
+
       if (node.nodeType === 3) {
         if (hasText) {
           const block = findEnclosingTextBlock(node);
@@ -1118,6 +1134,7 @@ function initIntersectionObserver() {
   if (intersectionObserver) return;
 
   intersectionObserver = new IntersectionObserver((entries) => {
+    if (isBellowsCollectorActive()) return;
     const newImages = [];
     const boostItemIds = [];
 
@@ -1242,6 +1259,7 @@ function isPhysicallySmallImage(el, nw, nh) {
 }
 
 function processTextElement(el) {
+  if (isBellowsCollectorActive()) return null;
   if (!el || !(el instanceof Element)) return null;
   if (processedTextElements.has(el)) return null;
 
@@ -1567,7 +1585,9 @@ function resolveInvestigatorImageUrl(el, baseSrc, nw, nh) {
 }
 
 function processImageElement(el, isLazy = false) {
+  if (isBellowsCollectorActive()) return null;
   if (!el || el.tagName.toLowerCase() !== 'img') return null;
+  if (typeof el.closest === 'function' && el.closest('#fvf-community-report-backdrop')) return null;
   if (processedImages.has(el)) return null;
 
   const src = el.currentSrc || el.src || el.getAttribute('src');
@@ -1818,12 +1838,13 @@ function queueClassifierTimings(results) {
 }
 
 function applyStylesForItem(itemId) {
+  if (isBellowsCollectorActive()) return;
   const entry = itemResults.get(itemId);
   if (!entry) return;
-  const elements = getElementsForItem(itemId).filter((el) => el && el.isConnected);
+  const elements = getElementsForItem(itemId).filter((el) => el && el.isConnected && !(typeof el.closest === 'function' && el.closest('#fvf-community-report-backdrop')));
   if (!elements.length) {
     if (entry.modality === 'image') {
-      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => img.currentSrc === itemId || img.src === itemId);
+      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => (img.currentSrc === itemId || img.src === itemId) && !(typeof img.closest === 'function' && img.closest('#fvf-community-report-backdrop')));
       if (liveImgs.length) {
         liveImgs.forEach((img) => trackElement(itemId, img));
         elements.push(...liveImgs);
@@ -1893,7 +1914,7 @@ function applyStylesForItem(itemId) {
 }
 
 function applyResultChunk(response) {
-  if (!response || !Array.isArray(response.results)) return;
+  if (isBellowsCollectorActive() || !response || !Array.isArray(response.results)) return;
 
   if (settings.verboseLogs && Array.isArray(response.errors) && response.errors.length > 0) {
     response.errors.filter((e) => e.type === 'info').forEach((log) => console.log(log.message));
@@ -2085,23 +2106,36 @@ function bindPageLifecycleCleanup() {
   });
 }
 
+async function _bootstrapNormalScanningIfNotCollector() {
+  if (isBellowsCollectorActive()) return;
+  if (ext && ext.runtime && ext.runtime.sendMessage) {
+    try {
+      const resp = await ext.runtime.sendMessage({ type: 'BELLOWS_QUERY_COLLECTOR_TAB' });
+      if (resp && resp.active) {
+        activateBellowsCollector(resp);
+        return;
+      }
+    } catch (_) {}
+  }
+  await loadSettings();
+  if (isBellowsCollectorActive()) return;
+  startDynamicDetection();
+  performInitialExtraction();
+}
+
 function initAutoExtract() {
   bindPageLifecycleCleanup();
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', async () => {
-      await loadSettings();
-      startDynamicDetection();
-      performInitialExtraction();
+    document.addEventListener('DOMContentLoaded', () => {
+      _bootstrapNormalScanningIfNotCollector();
     });
   } else {
-    loadSettings().then(() => {
-      startDynamicDetection();
-      performInitialExtraction();
-    });
+    _bootstrapNormalScanningIfNotCollector();
   }
 }
 
 function startDynamicDetection() {
+  if (isBellowsCollectorActive()) return;
   if (document.documentElement && document.documentElement.dataset.fvfOnboarding === 'true') {
     return;
   }
@@ -2117,7 +2151,7 @@ function startDynamicDetection() {
         clearTimeout(mutationFlushTimer);
         mutationFlushTimer = null;
         pendingMutations = [];
-      } else if (!scanPaused && settings.enabled) {
+      } else if (!scanPaused && settings.enabled && !isBellowsCollectorActive()) {
         if (hasActiveModality('image')) {
           const imgs = scanAllImages();
           if (imgs.length > 0) scheduleClassification(imgs);
@@ -2133,7 +2167,7 @@ function startDynamicDetection() {
 
   if (scanIntervalId) clearInterval(scanIntervalId);
   scanIntervalId = setInterval(() => {
-    if (scanPaused || window.__FVF_BELLOWS_COLLECTOR_ACTIVE) return;
+    if (scanPaused || isBellowsCollectorActive()) return;
     cleanupStaleEntries();
     if (hasActiveModality('image')) {
       const newImages = scanAllImages();
@@ -2151,7 +2185,7 @@ function startDynamicDetection() {
 }
 
 function performInitialExtraction() {
-  if (window.__FVF_BELLOWS_COLLECTOR_ACTIVE) {
+  if (isBellowsCollectorActive()) {
     return;
   }
   if (document.documentElement && document.documentElement.dataset.fvfOnboarding === 'true') {
@@ -2260,6 +2294,247 @@ window.addEventListener('message', (event) => {
 });
 
 let lastContextMenuTarget = null;
+let lastContextMenuPoint = null;
+let lastContextMenuResolvedImage = null;
+let lastContextMenuResolvedText = null;
+
+function scoreCandidateImage(img, x, y, zRank = 0) {
+  if (!img || !img.isConnected || img.tagName?.toLowerCase() !== 'img') return -Infinity;
+  const rect = typeof img.getBoundingClientRect === 'function' ? img.getBoundingClientRect() : null;
+  if (!rect) return -Infinity;
+
+  const natW = img.naturalWidth || 0;
+  const natH = img.naturalHeight || 0;
+  const w = rect.width > 0 ? rect.width : natW;
+  const h = rect.height > 0 ? rect.height : natH;
+
+  // 1. Invisible or zero-size images / 1x1 tracking pixels
+  if (w <= 0 || h <= 0) return -Infinity;
+  if (natW === 1 && natH === 1) return -Infinity;
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const cs = window.getComputedStyle(img);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') === 0) {
+        return -Infinity;
+      }
+    } catch (_) {}
+  }
+
+  let score = 0;
+
+  // 2. Point containment
+  const containsX = rect.left <= x && x <= rect.right;
+  const containsY = rect.top <= y && y <= rect.bottom;
+  if (containsX && containsY) {
+    score += 500;
+  } else {
+    // If click was near bounds (e.g. edge or border margin)
+    const distX = Math.max(0, rect.left - x, x - rect.right);
+    const distY = Math.max(0, rect.top - y, y - rect.bottom);
+    if (distX <= 12 && distY <= 12) {
+      score += 250 - (distX + distY) * 10;
+    } else {
+      return -Infinity;
+    }
+  }
+
+  // 3. Size / Content Prominence (filter out tiny icons/emojis/avatars)
+  const minDim = Math.min(w, h);
+  if (minDim < 20) {
+    score -= 800; // Tiny icon / favicon
+  } else if (minDim < 44) {
+    score -= 150; // Small badge
+  } else {
+    score += Math.min(400, Math.round(Math.sqrt(w * h)));
+  }
+
+  // 4. Was this image tracked or scanned by FvF?
+  const src = img.currentSrc || img.src || '';
+  if (elementToItemId.has(img) || (src && seenImageUrls.has(src)) || processedImages.has(img)) {
+    score += 250;
+  }
+
+  // 5. Cursor proximity to image center (normalized by image size)
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const distToCenter = Math.hypot(x - centerX, y - centerY);
+  const maxDim = Math.max(w, h, 1);
+  score += Math.max(0, 100 - (distToCenter / maxDim) * 100);
+
+  // 6. Z-order rank (elements earlier in elementsFromPoint are closer to the user)
+  score += Math.max(0, 50 - zRank * 5);
+
+  return score;
+}
+
+function findTargetImageFromPoint(x, y, directTarget) {
+  // If coordinates are invalid (e.g. keyboard Menu key invocation), fallback to directTarget inspection
+  if (typeof x !== 'number' || typeof y !== 'number' || (x === 0 && y === 0 && (!directTarget || directTarget === document.body))) {
+    if (directTarget) {
+      if (directTarget.tagName?.toLowerCase() === 'img') return directTarget;
+      const sub = directTarget.querySelector?.('img');
+      if (sub) return sub;
+    }
+    return currentHoverEl && currentHoverEl.tagName?.toLowerCase() === 'img' ? currentHoverEl : null;
+  }
+
+  // Priority 1: Check if an element at/near this point has been classified and flagged (.ai-detected)
+  // Check currentHoverEl first (actively maintained during hover with fvf-hover-active)
+  if (currentHoverEl && currentHoverEl.isConnected && currentHoverEl.tagName?.toLowerCase() === 'img') {
+    const r = currentHoverEl.getBoundingClientRect();
+    if (x >= r.left - 8 && x <= r.right + 8 && y >= r.top - 8 && y <= r.bottom + 8) {
+      return currentHoverEl;
+    }
+  }
+
+  // Next, use document.elementsFromPoint(x, y) to penetrate all overlay elements
+  let elements = [];
+  if (typeof document.elementsFromPoint === 'function') {
+    try {
+      elements = document.elementsFromPoint(x, y) || [];
+    } catch (_) {}
+  }
+
+  // First pass: Flagged elements (.ai-detected)
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el || !el.isConnected) continue;
+    if (el.tagName && el.tagName.toLowerCase() === 'img') {
+      if (el.classList.contains('ai-detected')) {
+        return el;
+      }
+    } else {
+      if (el.classList && el.classList.contains('ai-detected')) {
+        const nestedImg = el.querySelector('img');
+        if (nestedImg) return nestedImg;
+      }
+      if (typeof el.closest === 'function') {
+        const flaggedAncestor = el.closest('.ai-detected');
+        if (flaggedAncestor) {
+          if (flaggedAncestor.tagName?.toLowerCase() === 'img') return flaggedAncestor;
+          const nestedImg = flaggedAncestor.querySelector('img');
+          if (nestedImg) return nestedImg;
+        }
+      }
+      if (el.querySelectorAll) {
+        const flaggedImgs = el.querySelectorAll('img.ai-detected');
+        for (let j = 0; j < flaggedImgs.length; j++) {
+          const cImg = flaggedImgs[j];
+          const cr = cImg.getBoundingClientRect();
+          if (x >= cr.left - 6 && x <= cr.right + 6 && y >= cr.top - 6 && y <= cr.bottom + 6) {
+            return cImg;
+          }
+        }
+      }
+    }
+  }
+
+  // Check if any element in the stack has an itemId in itemResults with a positive image score
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el) continue;
+    const itemId = elementToItemId.get(el);
+    if (itemId && itemResults.has(itemId)) {
+      const res = itemResults.get(itemId);
+      if (res && res.modality === 'image') {
+        if (el.tagName?.toLowerCase() === 'img') return el;
+        const sub = el.querySelector?.('img');
+        if (sub) return sub;
+      }
+    }
+  }
+
+  // Priority 2: Intelligent candidate selection for unflagged elements (False negative case)
+  const candidateMap = new Map();
+
+  const addCandidate = (img, zRank = 0) => {
+    if (!img || !img.isConnected || img.tagName?.toLowerCase() !== 'img') return;
+    if (candidateMap.has(img)) return;
+    const score = scoreCandidateImage(img, x, y, zRank);
+    if (Number.isFinite(score) && score > -500) {
+      candidateMap.set(img, score);
+    }
+  };
+
+  if (directTarget && directTarget.tagName?.toLowerCase() === 'img') {
+    addCandidate(directTarget, 0);
+  }
+
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el) continue;
+    if (el.tagName?.toLowerCase() === 'img') {
+      addCandidate(el, i);
+    } else {
+      if (el.querySelectorAll) {
+        const imgs = el.querySelectorAll('img');
+        for (let j = 0; j < imgs.length; j++) {
+          const img = imgs[j];
+          const r = img.getBoundingClientRect();
+          if (x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6) {
+            addCandidate(img, i + 1);
+          }
+        }
+      }
+    }
+  }
+
+  if (candidateMap.size > 0) {
+    let bestImg = null;
+    let bestScore = -Infinity;
+    for (const [img, score] of candidateMap.entries()) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestImg = img;
+      }
+    }
+    if (bestImg) return bestImg;
+  }
+
+  // Fallback to directTarget if it's an img
+  if (directTarget && directTarget.tagName?.toLowerCase() === 'img') {
+    return directTarget;
+  }
+
+  return null;
+}
+
+function findTargetTextFromPoint(x, y, directTarget) {
+  let elements = [];
+  if (typeof document.elementsFromPoint === 'function' && typeof x === 'number' && typeof y === 'number') {
+    try {
+      elements = document.elementsFromPoint(x, y) || [];
+    } catch (_) {}
+  }
+  if (directTarget && !elements.includes(directTarget)) {
+    elements.unshift(directTarget);
+  }
+
+  // Pass 1: Flagged text (.ai-detected-text)
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el || !el.isConnected) continue;
+    if (el.classList && el.classList.contains('ai-detected-text')) {
+      return el;
+    }
+    if (typeof el.closest === 'function') {
+      const parent = el.closest('.ai-detected-text');
+      if (parent) return parent;
+    }
+  }
+
+  // Pass 2: Unflagged text element
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el || !el.isConnected) continue;
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (TU.isTextTagName(tag)) {
+      return el;
+    }
+  }
+
+  return null;
+}
 
 function getTextLabelFromElement(element, fallback = 'AI text') {
   if (!element?.title) return fallback;
@@ -2306,14 +2581,17 @@ function sendContextMenuUpdate(payload) {
 }
 
 document.addEventListener('contextmenu', (evt) => {
+  lastContextMenuPoint = { x: evt.clientX, y: evt.clientY };
   lastContextMenuTarget = evt.target;
+  const resolvedImg = findTargetImageFromPoint(evt.clientX, evt.clientY, evt.target);
+  lastContextMenuResolvedImage = resolvedImg;
 
-  if (evt.target && evt.target.tagName && evt.target.tagName.toLowerCase() === 'img') {
-    const hasVisibleAiStyling = evt.target.classList.contains('ai-detected');
+  if (resolvedImg) {
+    const hasVisibleAiStyling = resolvedImg.classList.contains('ai-detected');
     let label = 'tag';
 
     if (hasVisibleAiStyling) {
-      label = VE.getImageBadgeLabel(evt.target, 'tag');
+      label = VE.getImageBadgeLabel(resolvedImg, 'tag');
     }
 
     sendContextMenuUpdate({
@@ -2321,20 +2599,26 @@ document.addEventListener('contextmenu', (evt) => {
       label: label,
       modality: 'image'
     });
-  } else if (evt.target && evt.target.classList && evt.target.classList.contains('ai-detected-text')) {
-    sendContextMenuUpdate({
-      hasAiTags: true,
-      label: getTextLabelFromElement(evt.target),
-      modality: 'text'
-    });
-  } else if (evt.target && evt.target.tagName) {
-    const tag = evt.target.tagName.toLowerCase();
-    if (TU.isTextTagName(tag)) {
+  } else {
+    const resolvedText = findTargetTextFromPoint(evt.clientX, evt.clientY, evt.target);
+    lastContextMenuResolvedText = resolvedText;
+
+    if (resolvedText) {
+      const hasVisibleAiStyling = resolvedText.classList.contains('ai-detected-text');
       sendContextMenuUpdate({
-        hasAiTags: false,
-        label: 'tag',
+        hasAiTags: hasVisibleAiStyling,
+        label: hasVisibleAiStyling ? getTextLabelFromElement(resolvedText) : 'tag',
         modality: 'text'
       });
+    } else if (evt.target && evt.target.tagName) {
+      const tag = evt.target.tagName.toLowerCase();
+      if (TU.isTextTagName(tag)) {
+        sendContextMenuUpdate({
+          hasAiTags: false,
+          label: 'tag',
+          modality: 'text'
+        });
+      }
     }
   }
 }, true);
@@ -2411,60 +2695,60 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 
     if (message.type === 'TOGGLE_BLUR') {
       const srcUrl = message.srcUrl;
+      const targetImage = (srcUrl ? Array.from(document.querySelectorAll('img')).find((img) => img.currentSrc === srcUrl || img.src === srcUrl) : null)
+        || (lastContextMenuResolvedImage && lastContextMenuResolvedImage.isConnected ? lastContextMenuResolvedImage : null)
+        || (lastContextMenuPoint ? findTargetImageFromPoint(lastContextMenuPoint.x, lastContextMenuPoint.y, lastContextMenuTarget) : null)
+        || (lastContextMenuTarget && lastContextMenuTarget.tagName?.toLowerCase() === 'img' ? lastContextMenuTarget : null);
 
-      if (srcUrl) {
-        const images = Array.from(document.querySelectorAll('img'));
-        const targetImage = images.find((img) => img.currentSrc === srcUrl || img.src === srcUrl);
-        if (targetImage) {
-          const itemId = elementToItemId.get(targetImage) || targetImage.currentSrc || targetImage.src;
-          const hasVisibleAiStyling = targetImage.classList.contains('ai-detected');
+      if (targetImage) {
+        const itemId = elementToItemId.get(targetImage) || targetImage.currentSrc || targetImage.src;
+        const hasVisibleAiStyling = targetImage.classList.contains('ai-detected');
 
-          if (hasVisibleAiStyling) {
-            const badgeLabel = VE.getImageBadgeLabel(targetImage, 'AI');
-            if (itemId) {
-              itemResults.delete(itemId);
-            }
-            if (targetImage.classList.contains('ai-detected')) {
-              aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
-            }
-            VE.clearImageStyles(targetImage);
-            updateHoverHandlerAttachment();
-            if (currentHoverEl === targetImage) {
-              currentHoverEl = null;
-            }
-            return Promise.resolve({ hasAiTags: false, label: badgeLabel, modality: 'image' });
-          } else {
-            applyManualBlurStyles(itemId, targetImage, {
-              id: 'manual_blur',
-              name: 'Manual Blur',
-              modality: 'image',
-              enabled: true,
-              threshold: 0.5,
-              classifiers: ['manual'],
-              weights: null,
-              styles: {
-                image: {
-                  applyBlur: true,
-                  blurAmount: (settings.blurAmount ?? 4) * 2,
-                  blurMode: 'hover',
-                  applyBorder: false,
-                  borderMultiplier: (settings.borderMultiplier ?? 1) * 2,
-                  borderColor: '#808080',
-                  borderMode: 'off',
-                  applyBadge: true,
-                  badgeMode: 'always'
-                }
-              }
-            });
-            return Promise.resolve({ hasAiTags: true, label: 'Blur', modality: 'image' });
+        if (hasVisibleAiStyling) {
+          const badgeLabel = VE.getImageBadgeLabel(targetImage, 'AI');
+          if (itemId) {
+            itemResults.delete(itemId);
           }
+          if (targetImage.classList.contains('ai-detected')) {
+            aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
+          }
+          VE.clearImageStyles(targetImage);
+          updateHoverHandlerAttachment();
+          if (currentHoverEl === targetImage) {
+            currentHoverEl = null;
+          }
+          return Promise.resolve({ hasAiTags: false, label: badgeLabel, modality: 'image' });
+        } else {
+          applyManualBlurStyles(itemId, targetImage, {
+            id: 'manual_blur',
+            name: 'Manual Blur',
+            modality: 'image',
+            enabled: true,
+            threshold: 0.5,
+            classifiers: ['manual'],
+            weights: null,
+            styles: {
+              image: {
+                applyBlur: true,
+                blurAmount: (settings.blurAmount ?? 4) * 2,
+                blurMode: 'hover',
+                applyBorder: false,
+                borderMultiplier: (settings.borderMultiplier ?? 1) * 2,
+                borderColor: '#808080',
+                borderMode: 'off',
+                applyBadge: true,
+                badgeMode: 'always'
+              }
+            }
+          });
+          return Promise.resolve({ hasAiTags: true, label: 'Blur', modality: 'image' });
         }
       }
 
-      if (!srcUrl && lastContextMenuTarget) {
-        const targetText = lastContextMenuTarget;
+      const targetText = (lastContextMenuResolvedText && lastContextMenuResolvedText.isConnected ? lastContextMenuResolvedText : null)
+        || lastContextMenuTarget;
+      if (targetText) {
         const tag = targetText.tagName ? targetText.tagName.toLowerCase() : '';
-
         if (TU.isTextTagName(tag) || targetText.classList.contains('ai-detected-text')) {
           const text = TU.normalizeElementText(targetText);
           const itemId = text.substring(0, 500);
@@ -2805,6 +3089,11 @@ function activateBellowsCollector(opts = {}) {
   bellowsCollector.counts = opts.counts || { positives: 0, hard_negatives: 0, base_negatives: 0 };
   window.__FVF_BELLOWS_COLLECTOR_ACTIVE = true;
   resetObservers();
+  resetState();
+  try {
+    document.querySelectorAll('.ai-detected').forEach((el) => VE.clearImageStyles(el));
+    document.querySelectorAll('.ai-detected-text').forEach((el) => VE.clearTextStyles(el));
+  } catch (_) {}
 
   _startGreenEmbers();
   const frame = document.createElement('div');
@@ -3083,6 +3372,10 @@ function resetState() {
   aiDetectedImageCount = 0;
   currentHoverEl = null;
   lastContextMenuState = null;
+  lastContextMenuTarget = null;
+  lastContextMenuPoint = null;
+  lastContextMenuResolvedImage = null;
+  lastContextMenuResolvedText = null;
   if (classificationTimeout) {
     clearTimeout(classificationTimeout);
     classificationTimeout = null;
@@ -3091,6 +3384,7 @@ function resetState() {
 }
 
 async function reloadSettingsAndRescan() {
+  if (isBellowsCollectorActive()) return;
   const generation = ++rescanGeneration;
   ++settingsUpdateGeneration;
   await loadSettings();
@@ -3153,19 +3447,49 @@ if (ext && ext.storage && ext.storage.onChanged) {
 // ============================================================================
 
 function findReportTargetImageElement(srcUrl) {
-  if (lastContextMenuTarget && lastContextMenuTarget.tagName && lastContextMenuTarget.tagName.toLowerCase() === 'img') {
-    if (!srcUrl || lastContextMenuTarget.currentSrc === srcUrl || lastContextMenuTarget.src === srcUrl) {
-      return lastContextMenuTarget;
+  // 1. Check lastContextMenuResolvedImage (from positional detection on contextmenu)
+  if (lastContextMenuResolvedImage && lastContextMenuResolvedImage.isConnected) {
+    if (!srcUrl || lastContextMenuResolvedImage.currentSrc === srcUrl || lastContextMenuResolvedImage.src === srcUrl) {
+      return lastContextMenuResolvedImage;
+    }
+    if (lastContextMenuPoint) {
+      const r = lastContextMenuResolvedImage.getBoundingClientRect();
+      if (lastContextMenuPoint.x >= r.left - 4 && lastContextMenuPoint.x <= r.right + 4 &&
+          lastContextMenuPoint.y >= r.top - 4 && lastContextMenuPoint.y <= r.bottom + 4) {
+        return lastContextMenuResolvedImage;
+      }
     }
   }
+
+  // 2. Re-run positional detection from lastContextMenuPoint if available
+  if (lastContextMenuPoint) {
+    const hitImg = findTargetImageFromPoint(lastContextMenuPoint.x, lastContextMenuPoint.y, lastContextMenuTarget);
+    if (hitImg) {
+      lastContextMenuResolvedImage = hitImg;
+      return hitImg;
+    }
+  }
+
+  // 3. Exact URL match in document if srcUrl is provided
   if (srcUrl) {
     const imgs = Array.from(document.querySelectorAll('img'));
     const match = imgs.find((im) => im.currentSrc === srcUrl || im.src === srcUrl);
     if (match) return match;
   }
-  return lastContextMenuTarget && lastContextMenuTarget.tagName?.toLowerCase() === 'img'
-    ? lastContextMenuTarget
-    : null;
+
+  // 4. Current hovered element from pointer tracking
+  if (currentHoverEl && currentHoverEl.isConnected && currentHoverEl.tagName?.toLowerCase() === 'img') {
+    return currentHoverEl;
+  }
+
+  // 5. Fallback to lastContextMenuTarget
+  if (lastContextMenuTarget && lastContextMenuTarget.isConnected) {
+    if (lastContextMenuTarget.tagName?.toLowerCase() === 'img') return lastContextMenuTarget;
+    const sub = lastContextMenuTarget.querySelector?.('img');
+    if (sub) return sub;
+  }
+
+  return null;
 }
 
 function extractImageClassificationSummary(imgEl, srcUrl) {
@@ -3255,17 +3579,33 @@ async function openCommunityReportModal(srcUrl) {
       <h3 class="fvf-report-title">Report Incorrect Classification</h3>
       <button type="button" class="fvf-report-close" id="fvf-report-close-btn" aria-label="Close">✕</button>
     </div>
-    <div id="fvf-report-body" class="fvf-report-status">Preparing EXIF-stripped image preview…</div>
+    <div id="fvf-report-body" class="fvf-report-status">Loading image…</div>
   `;
   backdrop.appendChild(modal);
   document.documentElement.appendChild(backdrop);
 
+  let activeProgressListener = null;
+  let activeProgressTimer = null;
+  let autoCloseTimer = null;
+
   const closeModal = () => {
+    if (autoCloseTimer) {
+      clearTimeout(autoCloseTimer);
+      autoCloseTimer = null;
+    }
+    if (activeProgressTimer) {
+      clearInterval(activeProgressTimer);
+      activeProgressTimer = null;
+    }
+    if (activeProgressListener && ext.runtime && ext.runtime.onMessage && ext.runtime.onMessage.removeListener) {
+      try { ext.runtime.onMessage.removeListener(activeProgressListener); } catch (_) {}
+      activeProgressListener = null;
+    }
     document.removeEventListener('keydown', onKeyDown, true);
     backdrop.remove();
   };
   const onKeyDown = (e) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !backdrop.classList.contains('is-minimized')) {
       e.preventDefault();
       e.stopPropagation();
       closeModal();
@@ -3273,13 +3613,13 @@ async function openCommunityReportModal(srcUrl) {
   };
   document.addEventListener('keydown', onKeyDown, true);
   backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) closeModal();
+    if (e.target === backdrop && !backdrop.classList.contains('is-minimized')) closeModal();
   });
   modal.querySelector('#fvf-report-close-btn')?.addEventListener('click', closeModal);
 
   const bodyEl = modal.querySelector('#fvf-report-body');
   if (!resolvedSrc) {
-    bodyEl.textContent = 'Could not locate the selected image URL.';
+    bodyEl.textContent = 'Could not locate an image under the cursor to report.';
     return;
   }
 
@@ -3320,7 +3660,7 @@ async function openCommunityReportModal(srcUrl) {
     bodyEl.innerHTML = '';
     const msg = document.createElement('p');
     msg.style.margin = '0 0 12px 0';
-    msg.textContent = 'Link and verify your Hugging Face account in Fire vs Fire Options → Advanced before submitting non-anonymous community reports.';
+    msg.textContent = 'Link and verify your Hugging Face account in Fire vs Fire Options before submitting non-anonymous community reports.';
     const btnRow = document.createElement('div');
     btnRow.className = 'fvf-report-actions';
     const cancelBtn = document.createElement('button');
@@ -3343,93 +3683,211 @@ async function openCommunityReportModal(srcUrl) {
     return;
   }
 
-  const sizeKb = (Number(prep.byteLength || 0) / 1024).toFixed(1);
-  const scorePct = typeof summary.modelScore === 'number' ? `${Math.round(summary.modelScore * 100)}% AI` : 'Not scored';
-  const defaultFpChecked = summary.wasFlagged ? 'checked' : '';
-  const defaultFnChecked = !summary.wasFlagged ? 'checked' : '';
+  const hfRepoUrl = prep.hfRepoUrl || 'https://huggingface.co/datasets/LuckyCow/fvf-community-reports';
 
   bodyEl.className = '';
   bodyEl.innerHTML = '';
+
+  const mainRow = document.createElement('div');
+  mainRow.className = 'fvf-report-main-row';
 
   const previewWrap = document.createElement('div');
   previewWrap.className = 'fvf-report-preview-wrap';
   const previewImg = document.createElement('img');
   previewImg.className = 'fvf-report-preview-img';
   previewImg.src = prep.sanitizedDataUrl;
-  previewImg.alt = 'Sanitized image preview';
-  const caption = document.createElement('div');
-  caption.className = 'fvf-report-caption';
-  caption.textContent = `EXIF stripped • ${prep.width}×${prep.height} px • ${sizeKb} KB RGB JPEG`;
+  previewImg.alt = 'Image preview';
   previewWrap.appendChild(previewImg);
-  previewWrap.appendChild(caption);
 
-  const metaRow = document.createElement('div');
-  metaRow.className = 'fvf-report-meta-row';
-  const pillUser = document.createElement('span');
-  pillUser.className = 'fvf-report-pill is-user';
-  pillUser.textContent = `Submitting as @${prep.username}`;
-  const pillDomain = document.createElement('span');
-  pillDomain.className = 'fvf-report-pill';
-  pillDomain.textContent = `Domain: ${pageDomain}`;
-  const pillModel = document.createElement('span');
-  pillModel.className = 'fvf-report-pill';
-  pillModel.textContent = `${summary.modelName}: ${scorePct}`;
-  metaRow.appendChild(pillUser);
-  metaRow.appendChild(pillDomain);
-  metaRow.appendChild(pillModel);
+  const choiceCol = document.createElement('div');
+  choiceCol.className = 'fvf-report-choice-col';
 
-  const verdictGroup = document.createElement('div');
-  verdictGroup.className = 'fvf-report-verdict-group';
-  verdictGroup.innerHTML = `
-    <label class="fvf-report-verdict-option">
-      <input type="radio" name="fvf-report-verdict" value="0" ${defaultFpChecked} />
-      <div>
-        <strong>False Positive — This image is Real / Human-made</strong>
-        <span>Fire vs Fire flagged or scored this too high, but it is a real photo or human artwork.</span>
-      </div>
-    </label>
-    <label class="fvf-report-verdict-option">
-      <input type="radio" name="fvf-report-verdict" value="1" ${defaultFnChecked} />
-      <div>
-        <strong>False Negative — This image is AI-generated</strong>
-        <span>Fire vs Fire missed or under-scored this AI-generated / synthetic image.</span>
-      </div>
-    </label>
-  `;
+  const aiBtn = document.createElement('button');
+  aiBtn.type = 'button';
+  aiBtn.className = 'fvf-report-choice-btn is-ai';
+  aiBtn.textContent = 'I think this is AI generated';
 
-  const noteInput = document.createElement('input');
-  noteInput.type = 'text';
-  noteInput.maxLength = 140;
-  noteInput.className = 'fvf-report-note-input';
-  noteInput.placeholder = 'Optional note (e.g., DSLR photo from 2018, Midjourney v6)…';
+  const authBtn = document.createElement('button');
+  authBtn.type = 'button';
+  authBtn.className = 'fvf-report-choice-btn is-authentic';
+  authBtn.textContent = 'I think this is authentic';
 
-  const actionsRow = document.createElement('div');
-  actionsRow.className = 'fvf-report-actions';
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'fvf-report-btn-secondary';
-  cancelBtn.textContent = 'Cancel';
-  cancelBtn.addEventListener('click', closeModal);
+  choiceCol.appendChild(aiBtn);
+  choiceCol.appendChild(authBtn);
 
-  const submitBtn = document.createElement('button');
-  submitBtn.type = 'button';
-  submitBtn.className = 'fvf-report-btn-primary';
-  submitBtn.textContent = `Submit Report as @${prep.username}`;
+  const minThankYou = document.createElement('div');
+  minThankYou.className = 'fvf-report-min-thankyou';
+  minThankYou.hidden = true;
+  const minThankTitle = document.createElement('div');
+  minThankTitle.className = 'fvf-report-thankyou-title';
+  minThankTitle.textContent = 'Thank you!';
+  const minThankSub = document.createElement('div');
+  minThankSub.className = 'fvf-report-thankyou-sub';
+  minThankSub.textContent = 'Uploading report…';
+  minThankYou.appendChild(minThankTitle);
+  minThankYou.appendChild(minThankSub);
+  choiceCol.appendChild(minThankYou);
 
-  const statusDiv = document.createElement('div');
-  statusDiv.className = 'fvf-report-status';
+  mainRow.appendChild(previewWrap);
+  mainRow.appendChild(choiceCol);
 
-  submitBtn.addEventListener('click', async () => {
-    const selected = modal.querySelector('input[name="fvf-report-verdict"]:checked');
-    const reportedLabel = selected ? Number(selected.value) : 0;
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Uploading to Hugging Face…';
-    statusDiv.textContent = 'Sending EXIF-stripped image & metadata as a community PR…';
-    statusDiv.style.color = '#fbbf24';
+  const progressWrap = document.createElement('div');
+  progressWrap.className = 'fvf-report-progress-wrap';
+  progressWrap.hidden = true;
+
+  const progressBar = document.createElement('div');
+  progressBar.className = 'fvf-report-progress-bar';
+  const progressFill = document.createElement('div');
+  progressFill.className = 'fvf-report-progress-fill';
+  progressFill.style.width = '0%';
+  progressBar.appendChild(progressFill);
+
+  const progressText = document.createElement('div');
+  progressText.className = 'fvf-report-progress-text';
+
+  progressWrap.appendChild(progressBar);
+  progressWrap.appendChild(progressText);
+
+  const footer = document.createElement('div');
+  footer.className = 'fvf-report-footer';
+  footer.appendChild(document.createTextNode(`Submitting as @${prep.username} to `));
+  const repoLink = document.createElement('a');
+  repoLink.href = hfRepoUrl;
+  repoLink.target = '_blank';
+  repoLink.rel = 'noopener noreferrer';
+  repoLink.textContent = hfRepoUrl;
+  footer.appendChild(repoLink);
+
+  const applyReportedFlagOnPage = (reportedLabel) => {
+    if (!settings.enabled || !imgEl || !imgEl.isConnected) return;
+    const activeImageEnsembles = getEnsemblesByModality().image || [];
+    const activeFvfEnsembles = activeImageEnsembles.filter(
+      (ens) => Array.isArray(ens.classifiers) && ens.classifiers.some((cid) => /^fvf_/i.test(String(cid)))
+    );
+    if (!activeFvfEnsembles.length) return;
+
+    const targetItemId = (elementToItemId && elementToItemId.get(imgEl)) || imgEl.currentSrc || imgEl.src || resolvedSrc;
+    if (!targetItemId) return;
+
+    trackElement(targetItemId, imgEl);
+    pendingItemIds.delete(targetItemId);
+    const entry = itemResults.get(targetItemId) || { modality: 'image', ensembles: {} };
+    entry.modality = 'image';
+
+    if (reportedLabel === 1) {
+      const targetEns =
+        activeFvfEnsembles.find((ens) => Array.isArray(ens.classifiers) && ens.classifiers.includes(summary.modelId)) ||
+        activeFvfEnsembles[0];
+      const primaryCid =
+        (targetEns.classifiers || []).find((cid) => /^fvf_/i.test(String(cid))) ||
+        (targetEns.classifiers || [])[0] ||
+        'fvf_community_report';
+      const rawCategoryName = typeof targetEns.name === 'string' ? targetEns.name.trim() : '';
+      const looksLikeRawModelName = !rawCategoryName
+        || rawCategoryName === primaryCid
+        || rawCategoryName === summary.modelName
+        || /^(fvf[\s_-]+)?(heimdall|m[ií]mir|huginn|bragi)\b/i.test(rawCategoryName)
+        || /^category\s+\d+$/i.test(rawCategoryName);
+      const fallbackSuggestedLabel = /^res_net50_spider$/i.test(primaryCid)
+        ? 'Spider'
+        : ((targetEns.modality || 'image') === 'text' ? 'AI text' : 'AI generated');
+      const displayLabel = looksLikeRawModelName ? fallbackSuggestedLabel : rawCategoryName;
+      entry.ensembles[targetEns.id] = {
+        score: 1.0,
+        label: 'ai',
+        displayLabel,
+        classifiers: {
+          [primaryCid]: {
+            score: 1.0,
+            label: displayLabel,
+            model_name: summary.modelName || displayLabel
+          }
+        }
+      };
+    } else {
+      activeFvfEnsembles.forEach((ens) => {
+        if (entry.ensembles[ens.id]) {
+          entry.ensembles[ens.id] = {
+            score: 0.0,
+            label: 'human',
+            displayLabel: 'Human',
+            classifiers: {}
+          };
+        }
+      });
+    }
+
+    itemResults.set(targetItemId, entry);
+    applyStylesForItem(targetItemId);
+    updateHoverHandlerAttachment();
+  };
+
+  let currentPct = 0;
+  const setProgress = (pct) => {
+    const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
+    if (clamped > currentPct) currentPct = clamped;
+    progressFill.style.width = `${currentPct}%`;
+  };
+
+  const startSubmit = async (reportedLabel) => {
+    aiBtn.disabled = true;
+    authBtn.disabled = true;
+    aiBtn.hidden = true;
+    authBtn.hidden = true;
+    minThankYou.hidden = false;
+    minThankTitle.textContent = 'Thank you!';
+    minThankSub.textContent = 'Uploading report…';
+
+    backdrop.classList.add('is-minimized');
+    modal.classList.add('is-minimized');
+    footer.hidden = true;
+
+    currentPct = 0;
+    progressFill.style.width = '0%';
+    progressWrap.hidden = false;
+    progressText.hidden = true;
+    progressText.textContent = '';
+
+    const reportId = `report_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setProgress(8);
+
+    if (activeProgressListener && ext.runtime?.onMessage?.removeListener) {
+      try { ext.runtime.onMessage.removeListener(activeProgressListener); } catch (_) {}
+    }
+    if (ext.runtime?.onMessage?.addListener) {
+      activeProgressListener = (msg) => {
+        if (msg && msg.type === 'COMMUNITY_REPORT_PROGRESS' && msg.reportId === reportId) {
+          setProgress(msg.percent);
+        }
+      };
+      ext.runtime.onMessage.addListener(activeProgressListener);
+    }
+
+    if (activeProgressTimer) clearInterval(activeProgressTimer);
+    activeProgressTimer = setInterval(() => {
+      if (currentPct < 88) {
+        setProgress(Math.min(88, currentPct + 2));
+      }
+    }, 250);
+
+    const restoreOnError = (errMsg) => {
+      backdrop.classList.remove('is-minimized');
+      modal.classList.remove('is-minimized');
+      footer.hidden = false;
+      minThankYou.hidden = true;
+      aiBtn.hidden = false;
+      authBtn.hidden = false;
+      aiBtn.disabled = false;
+      authBtn.disabled = false;
+      progressText.hidden = false;
+      progressText.style.color = '#f87171';
+      progressText.textContent = errMsg;
+    };
 
     try {
       const res = await ext.runtime.sendMessage({
         type: 'SUBMIT_COMMUNITY_REPORT',
+        reportId,
         report: {
           sanitizedDataUrl: prep.sanitizedDataUrl,
           width: prep.width,
@@ -3439,44 +3897,48 @@ async function openCommunityReportModal(srcUrl) {
           modelName: summary.modelName,
           modelScore: summary.modelScore,
           domain: pageDomain,
-          note: noteInput.value || ''
+          note: ''
         }
       });
+      if (activeProgressTimer) {
+        clearInterval(activeProgressTimer);
+        activeProgressTimer = null;
+      }
       if (res && res.ok) {
-        submitBtn.textContent = 'Submitted ✓';
-        cancelBtn.textContent = 'Close';
-        statusDiv.style.color = '#6ee7b7';
-        statusDiv.innerHTML = '';
-        statusDiv.appendChild(document.createTextNode('Thank you! Community PR created: '));
-        const link = document.createElement('a');
-        link.href = res.prUrl;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = res.prUrl;
-        statusDiv.appendChild(link);
+        try { applyReportedFlagOnPage(reportedLabel); } catch (_) {}
+      }
+      if (!backdrop.isConnected) return;
+      if (res && res.ok) {
+        setProgress(100);
+        minThankSub.textContent = 'Upload complete';
+
+        modal.classList.remove('fvf-report-thankyou-flash');
+        void modal.offsetWidth;
+        modal.classList.add('fvf-report-thankyou-flash');
+
+        autoCloseTimer = setTimeout(() => {
+          autoCloseTimer = null;
+          if (backdrop.isConnected) closeModal();
+        }, 500);
       } else {
-        submitBtn.disabled = false;
-        submitBtn.textContent = `Submit Report as @${prep.username}`;
-        statusDiv.style.color = '#f87171';
-        statusDiv.textContent = res?.error || 'Upload failed.';
+        restoreOnError(res?.error || 'Upload failed.');
       }
     } catch (err) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = `Submit Report as @${prep.username}`;
-      statusDiv.style.color = '#f87171';
-      statusDiv.textContent = err?.message || 'Upload error.';
+      if (activeProgressTimer) {
+        clearInterval(activeProgressTimer);
+        activeProgressTimer = null;
+      }
+      if (!backdrop.isConnected) return;
+      restoreOnError(err?.message || 'Upload error.');
     }
-  });
+  };
 
-  actionsRow.appendChild(cancelBtn);
-  actionsRow.appendChild(submitBtn);
+  aiBtn.addEventListener('click', () => startSubmit(1));
+  authBtn.addEventListener('click', () => startSubmit(0));
 
-  bodyEl.appendChild(previewWrap);
-  bodyEl.appendChild(metaRow);
-  bodyEl.appendChild(verdictGroup);
-  bodyEl.appendChild(noteInput);
-  bodyEl.appendChild(actionsRow);
-  bodyEl.appendChild(statusDiv);
+  bodyEl.appendChild(mainRow);
+  bodyEl.appendChild(progressWrap);
+  bodyEl.appendChild(footer);
 }
 
 }

@@ -59,7 +59,7 @@ PROHIBITED_POLICY_LIST: List[Dict[str, str]] = [
     {
         "code": "religion_symbols",
         "title": "Religions & Religious Symbols",
-        "detail": "Filtering people of any faith, religious attire (hijabs, turbans, kippahs, habits), places of worship, or religious symbols.",
+        "detail": "Filtering people of any faith, religious attire, places of worship, or religious symbols.",
     },
     {
         "code": "country_government",

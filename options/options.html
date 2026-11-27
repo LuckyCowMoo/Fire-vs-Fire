@@ -204,6 +204,54 @@
         <div id="category-panel" class="category-detail" hidden></div>
       </section>
 
+      <details class="collapsible reporting-panel" id="reporting-section">
+        <summary class="collapsible-summary">Misclassification reporting</summary>
+        <div class="collapsible-body">
+          <label class="toggle-row">
+            <span class="toggle-row-text">Enable misclassification reporting</span>
+            <span class="switch">
+              <input type="checkbox" id="communityReportingEnabled" />
+              <span class="capsule-track" aria-hidden="true">
+                <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+              </span>
+            </span>
+          </label>
+          <p class="field-hint">
+            Help improve FvF classifiers, enables a right click &ldquo;Report incorrect FvF classification&rdquo;. This feature is opt in, any content you contribute to the dataset will help improve FvF classifiers, the dataset is publicly available for all to use in other non commercial projects, submissions are not anonymous, a Hugging Face account and token is required, this will take 3 minutes to set up. I will attempt to re-train FvF classifiers with the newly collected data approximately every week.
+          </p>
+          <p class="field-hint" style="margin-top: -6px;">
+            Community dataset:
+            <a href="https://huggingface.co/datasets/LuckyCow/fvf-community-reports" target="_blank" rel="noopener noreferrer" style="color: #ffb38a; text-decoration: underline;">huggingface.co/datasets/LuckyCow/fvf-community-reports ↗</a>
+          </p>
+          <div id="community-reporting-config" hidden style="margin-top: 10px;">
+            <div id="community-hf-token-instructions" class="hf-token-instructions">
+              <div class="hf-token-instructions-title">
+                <span>Important: A Write token is required</span>
+                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Get free token ↗</a>
+              </div>
+              <p class="hf-token-instructions-body">
+                Read-only tokens cannot submit reports. On Hugging Face, create a <strong>Write</strong> token (easiest), or choose a <strong>Fine-grained</strong> token and enable <strong>Write access to discussions and pull requests</strong>.
+              </p>
+            </div>
+            <label class="field" style="margin-bottom: 8px;">
+              <span class="field-label">
+                <span>Hugging Face Access Token</span>
+              </span>
+              <div class="hf-token-input-row">
+                <input type="password" class="input-text hf-token-input" id="communityHfToken" placeholder="hf_..." autocomplete="off" />
+                <button id="toggle-community-hf-token-btn" type="button" class="btn btn-outline hf-token-toggle-btn" aria-label="Show token" aria-pressed="false">Show</button>
+              </div>
+            </label>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
+              <button id="verify-community-hf-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
+                Check Token
+              </button>
+              <span id="community-hf-status" style="font-size: 12px; color: var(--text-muted);">Not connected</span>
+            </div>
+          </div>
+        </div>
+      </details>
+
       <details class="collapsible advanced-panel">
         <summary class="collapsible-summary">Advanced</summary>
         <div class="collapsible-body">
@@ -220,43 +268,6 @@
                 <span>↻ Check for Updates</span>
               </button>
               <div id="host-update-status" class="host-update-status" style="display: none; width: 100%; margin-top: 6px;"></div>
-            </div>
-          </div>
-
-          <!-- Community Dataset Contributions (Opt-In, Non-Anonymous via Hugging Face) -->
-          <div class="advanced-section-group" style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
-            <div style="font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;">
-              Community Dataset Contributions (Opt-In)
-            </div>
-            <label class="toggle-row">
-              <span class="toggle-row-text">Enable right-click misclassification reporting</span>
-              <span class="switch">
-                <input type="checkbox" id="communityReportingEnabled" />
-                <span class="capsule-track" aria-hidden="true">
-                  <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
-                </span>
-              </span>
-            </label>
-            <p class="field-hint">
-              Adds &ldquo;Report incorrect FvF classification…&rdquo; to your right-click menu on images. Zero telemetry: nothing is sent automatically, every report shows an EXIF-stripped preview first, and submissions are non-anonymous via your Hugging Face account.
-            </p>
-            <div id="community-reporting-config" hidden style="margin-top: 10px;">
-              <label class="field">
-                <span class="field-label" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                  <span>Hugging Face Access Token</span>
-                  <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" style="color: #ffb38a; font-size: 11px; text-decoration: underline;">Get free token ↗</a>
-                </span>
-                <input type="password" class="input-text" id="communityHfToken" placeholder="hf_..." autocomplete="off" />
-              </label>
-              <p class="field-hint" style="margin: 4px 0 6px 0;">
-                Use a <strong>Write</strong> token, or a Fine-grained token with <em>Write access to discussions and pull requests</em>.
-              </p>
-              <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
-                <button id="verify-community-hf-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
-                  Verify Account
-                </button>
-                <span id="community-hf-status" style="font-size: 12px; color: var(--text-muted);">Not connected</span>
-              </div>
             </div>
           </div>
 
@@ -332,6 +343,16 @@
             <span class="toggle-row-text">Disable update notifications</span>
             <span class="switch">
               <input type="checkbox" id="disableUpdateNotifications" />
+              <span class="capsule-track" aria-hidden="true">
+                <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+              </span>
+            </span>
+          </label>
+
+          <label class="toggle-row">
+            <span class="toggle-row-text">Enable right-click &ldquo;Blur this image&rdquo;</span>
+            <span class="switch">
+              <input type="checkbox" id="enableManualBlurContextMenu" />
               <span class="capsule-track" aria-hidden="true">
                 <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
               </span>

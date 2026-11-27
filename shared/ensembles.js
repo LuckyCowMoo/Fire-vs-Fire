@@ -15,7 +15,7 @@
     return [
       {
         id: 'auto_image_fvf_heimdall04_b',
-        name: 'FvF Heimdall 04 B',
+        name: 'AI generated',
         modality: 'image',
         enabled: true,
         threshold: settings.imageAiThreshold ?? 0.75,
@@ -37,7 +37,7 @@
       },
       {
         id: 'auto_image_fvf_heimdall04',
-        name: 'FvF Heimdall 04',
+        name: 'AI generated',
         modality: 'image',
         enabled: true,
         threshold: settings.imageAiThreshold ?? 0.75,
@@ -59,7 +59,7 @@
       },
       {
         id: 'ai_images_03',
-        name: 'FvF Heimdall 03',
+        name: 'AI generated',
         modality: 'image',
         enabled: false,
         threshold: settings.imageAiThreshold ?? 0.75,
@@ -81,7 +81,7 @@
       },
       {
         id: 'ai_images_02',
-        name: 'FvF Heimdall 02',
+        name: 'AI generated',
         modality: 'image',
         enabled: false,
         threshold: settings.imageAiThreshold ?? 0.75,
@@ -103,7 +103,7 @@
       },
       {
         id: 'ai_text',
-        name: 'Mimir 02 B',
+        name: 'AI text',
         modality: 'text',
         enabled: true,
         threshold: settings.textAiThreshold ?? 0.75,

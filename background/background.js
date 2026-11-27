@@ -685,6 +685,9 @@ ext.storage.onChanged.addListener((changes, area) => {
     if (changes.pauseOnBattery) powerSettings.pauseOnBattery = Boolean(changes.pauseOnBattery.newValue);
     if (changes.pauseBelowThreshold) powerSettings.pauseBelowThreshold = Boolean(changes.pauseBelowThreshold.newValue);
     if (changes.batteryThreshold) powerSettings.batteryThreshold = Number(changes.batteryThreshold.newValue);
+    if (changes.communityReportingEnabled || changes.communityHfUsername) {
+      syncCommunityReportContextMenu().catch(() => {});
+    }
   }
 });
 
@@ -1010,6 +1013,7 @@ async function buildAndSaveAutoCategories(downloadedModelIds = [], customThresho
 ext.runtime.onInstalled.addListener((details) => {
   console.log('Extension installed:', details && details.reason);
   updateToolbarState();
+  syncCommunityReportContextMenu().catch(() => {});
   if (ext.contextMenus && ext.contextMenus.create) {
     try {
       ext.contextMenus.create({
@@ -1062,6 +1066,14 @@ ext.runtime.onInstalled.addListener((details) => {
 
 if (ext.contextMenus && ext.contextMenus.onClicked) {
   ext.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === 'report-misclassification' && tab && tab.id != null) {
+      ext.tabs.sendMessage(tab.id, {
+        type: 'OPEN_COMMUNITY_REPORT_MODAL',
+        srcUrl: info.srcUrl || null
+      }).catch(() => {});
+      return;
+    }
+
     if (info.menuItemId === 'toggle-blur' && tab && tab.id != null) {
       const message = { type: 'TOGGLE_BLUR' };
 
@@ -1611,6 +1623,34 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })().catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
     return true;
   }
+  if (message && message.type === 'VERIFY_COMMUNITY_HF_TOKEN') {
+    verifyCommunityHfToken(message.token)
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+
+  if (message && message.type === 'PREPARE_COMMUNITY_REPORT_IMAGE') {
+    (async () => {
+      const stored = await ext.storage.local.get(['communityReportingEnabled', 'communityHfToken', 'communityHfUsername']);
+      const sanitized = await sanitizeImageForCommunityReport(message.srcUrl, 1024, 0.92);
+      sendResponse({
+        ok: true,
+        ...sanitized,
+        hasToken: Boolean(stored?.communityHfToken && stored?.communityHfUsername),
+        username: stored?.communityHfUsername || ''
+      });
+    })().catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+
+  if (message && message.type === 'SUBMIT_COMMUNITY_REPORT') {
+    submitCommunityReportToHf(message.report)
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+
   if (message && message.type === 'CANCEL_ALL') {
     sendToNativeFireAndForget({
       version: 2,
@@ -1626,3 +1666,361 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+
+// ============================================================================
+// OPT-IN NON-ANONYMOUS COMMUNITY MISCLASSIFICATION REPORTING (HUGGING FACE PRs)
+// ============================================================================
+
+const COMMUNITY_REPORTS_HF_REPO = 'LuckyCow/fvf-community-reports';
+
+async function syncCommunityReportContextMenu() {
+  if (!ext.contextMenus || !ext.contextMenus.create) return;
+  let enabled = false;
+  try {
+    const res = await ext.storage.local.get(['communityReportingEnabled']);
+    enabled = Boolean(res?.communityReportingEnabled);
+  } catch (_) {}
+
+  try {
+    await new Promise((resolve) => {
+      try {
+        const p = ext.contextMenus.remove('report-misclassification', () => {
+          void ext.runtime.lastError;
+          resolve();
+        });
+        if (p && typeof p.then === 'function') p.then(resolve).catch(resolve);
+      } catch (_) {
+        resolve();
+      }
+    });
+  } catch (_) {}
+
+  if (enabled) {
+    try {
+      ext.contextMenus.create({
+        id: 'report-misclassification',
+        title: 'Report incorrect FvF classification…',
+        contexts: ['image']
+      });
+    } catch (e) {
+      console.warn('[CommunityReport] Context menu create failed:', e);
+    }
+  }
+}
+
+syncCommunityReportContextMenu().catch(() => {});
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function dataUrlToUint8Array(dataUrl) {
+  const commaIdx = dataUrl.indexOf(',');
+  const b64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function sha256Hex(uint8Array) {
+  const digest = await crypto.subtle.digest('SHA-256', uint8Array);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function sanitizeImageForCommunityReport(srcUrl, maxDim = 1024, quality = 0.92) {
+  if (!srcUrl || typeof srcUrl !== 'string') {
+    throw new Error('Missing image source URL');
+  }
+  let blob = null;
+  if (srcUrl.startsWith('data:')) {
+    const resp = await fetch(srcUrl);
+    blob = await resp.blob();
+  } else if (srcUrl.startsWith('http://') || srcUrl.startsWith('https://')) {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 10000);
+    const resp = await fetch(srcUrl, {
+      signal: controller.signal,
+      credentials: 'omit',
+      headers: { Accept: 'image/*,*/*;q=0.8' }
+    });
+    clearTimeout(tid);
+    if (!resp || !resp.ok) {
+      throw new Error(`Could not fetch image (HTTP ${resp ? resp.status : 'error'})`);
+    }
+    blob = await resp.blob();
+  } else {
+    throw new Error('Unsupported image URL scheme');
+  }
+
+  if (!blob || blob.size === 0) {
+    throw new Error('Empty image payload');
+  }
+
+  let width = 0;
+  let height = 0;
+  let outBlob = null;
+
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob);
+    width = bitmap.width || 0;
+    height = bitmap.height || 0;
+    if (width < 32 || height < 32) {
+      bitmap.close?.();
+      throw new Error('Image is too small (< 32px) to report');
+    }
+    if (width > maxDim || height > maxDim) {
+      if (width >= height) {
+        height = Math.max(1, Math.round((height * maxDim) / width));
+        width = maxDim;
+      } else {
+        width = Math.max(1, Math.round((width * maxDim) / height));
+        height = maxDim;
+      }
+    }
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const off = new OffscreenCanvas(width, height);
+      const ctx = off.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close?.();
+      outBlob = await off.convertToBlob({ type: 'image/jpeg', quality });
+      off.width = 0;
+      off.height = 0;
+    } else if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close?.();
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      canvas.width = 0;
+      canvas.height = 0;
+      const bytes = dataUrlToUint8Array(dataUrl);
+      const hash = await sha256Hex(bytes);
+      return {
+        sanitizedDataUrl: dataUrl,
+        sha256: hash,
+        width,
+        height,
+        byteLength: bytes.byteLength
+      };
+    } else {
+      bitmap.close?.();
+      throw new Error('Canvas re-encoding unavailable in this browser context');
+    }
+  } else {
+    throw new Error('createImageBitmap unavailable for EXIF stripping');
+  }
+
+  const ab = await outBlob.arrayBuffer();
+  const bytes = new Uint8Array(ab);
+  const hash = await sha256Hex(bytes);
+  const sanitizedDataUrl = `data:image/jpeg;base64,${arrayBufferToBase64(ab)}`;
+  return {
+    sanitizedDataUrl,
+    sha256: hash,
+    width,
+    height,
+    byteLength: bytes.byteLength
+  };
+}
+
+async function verifyCommunityHfToken(token) {
+  const clean = String(token || '').trim();
+  if (!clean || !clean.startsWith('hf_')) {
+    return { ok: false, error: 'Token must start with hf_' };
+  }
+  const resp = await fetch('https://huggingface.co/api/whoami-v2', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${clean}` }
+  });
+  if (!resp.ok) {
+    return { ok: false, error: `Hugging Face rejected token (HTTP ${resp.status})` };
+  }
+  const data = await resp.json();
+  const username = data && typeof data.name === 'string' ? data.name.trim() : '';
+  if (!username) {
+    return { ok: false, error: 'Could not read Hugging Face username from token' };
+  }
+  await ext.storage.local.set({
+    communityHfToken: clean,
+    communityHfUsername: username
+  });
+  return { ok: true, username };
+}
+
+async function submitCommunityReportToHf(reportInput) {
+  const stored = await ext.storage.local.get(['communityReportingEnabled', 'communityHfToken', 'communityHfUsername']);
+  if (!stored?.communityReportingEnabled) {
+    return { ok: false, error: 'Opt-in community reporting is disabled in Options.' };
+  }
+  const token = String(stored?.communityHfToken || '').trim();
+  const username = String(stored?.communityHfUsername || '').trim();
+  if (!token || !username) {
+    return { ok: false, error: 'Verify your Hugging Face token in Options → Advanced first.' };
+  }
+
+  const sanitizedDataUrl = String(reportInput?.sanitizedDataUrl || '');
+  if (!sanitizedDataUrl.startsWith('data:image/jpeg;base64,')) {
+    return { ok: false, error: 'Missing sanitized JPEG preview bytes.' };
+  }
+
+  const imgBytes = dataUrlToUint8Array(sanitizedDataUrl);
+  const sha256 = await sha256Hex(imgBytes);
+  const shortId = sha256.slice(0, 16);
+  const safeUser = username.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const basePath = `reports/${safeUser}/${shortId}`;
+  const imgPath = `${basePath}/image.jpg`;
+  const jsonPath = `${basePath}/report.json`;
+
+  const reportedLabel = Number(reportInput?.reportedLabel) === 1 ? 1 : 0;
+  const verdict = reportedLabel === 1 ? 'false_negative' : 'false_positive';
+  const reportObj = {
+    sha256,
+    reporter_hf_user: username,
+    reported_label: reportedLabel,
+    verdict,
+    model_id: String(reportInput?.modelId || 'unknown'),
+    model_name: String(reportInput?.modelName || 'FvF Heimdall'),
+    model_score: typeof reportInput?.modelScore === 'number' ? Number(reportInput.modelScore.toFixed(4)) : null,
+    domain: String(reportInput?.domain || ''),
+    note: String(reportInput?.note || '').trim().slice(0, 140),
+    width: Number(reportInput?.width || 0),
+    height: Number(reportInput?.height || 0),
+    byte_length: imgBytes.byteLength,
+    timestamp_utc: new Date().toISOString()
+  };
+
+  const jsonStr = JSON.stringify(reportObj, null, 2);
+  const jsonBytes = new TextEncoder().encode(jsonStr);
+  const imgSampleB64 = arrayBufferToBase64(imgBytes.slice(0, 512).buffer);
+
+  const preResp = await fetch(
+    `https://huggingface.co/api/datasets/${COMMUNITY_REPORTS_HF_REPO}/preupload/main?create_pr=1`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        files: [
+          { path: imgPath, size: imgBytes.byteLength, sample: imgSampleB64 }
+        ]
+      })
+    }
+  );
+  if (!preResp.ok) {
+    const errBody = await preResp.text().catch(() => '');
+    return {
+      ok: false,
+      error: `Hugging Face preupload failed (HTTP ${preResp.status}). Ensure ${COMMUNITY_REPORTS_HF_REPO} exists and token has write access. ${errBody.slice(0, 140)}`
+    };
+  }
+  const preJson = await preResp.json();
+  const imgMode = preJson?.files?.[0]?.uploadMode || 'regular';
+
+  let imgOpLine = null;
+  if (imgMode === 'lfs') {
+    const lfsResp = await fetch(
+      `https://huggingface.co/datasets/${COMMUNITY_REPORTS_HF_REPO}.git/info/lfs/objects/batch`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.git-lfs+json',
+          'Content-Type': 'application/vnd.git-lfs+json'
+        },
+        body: JSON.stringify({
+          operation: 'upload',
+          transfers: ['basic'],
+          objects: [{ oid: sha256, size: imgBytes.byteLength }],
+          hash_algo: 'sha256'
+        })
+      }
+    );
+    if (!lfsResp.ok) {
+      return { ok: false, error: `Hugging Face LFS batch failed (HTTP ${lfsResp.status})` };
+    }
+    const lfsData = await lfsResp.json();
+    const obj = lfsData?.objects?.[0];
+    if (obj?.actions?.upload?.href) {
+      const putResp = await fetch(obj.actions.upload.href, {
+        method: 'PUT',
+        headers: obj.actions.upload.header || {},
+        body: imgBytes
+      });
+      if (!putResp.ok) {
+        return { ok: false, error: `Hugging Face LFS upload failed (HTTP ${putResp.status})` };
+      }
+      if (obj.actions.verify?.href) {
+        await fetch(obj.actions.verify.href, {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/vnd.git-lfs+json' }, obj.actions.verify.header || {}),
+          body: JSON.stringify({ oid: sha256, size: imgBytes.byteLength })
+        }).catch(() => {});
+      }
+    }
+    imgOpLine = JSON.stringify({
+      key: 'lfsFile',
+      value: { path: imgPath, algo: 'sha256', oid: sha256, size: imgBytes.byteLength }
+    });
+  } else {
+    imgOpLine = JSON.stringify({
+      key: 'file',
+      value: { path: imgPath, content: arrayBufferToBase64(imgBytes.buffer), encoding: 'base64' }
+    });
+  }
+
+  const headerLine = JSON.stringify({
+    key: 'header',
+    value: {
+      summary: `Community report (${verdict}) by @${username} [${shortId}]`,
+      description: `Verdict: ${verdict} | Model: ${reportObj.model_name} (${reportObj.model_score ?? 'n/a'}) | Domain: ${reportObj.domain || 'n/a'}${reportObj.note ? ` | Note: ${reportObj.note}` : ''}`
+    }
+  });
+  const jsonOpLine = JSON.stringify({
+    key: 'file',
+    value: { path: jsonPath, content: arrayBufferToBase64(jsonBytes.buffer), encoding: 'base64' }
+  });
+
+  const commitResp = await fetch(
+    `https://huggingface.co/api/datasets/${COMMUNITY_REPORTS_HF_REPO}/commit/main?create_pr=1`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/x-ndjson'
+      },
+      body: `${headerLine}
+${imgOpLine}
+${jsonOpLine}
+`
+    }
+  );
+  if (!commitResp.ok) {
+    const errText = await commitResp.text().catch(() => '');
+    return { ok: false, error: `Hugging Face commit PR failed (HTTP ${commitResp.status}): ${errText.slice(0, 180)}` };
+  }
+  const commitJson = await commitResp.json().catch(() => ({}));
+  return {
+    ok: true,
+    prUrl: commitJson?.pullRequestUrl || commitJson?.commitUrl || `https://huggingface.co/datasets/${COMMUNITY_REPORTS_HF_REPO}/discussions`,
+    sha256
+  };
+}

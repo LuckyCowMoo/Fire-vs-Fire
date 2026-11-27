@@ -242,3 +242,204 @@ img.ai-detected.fvf-hover-active {
   border-color: #6ee7b7;
   font-weight: 700;
 }
+
+/* ============================================================================
+   OPT-IN COMMUNITY MISCLASSIFICATION REPORT MODAL
+   ============================================================================ */
+
+.fvf-report-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  background: rgba(8, 4, 3, 0.78);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.fvf-report-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 92vh;
+  overflow-y: auto;
+  background: #140c0a;
+  color: #f8fafc;
+  border: 1px solid rgba(255, 98, 24, 0.45);
+  border-radius: 14px;
+  box-shadow: 0 22px 64px rgba(0, 0, 0, 0.75);
+  padding: 18px 20px;
+  box-sizing: border-box;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.fvf-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.fvf-report-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.fvf-report-close {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 3px 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fvf-report-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.fvf-report-preview-wrap {
+  background: #0a0605;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.fvf-report-preview-img {
+  max-width: 100%;
+  max-height: 210px;
+  border-radius: 6px;
+  object-fit: contain;
+  display: block;
+}
+
+.fvf-report-caption {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.fvf-report-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.fvf-report-pill {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: #e2e8f0;
+}
+
+.fvf-report-pill.is-user {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #6ee7b7;
+}
+
+.fvf-report-verdict-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.fvf-report-verdict-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+
+.fvf-report-verdict-option:hover {
+  border-color: rgba(255, 130, 70, 0.55);
+}
+
+.fvf-report-verdict-option strong {
+  display: block;
+  color: #ffffff;
+  font-size: 12.5px;
+}
+
+.fvf-report-verdict-option span {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.fvf-report-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0b0605;
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  margin-bottom: 12px;
+}
+
+.fvf-report-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.fvf-report-btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fvf-report-btn-primary {
+  background: linear-gradient(135deg, #ff511a, #f97316);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fvf-report-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fvf-report-status {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #cbd5e1;
+  word-break: break-word;
+}
+
+.fvf-report-status a {
+  color: #6ee7b7;
+  text-decoration: underline;
+}

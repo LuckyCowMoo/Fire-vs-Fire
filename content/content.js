@@ -2504,6 +2504,11 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
       return Promise.resolve({ hasAiTags: false, modality: 'image' });
     }
 
+    if (message.type === 'OPEN_COMMUNITY_REPORT_MODAL') {
+      openCommunityReportModal(message.srcUrl || null);
+      return Promise.resolve({ ok: true });
+    }
+
     if (message && message.type === 'BELLOWS_ACTIVATE_COLLECTOR') {
       activateBellowsCollector(message);
       return Promise.resolve({ ok: true });
@@ -3141,6 +3146,286 @@ if (ext && ext.storage && ext.storage.onChanged) {
       loadSettings();
     }
   });
+}
+
+// ============================================================================
+// OPT-IN NON-ANONYMOUS COMMUNITY MISCLASSIFICATION REPORT MODAL
+// ============================================================================
+
+function findReportTargetImageElement(srcUrl) {
+  if (lastContextMenuTarget && lastContextMenuTarget.tagName && lastContextMenuTarget.tagName.toLowerCase() === 'img') {
+    if (!srcUrl || lastContextMenuTarget.currentSrc === srcUrl || lastContextMenuTarget.src === srcUrl) {
+      return lastContextMenuTarget;
+    }
+  }
+  if (srcUrl) {
+    const imgs = Array.from(document.querySelectorAll('img'));
+    const match = imgs.find((im) => im.currentSrc === srcUrl || im.src === srcUrl);
+    if (match) return match;
+  }
+  return lastContextMenuTarget && lastContextMenuTarget.tagName?.toLowerCase() === 'img'
+    ? lastContextMenuTarget
+    : null;
+}
+
+function extractImageClassificationSummary(imgEl, srcUrl) {
+  const itemId = (imgEl && elementToItemId.get(imgEl)) || (imgEl && (imgEl.currentSrc || imgEl.src)) || srcUrl || '';
+  const entry = itemId ? itemResults.get(itemId) : null;
+  let modelId = 'fvf_heimdall04_b';
+  let modelName = 'FvF Heimdall';
+  let modelScore = null;
+  let wasFlagged = Boolean(imgEl && imgEl.classList && imgEl.classList.contains('ai-detected'));
+
+  if (entry && entry.ensembles && typeof entry.ensembles === 'object') {
+    const entries = Object.entries(entry.ensembles);
+    for (const [ensId, ensVal] of entries) {
+      if (!ensVal || typeof ensVal.score !== 'number') continue;
+      if (modelScore === null || ensVal.score > modelScore) {
+        modelScore = ensVal.score;
+        const clfs = ensVal.classifiers && typeof ensVal.classifiers === 'object'
+          ? Object.entries(ensVal.classifiers)
+          : [];
+        if (clfs.length > 0) {
+          const [bestCid, bestCInfo] = clfs[0];
+          modelId = bestCid || ensId;
+          modelName = bestCInfo?.model_name || bestCid || 'FvF Heimdall';
+          if (typeof bestCInfo?.score === 'number') modelScore = bestCInfo.score;
+        } else {
+          modelId = ensId;
+          modelName = ensVal.displayLabel || ensId;
+        }
+      }
+    }
+  }
+
+  return { modelId, modelName, modelScore, wasFlagged };
+}
+
+async function openCommunityReportModal(srcUrl) {
+  const existing = document.getElementById('fvf-community-report-backdrop');
+  if (existing) existing.remove();
+
+  const imgEl = findReportTargetImageElement(srcUrl);
+  const resolvedSrc = srcUrl || (imgEl && (imgEl.currentSrc || imgEl.src)) || '';
+  const summary = extractImageClassificationSummary(imgEl, resolvedSrc);
+  const pageDomain = getRegistrableDomain(typeof window !== 'undefined' && window.location ? window.location.hostname : '') || 'unknown';
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'fvf-community-report-backdrop';
+  backdrop.className = 'fvf-report-modal-backdrop';
+
+  const modal = document.createElement('div');
+  modal.className = 'fvf-report-modal';
+  modal.innerHTML = `
+    <div class="fvf-report-header">
+      <h3 class="fvf-report-title">Report Incorrect Classification</h3>
+      <button type="button" class="fvf-report-close" id="fvf-report-close-btn" aria-label="Close">✕</button>
+    </div>
+    <div id="fvf-report-body" class="fvf-report-status">Preparing EXIF-stripped image preview…</div>
+  `;
+  backdrop.appendChild(modal);
+  document.documentElement.appendChild(backdrop);
+
+  const closeModal = () => {
+    document.removeEventListener('keydown', onKeyDown, true);
+    backdrop.remove();
+  };
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeModal();
+    }
+  };
+  document.addEventListener('keydown', onKeyDown, true);
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeModal();
+  });
+  modal.querySelector('#fvf-report-close-btn')?.addEventListener('click', closeModal);
+
+  const bodyEl = modal.querySelector('#fvf-report-body');
+  if (!resolvedSrc) {
+    bodyEl.textContent = 'Could not locate the selected image URL.';
+    return;
+  }
+
+  let prep = null;
+  try {
+    prep = await ext.runtime.sendMessage({
+      type: 'PREPARE_COMMUNITY_REPORT_IMAGE',
+      srcUrl: resolvedSrc
+    });
+  } catch (err) {
+    bodyEl.textContent = `Error preparing image: ${err?.message || err}`;
+    return;
+  }
+
+  if (!prep || !prep.ok) {
+    bodyEl.textContent = `Failed to sanitize image: ${prep?.error || 'Unknown error'}`;
+    return;
+  }
+
+  if (!prep.hasToken || !prep.username) {
+    bodyEl.innerHTML = '';
+    const msg = document.createElement('p');
+    msg.style.margin = '0 0 12px 0';
+    msg.textContent = 'Link and verify your Hugging Face account in Fire vs Fire Options → Advanced before submitting non-anonymous community reports.';
+    const btnRow = document.createElement('div');
+    btnRow.className = 'fvf-report-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'fvf-report-btn-secondary';
+    cancelBtn.textContent = 'Close';
+    cancelBtn.addEventListener('click', closeModal);
+    const optsBtn = document.createElement('button');
+    optsBtn.type = 'button';
+    optsBtn.className = 'fvf-report-btn-primary';
+    optsBtn.textContent = 'Open Fire vs Fire Options';
+    optsBtn.addEventListener('click', () => {
+      ext.runtime.sendMessage({ type: 'OPEN_OPTIONS_FULLPAGE' }).catch(() => {});
+      closeModal();
+    });
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(optsBtn);
+    bodyEl.appendChild(msg);
+    bodyEl.appendChild(btnRow);
+    return;
+  }
+
+  const sizeKb = (Number(prep.byteLength || 0) / 1024).toFixed(1);
+  const scorePct = typeof summary.modelScore === 'number' ? `${Math.round(summary.modelScore * 100)}% AI` : 'Not scored';
+  const defaultFpChecked = summary.wasFlagged ? 'checked' : '';
+  const defaultFnChecked = !summary.wasFlagged ? 'checked' : '';
+
+  bodyEl.className = '';
+  bodyEl.innerHTML = '';
+
+  const previewWrap = document.createElement('div');
+  previewWrap.className = 'fvf-report-preview-wrap';
+  const previewImg = document.createElement('img');
+  previewImg.className = 'fvf-report-preview-img';
+  previewImg.src = prep.sanitizedDataUrl;
+  previewImg.alt = 'Sanitized image preview';
+  const caption = document.createElement('div');
+  caption.className = 'fvf-report-caption';
+  caption.textContent = `EXIF stripped • ${prep.width}×${prep.height} px • ${sizeKb} KB RGB JPEG`;
+  previewWrap.appendChild(previewImg);
+  previewWrap.appendChild(caption);
+
+  const metaRow = document.createElement('div');
+  metaRow.className = 'fvf-report-meta-row';
+  const pillUser = document.createElement('span');
+  pillUser.className = 'fvf-report-pill is-user';
+  pillUser.textContent = `Submitting as @${prep.username}`;
+  const pillDomain = document.createElement('span');
+  pillDomain.className = 'fvf-report-pill';
+  pillDomain.textContent = `Domain: ${pageDomain}`;
+  const pillModel = document.createElement('span');
+  pillModel.className = 'fvf-report-pill';
+  pillModel.textContent = `${summary.modelName}: ${scorePct}`;
+  metaRow.appendChild(pillUser);
+  metaRow.appendChild(pillDomain);
+  metaRow.appendChild(pillModel);
+
+  const verdictGroup = document.createElement('div');
+  verdictGroup.className = 'fvf-report-verdict-group';
+  verdictGroup.innerHTML = `
+    <label class="fvf-report-verdict-option">
+      <input type="radio" name="fvf-report-verdict" value="0" ${defaultFpChecked} />
+      <div>
+        <strong>False Positive — This image is Real / Human-made</strong>
+        <span>Fire vs Fire flagged or scored this too high, but it is a real photo or human artwork.</span>
+      </div>
+    </label>
+    <label class="fvf-report-verdict-option">
+      <input type="radio" name="fvf-report-verdict" value="1" ${defaultFnChecked} />
+      <div>
+        <strong>False Negative — This image is AI-generated</strong>
+        <span>Fire vs Fire missed or under-scored this AI-generated / synthetic image.</span>
+      </div>
+    </label>
+  `;
+
+  const noteInput = document.createElement('input');
+  noteInput.type = 'text';
+  noteInput.maxLength = 140;
+  noteInput.className = 'fvf-report-note-input';
+  noteInput.placeholder = 'Optional note (e.g., DSLR photo from 2018, Midjourney v6)…';
+
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'fvf-report-actions';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'fvf-report-btn-secondary';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', closeModal);
+
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'button';
+  submitBtn.className = 'fvf-report-btn-primary';
+  submitBtn.textContent = `Submit Report as @${prep.username}`;
+
+  const statusDiv = document.createElement('div');
+  statusDiv.className = 'fvf-report-status';
+
+  submitBtn.addEventListener('click', async () => {
+    const selected = modal.querySelector('input[name="fvf-report-verdict"]:checked');
+    const reportedLabel = selected ? Number(selected.value) : 0;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading to Hugging Face…';
+    statusDiv.textContent = 'Sending EXIF-stripped image & metadata as a community PR…';
+    statusDiv.style.color = '#fbbf24';
+
+    try {
+      const res = await ext.runtime.sendMessage({
+        type: 'SUBMIT_COMMUNITY_REPORT',
+        report: {
+          sanitizedDataUrl: prep.sanitizedDataUrl,
+          width: prep.width,
+          height: prep.height,
+          reportedLabel,
+          modelId: summary.modelId,
+          modelName: summary.modelName,
+          modelScore: summary.modelScore,
+          domain: pageDomain,
+          note: noteInput.value || ''
+        }
+      });
+      if (res && res.ok) {
+        submitBtn.textContent = 'Submitted ✓';
+        cancelBtn.textContent = 'Close';
+        statusDiv.style.color = '#6ee7b7';
+        statusDiv.innerHTML = '';
+        statusDiv.appendChild(document.createTextNode('Thank you! Community PR created: '));
+        const link = document.createElement('a');
+        link.href = res.prUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = res.prUrl;
+        statusDiv.appendChild(link);
+      } else {
+        submitBtn.disabled = false;
+        submitBtn.textContent = `Submit Report as @${prep.username}`;
+        statusDiv.style.color = '#f87171';
+        statusDiv.textContent = res?.error || 'Upload failed.';
+      }
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = `Submit Report as @${prep.username}`;
+      statusDiv.style.color = '#f87171';
+      statusDiv.textContent = err?.message || 'Upload error.';
+    }
+  });
+
+  actionsRow.appendChild(cancelBtn);
+  actionsRow.appendChild(submitBtn);
+
+  bodyEl.appendChild(previewWrap);
+  bodyEl.appendChild(metaRow);
+  bodyEl.appendChild(verdictGroup);
+  bodyEl.appendChild(noteInput);
+  bodyEl.appendChild(actionsRow);
+  bodyEl.appendChild(statusDiv);
 }
 
 }

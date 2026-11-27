@@ -3016,5 +3016,78 @@ function initNavButtonsAndHostUpdater() {
   refreshHostStatus();
 }
 
+function initCommunityReportingSettings() {
+  const toggleEl = document.getElementById('communityReportingEnabled');
+  const configEl = document.getElementById('community-reporting-config');
+  const tokenEl = document.getElementById('communityHfToken');
+  const verifyBtn = document.getElementById('verify-community-hf-btn');
+  const statusEl = document.getElementById('community-hf-status');
+  if (!toggleEl || !configEl || !tokenEl || !verifyBtn || !statusEl) return;
+
+  function renderStatus(username, errText = '') {
+    if (errText) {
+      statusEl.textContent = errText;
+      statusEl.style.color = '#f87171';
+    } else if (username) {
+      statusEl.textContent = `✓ Connected as @${username}`;
+      statusEl.style.color = '#34d399';
+    } else {
+      statusEl.textContent = 'Not connected';
+      statusEl.style.color = 'var(--text-muted)';
+    }
+  }
+
+  ext.storage.local
+    .get(['communityReportingEnabled', 'communityHfToken', 'communityHfUsername'])
+    .then((res) => {
+      const enabled = Boolean(res?.communityReportingEnabled);
+      toggleEl.checked = enabled;
+      configEl.hidden = !enabled;
+      if (typeof res?.communityHfToken === 'string') {
+        tokenEl.value = res.communityHfToken;
+      }
+      renderStatus(res?.communityHfUsername || '');
+    })
+    .catch(() => {});
+
+  toggleEl.addEventListener('change', async () => {
+    const enabled = Boolean(toggleEl.checked);
+    configEl.hidden = !enabled;
+    try {
+      await ext.storage.local.set({ communityReportingEnabled: enabled });
+    } catch (_) {}
+  });
+
+  verifyBtn.addEventListener('click', async () => {
+    const token = (tokenEl.value || '').trim();
+    if (!token) {
+      await ext.storage.local.remove(['communityHfToken', 'communityHfUsername']).catch(() => {});
+      renderStatus('', 'Enter a Hugging Face token (hf_...) first');
+      return;
+    }
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying…';
+    statusEl.textContent = 'Checking Hugging Face account…';
+    statusEl.style.color = '#fbbf24';
+    try {
+      const resp = await ext.runtime.sendMessage({
+        type: 'VERIFY_COMMUNITY_HF_TOKEN',
+        token
+      });
+      if (resp && resp.ok && resp.username) {
+        renderStatus(resp.username);
+      } else {
+        renderStatus('', resp?.error || 'Invalid Hugging Face token');
+      }
+    } catch (err) {
+      renderStatus('', err?.message || 'Verification failed');
+    } finally {
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = 'Verify Account';
+    }
+  });
+}
+
 initFloatingEmbers();
 initNavButtonsAndHostUpdater();
+initCommunityReportingSettings();

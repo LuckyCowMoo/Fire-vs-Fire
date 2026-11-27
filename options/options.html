@@ -223,6 +223,40 @@
             </div>
           </div>
 
+          <!-- Community Dataset Contributions (Opt-In, Non-Anonymous via Hugging Face) -->
+          <div class="advanced-section-group" style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+            <div style="font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px;">
+              Community Dataset Contributions (Opt-In)
+            </div>
+            <label class="toggle-row">
+              <span class="toggle-row-text">Enable right-click misclassification reporting</span>
+              <span class="switch">
+                <input type="checkbox" id="communityReportingEnabled" />
+                <span class="capsule-track" aria-hidden="true">
+                  <span class="capsule-thumb"><span class="capsule-dots"><i></i><i></i><i></i></span></span>
+                </span>
+              </span>
+            </label>
+            <p class="field-hint">
+              Adds &ldquo;Report incorrect FvF classification…&rdquo; to your right-click menu on images. Zero telemetry: nothing is sent automatically, every report shows an EXIF-stripped preview first, and submissions are non-anonymous via your Hugging Face account.
+            </p>
+            <div id="community-reporting-config" hidden style="margin-top: 10px;">
+              <label class="field">
+                <span class="field-label" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                  <span>Hugging Face Access Token</span>
+                  <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" style="color: #ffb38a; font-size: 11px; text-decoration: underline;">Get free token ↗</a>
+                </span>
+                <input type="password" class="input-text" id="communityHfToken" placeholder="hf_..." autocomplete="off" />
+              </label>
+              <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
+                <button id="verify-community-hf-btn" type="button" class="btn btn-outline" style="font-size: 12px; padding: 5px 12px;">
+                  Verify Account
+                </button>
+                <span id="community-hf-status" style="font-size: 12px; color: var(--text-muted);">Not connected</span>
+              </div>
+            </div>
+          </div>
+
           <div class="btn-row">
             <button id="refresh-models" type="button" class="btn btn-outline">
               Refresh classifiers

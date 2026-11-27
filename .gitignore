@@ -48,8 +48,11 @@ checkpoints/
 native/bellows_cache/
 native/bellows_jobs/
 native/classifiers/bellows_*
+native/.local_file_hashes.json
+native/.release_cache.json
 run_monitor.bat
 run_review_gui.bat
+run_weekly_retrain.bat
 test_image.py
 *.csv
 datasets/

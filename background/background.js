@@ -1857,6 +1857,32 @@ async function verifyCommunityHfToken(token) {
   if (!username) {
     return { ok: false, error: 'Could not read Hugging Face username from token' };
   }
+  const accessToken = data?.auth?.accessToken;
+  const role = String(accessToken?.role || '').toLowerCase();
+  if (role === 'read') {
+    return {
+      ok: false,
+      error: 'Read-only tokens cannot submit community PRs. Use a Write token or enable Discussions/PRs write access.'
+    };
+  }
+  if (role === 'finegrained' && accessToken?.fineGrained) {
+    const fg = accessToken.fineGrained;
+    const globalPerms = Array.isArray(fg.global) ? fg.global : [];
+    const hasGlobalWrite = globalPerms.includes('discussion.write') || globalPerms.includes('repo.write');
+    const scopedList = Array.isArray(fg.scoped) ? fg.scoped : [];
+    const hasScopedTarget = scopedList.some((entry) => {
+      const entityName = String(entry?.entity?.name || '');
+      const perms = Array.isArray(entry?.permissions) ? entry.permissions : [];
+      const canWrite = perms.includes('discussion.write') || perms.includes('repo.write');
+      return canWrite && (entityName === COMMUNITY_REPORTS_HF_REPO || entityName === 'LuckyCow');
+    });
+    if (!hasGlobalWrite && !hasScopedTarget) {
+      return {
+        ok: false,
+        error: 'Fine-grained token lacks "Write access to discussions and pull requests" permission.'
+      };
+    }
+  }
   await ext.storage.local.set({
     communityHfToken: clean,
     communityHfUsername: username
@@ -1959,6 +1985,11 @@ async function submitCommunityReportToHf(reportInput) {
     }
     const lfsData = await lfsResp.json();
     const obj = lfsData?.objects?.[0];
+    if (obj?.error) {
+      const code = obj.error.code || 'error';
+      const msg = obj.error.message || 'Check Hugging Face token permissions.';
+      return { ok: false, error: `Hugging Face LFS rejected upload (${code}): ${msg}` };
+    }
     if (obj?.actions?.upload?.href) {
       const putResp = await fetch(obj.actions.upload.href, {
         method: 'PUT',
@@ -1969,11 +2000,18 @@ async function submitCommunityReportToHf(reportInput) {
         return { ok: false, error: `Hugging Face LFS upload failed (HTTP ${putResp.status})` };
       }
       if (obj.actions.verify?.href) {
-        await fetch(obj.actions.verify.href, {
+        const verifyHeaders = Object.assign({ 'Content-Type': 'application/vnd.git-lfs+json' }, obj.actions.verify.header || {});
+        if (obj.actions.verify.href.startsWith('https://huggingface.co/') && !verifyHeaders.Authorization) {
+          verifyHeaders.Authorization = `Bearer ${token}`;
+        }
+        const verifyResp = await fetch(obj.actions.verify.href, {
           method: 'POST',
-          headers: Object.assign({ 'Content-Type': 'application/vnd.git-lfs+json' }, obj.actions.verify.header || {}),
+          headers: verifyHeaders,
           body: JSON.stringify({ oid: sha256, size: imgBytes.byteLength })
-        }).catch(() => {});
+        });
+        if (!verifyResp.ok) {
+          return { ok: false, error: `Hugging Face LFS verify failed (HTTP ${verifyResp.status})` };
+        }
       }
     }
     imgOpLine = JSON.stringify({

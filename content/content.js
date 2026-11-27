@@ -3201,6 +3201,40 @@ function extractImageClassificationSummary(imgEl, srcUrl) {
   return { modelId, modelName, modelScore, wasFlagged };
 }
 
+function tryExtractCleanCanvasJpegDataUrl(imgEl, maxDim = 1024, quality = 0.92) {
+  if (!imgEl || typeof document === 'undefined') return null;
+  try {
+    const natW = imgEl.naturalWidth || imgEl.width || 0;
+    const natH = imgEl.naturalHeight || imgEl.height || 0;
+    if (natW < 32 || natH < 32) return null;
+    let w = natW;
+    let h = natH;
+    if (w > maxDim || h > maxDim) {
+      if (w >= h) {
+        h = Math.max(1, Math.round((h * maxDim) / w));
+        w = maxDim;
+      } else {
+        w = Math.max(1, Math.round((w * maxDim) / h));
+        h = maxDim;
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(imgEl, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    canvas.width = 0;
+    canvas.height = 0;
+    return dataUrl && dataUrl.startsWith('data:image/jpeg;base64,') ? dataUrl : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function openCommunityReportModal(srcUrl) {
   const existing = document.getElementById('fvf-community-report-backdrop');
   if (existing) existing.remove();
@@ -3250,14 +3284,31 @@ async function openCommunityReportModal(srcUrl) {
   }
 
   let prep = null;
+  let candidateSrc = resolvedSrc;
+  if (candidateSrc.startsWith('blob:') && imgEl) {
+    const fallbackUrl = tryExtractCleanCanvasJpegDataUrl(imgEl, 1024, 0.92);
+    if (fallbackUrl) candidateSrc = fallbackUrl;
+  }
   try {
     prep = await ext.runtime.sendMessage({
       type: 'PREPARE_COMMUNITY_REPORT_IMAGE',
-      srcUrl: resolvedSrc
+      srcUrl: candidateSrc
     });
   } catch (err) {
     bodyEl.textContent = `Error preparing image: ${err?.message || err}`;
     return;
+  }
+
+  if ((!prep || !prep.ok) && imgEl && !candidateSrc.startsWith('data:')) {
+    const fallbackUrl = tryExtractCleanCanvasJpegDataUrl(imgEl, 1024, 0.92);
+    if (fallbackUrl) {
+      try {
+        prep = await ext.runtime.sendMessage({
+          type: 'PREPARE_COMMUNITY_REPORT_IMAGE',
+          srcUrl: fallbackUrl
+        });
+      } catch (_) {}
+    }
   }
 
   if (!prep || !prep.ok) {

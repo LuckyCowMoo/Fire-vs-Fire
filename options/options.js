@@ -1384,6 +1384,19 @@ function renderClassifierPicker(classifierNamesById) {
     });
 
     empty.appendChild(openHubBtn);
+    if (modality === 'image' || modality === 'text') {
+      const forgeBtn = document.createElement('button');
+      forgeBtn.type = 'button';
+      forgeBtn.className = 'btn btn-outline';
+      forgeBtn.style.marginTop = '8px';
+      forgeBtn.style.borderColor = 'rgba(52, 211, 153, 0.55)';
+      forgeBtn.style.color = '#6ee7b7';
+      forgeBtn.textContent = '🔥 Make Your Own Classifier (FvF Bellows)';
+      forgeBtn.addEventListener('click', () => {
+        ext.runtime.sendMessage({ type: 'OPEN_BELLOWS', modality }).catch(() => {});
+      });
+      empty.appendChild(forgeBtn);
+    }
     list.appendChild(empty);
   } else {
     compatible.forEach((model) => {
@@ -1467,6 +1480,27 @@ function renderClassifierPicker(classifierNamesById) {
       card.appendChild(selectBtn);
       list.appendChild(card);
     });
+  }
+
+  if (modality === 'image' || modality === 'text') {
+    const bellowsCard = document.createElement('div');
+    bellowsCard.className = 'classifier-pick-card';
+    bellowsCard.style.borderColor = 'rgba(52, 211, 153, 0.45)';
+    bellowsCard.style.background = 'rgba(16, 185, 129, 0.08)';
+    bellowsCard.style.cursor = 'pointer';
+    bellowsCard.innerHTML = `
+      <div class="classifier-pick-card-main">
+        <span class="classifier-pick-name" style="color: #6ee7b7;">🔥 Make Your Own Classifier (FvF Bellows)</span>
+        <div class="classifier-pick-meta">
+          <span class="classifier-rate">Train a custom ${modalityLabel.toLowerCase()} classifier locally on your own hardware</span>
+        </div>
+      </div>
+      <button type="button" class="btn-pick-classifier" style="border-color: rgba(52, 211, 153, 0.55); color: #6ee7b7;">Launch Bellows →</button>
+    `;
+    bellowsCard.addEventListener('click', () => {
+      ext.runtime.sendMessage({ type: 'OPEN_BELLOWS', modality }).catch(() => {});
+    });
+    list.appendChild(bellowsCard);
   }
 
   container.appendChild(list);
@@ -2587,8 +2621,35 @@ if (refreshBtn) {
 window.addEventListener('focus', () => {
   if (settingsLoaded) {
     fetchModels().catch(() => {});
+    refreshBellowsBanner().catch(() => {});
   }
 });
+
+const bellowsBannerEl = document.getElementById('bellows-active-banner');
+const bellowsReopenBtn = document.getElementById('bellows-reopen-btn');
+
+async function refreshBellowsBanner() {
+  if (!bellowsBannerEl || !bellowsReopenBtn) return;
+  try {
+    const res = await ext.runtime.sendMessage({ type: 'BELLOWS_GET_STATUS' });
+    const st = res && res.status;
+    if (st && (res.active || st.state === 'running' || st.state === 'exporting' || st.state === 'initializing' || st.state === 'downloading_backbone')) {
+      const pct = Math.round(Number(st.progress_pct || 0));
+      bellowsReopenBtn.textContent = `🔥 FvF Bellows Training: ${st.model_name || 'Custom'} (${pct}%) — Click to Reopen`;
+      bellowsReopenBtn.onclick = () => ext.runtime.sendMessage({ type: 'OPEN_BELLOWS', resume: true, jobId: st.job_id }).catch(() => {});
+      bellowsBannerEl.hidden = false;
+      return;
+    }
+    bellowsBannerEl.hidden = true;
+  } catch (_) {
+    bellowsBannerEl.hidden = true;
+  }
+}
+
+setInterval(() => {
+  refreshBellowsBanner().catch(() => {});
+}, 6000);
+refreshBellowsBanner().catch(() => {});
 
 // Initialize accent sliders on load
 [classificationDelayInput, imageCaptureQualityInput].forEach((el) => {

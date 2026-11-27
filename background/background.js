@@ -169,6 +169,19 @@ function ensureNativePort() {
       }
       return;
     }
+    if (resType === 'bellowsProgress') {
+      try {
+        ext.runtime.sendMessage({ type: 'BELLOWS_PROGRESS', payload: response }).catch(() => {});
+        if (ext.tabs && ext.tabs.query) {
+          ext.tabs.query({}, (tabs) => {
+            (tabs || []).forEach((t) => {
+              if (t && t.id != null) ext.tabs.sendMessage(t.id, { type: 'BELLOWS_PROGRESS', payload: response }).catch(() => {});
+            });
+          });
+        }
+      } catch (_) {}
+      return;
+    }
 
     if (resType === 'classifyResultChunk' || resType === 'classifyJobComplete') {
       const jobId = response.jobId;
@@ -595,6 +608,7 @@ if (ext.tabs) {
 
   if (ext.tabs.onRemoved) {
     ext.tabs.onRemoved.addListener((tabId) => {
+      bellowsCollectorTabs.delete(tabId);
       tabLastUrl.delete(tabId);
       sendToNativeFireAndForget({
         version: 2,
@@ -747,6 +761,23 @@ async function openOnboardingExperience(targetScreen = 1) {
   }
 }
 
+const bellowsCollectorTabs = new Map();
+async function openBellowsWorkspace(opts = {}) {
+  const qs = [];
+  if (opts.modality) qs.push(`modality=${encodeURIComponent(opts.modality)}`);
+  if (opts.resume) qs.push('resume=1');
+  if (opts.jobId) qs.push(`jobId=${encodeURIComponent(opts.jobId)}`);
+  const url = ext.runtime.getURL(`docs/bellows.html${qs.length ? '?' + qs.join('&') : ''}`);
+  if (ext.tabs && ext.tabs.query && ext.tabs.update && ext.tabs.create) {
+    const basePrefix = ext.runtime.getURL('docs/bellows.html');
+    const existing = await ext.tabs.query({ url: `${basePrefix}*` }).catch(() => []);
+    if (existing && existing.length > 0 && existing[0].id != null) {
+      await ext.tabs.update(existing[0].id, { active: true, ...(opts.modality || opts.resume ? { url } : {}) });
+      return;
+    }
+    await ext.tabs.create({ url });
+  }
+}
 async function fetchFallbackCatalog() {
   const urls = [
     'https://raw.githubusercontent.com/LuckyCowMoo/Fire-vs-Fire/FVF-clean/native/official_models.json',
@@ -1293,6 +1324,16 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
       { timeoutMs: 30000 }
     )
       .then((res) => {
+        if (res && res.ok && modelId && modelId.startsWith('bellows_')) {
+          const area = ext.storage && (ext.storage.sync || ext.storage.local);
+          if (area && area.get && area.set) {
+            area.get(['ensembleConfigsV2'], (st) => {
+              const arr = Array.isArray(st?.ensembleConfigsV2) ? st.ensembleConfigsV2 : [];
+              const filtered = arr.filter((e) => !(Array.isArray(e.classifiers) && e.classifiers.length === 1 && e.classifiers[0] === modelId));
+              if (filtered.length !== arr.length) area.set({ ensembleConfigsV2: filtered });
+            });
+          }
+        }
         if (res && res.ok && Array.isArray(res.installedModels)) {
           buildAndSaveAutoCategories(res.installedModels).catch(() => {});
         }
@@ -1405,6 +1446,171 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message && message.type === 'OPEN_BELLOWS') {
+    openBellowsWorkspace(message).catch(() => {});
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message && message.type === 'BELLOWS_PREFLIGHT') {
+    sendToNative({ type: 'bellowsPreflight', version: 2 }, { timeoutMs: 12000 })
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_CHECK_ETHICS') {
+    sendToNative({ type: 'bellowsCheckEthics', version: 2, modality: message.modality, prompt: message.prompt }, { timeoutMs: 240000 })
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_PREPARE_SESSION') {
+    sendToNative({ type: 'bellowsPrepareSession', version: 2, modality: message.modality, prompt: message.prompt, jobId: message.jobId }, { timeoutMs: 300000 })
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_ADD_SAMPLES') {
+    sendToNative({ type: 'bellowsAddSamples', version: 2, jobId: message.jobId, modality: message.modality, kind: message.kind, samples: message.samples }, { timeoutMs: 30000 })
+      .then((res) => {
+        if (res && res.counts && sender?.tab?.id != null && bellowsCollectorTabs.has(sender.tab.id)) {
+          const info = bellowsCollectorTabs.get(sender.tab.id);
+          info.counts = res.counts;
+          if (info.sourceTabId != null) ext.tabs.sendMessage(info.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: res.counts } }).catch(() => {});
+        }
+        sendResponse(res);
+      })
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_REMOVE_SAMPLE') {
+    sendToNative({ type: 'bellowsRemoveSample', version: 2, jobId: message.jobId, modality: message.modality, sampleId: message.sampleId }, { timeoutMs: 10000 })
+      .then((res) => {
+        if (res && res.counts && sender?.tab?.id != null && bellowsCollectorTabs.has(sender.tab.id)) {
+          const info = bellowsCollectorTabs.get(sender.tab.id);
+          info.counts = res.counts;
+          if (info.sourceTabId != null) ext.tabs.sendMessage(info.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: res.counts } }).catch(() => {});
+        }
+        sendResponse(res);
+      })
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_CAPTURE_IMAGE_URL') {
+    (async () => {
+      const resp = await fetch(message.url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      const b64 = `data:image/jpeg;base64,${btoa(bin)}`;
+      const nativeRes = await sendToNative({ type: 'bellowsAddSamples', version: 2, jobId: message.jobId, modality: 'image', kind: message.kind, samples: [b64] }, { timeoutMs: 20000 });
+      if (nativeRes && nativeRes.counts && sender?.tab?.id != null && bellowsCollectorTabs.has(sender.tab.id)) {
+        const info = bellowsCollectorTabs.get(sender.tab.id);
+        info.counts = nativeRes.counts;
+        if (info.sourceTabId != null) ext.tabs.sendMessage(info.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: nativeRes.counts } }).catch(() => {});
+      }
+      sendResponse(nativeRes);
+    })().catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_START_COLLECTOR') {
+    (async () => {
+      const modality = message.modality === 'text' ? 'text' : 'image';
+      const q = encodeURIComponent(String(message.prompt || '').trim());
+      const sourceEngine = String(message.engine || (modality === 'image' ? 'google_images' : 'reddit'));
+      let targetUrl = `https://www.google.com/search?tbm=isch&q=${q}`;
+      if (modality === 'text') {
+        if (sourceEngine === 'wikipedia') targetUrl = `https://en.wikipedia.org/w/index.php?search=${q}`;
+        else if (sourceEngine === 'google') targetUrl = `https://www.google.com/search?q=${q}`;
+        else targetUrl = `https://www.reddit.com/search/?q=${q}&type=comment`;
+      }
+      const tab = await ext.tabs.create({ url: targetUrl, active: true });
+      const state = { jobId: message.jobId, modality, prompt: message.prompt || '', counts: message.counts || { positives: 0, hard_negatives: 0, base_negatives: 0 }, sourceTabId: sender?.tab?.id ?? null };
+      bellowsCollectorTabs.set(tab.id, state);
+      setTimeout(() => {
+        ext.tabs.sendMessage(tab.id, { type: 'BELLOWS_ACTIVATE_COLLECTOR', ...state }).catch(() => {});
+      }, 1500);
+      sendResponse({ ok: true, tabId: tab.id });
+    })().catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_QUERY_COLLECTOR_TAB') {
+    const tid = sender?.tab?.id;
+    const state = (tid != null && bellowsCollectorTabs.has(tid)) ? bellowsCollectorTabs.get(tid) : null;
+    sendResponse(state ? { active: true, ...state } : { active: false });
+    return false;
+  }
+  if (message && message.type === 'BELLOWS_STOP_COLLECTOR') {
+    const tid = sender?.tab?.id;
+    const state = (tid != null && bellowsCollectorTabs.has(tid)) ? bellowsCollectorTabs.get(tid) : null;
+    if (tid != null) {
+      bellowsCollectorTabs.delete(tid);
+      ext.tabs.remove(tid).catch(() => {});
+    }
+    if (state && state.sourceTabId != null) {
+      ext.tabs.update(state.sourceTabId, { active: true }).catch(() => {});
+      ext.tabs.sendMessage(state.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: state.counts, closed: true } }).catch(() => {});
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message && message.type === 'BELLOWS_START_TRAINING') {
+    sendToNative({ ...message, type: 'bellowsStartTraining', version: 2 }, { timeoutMs: 20000 })
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_GET_STATUS') {
+    sendToNative({ type: 'bellowsGetStatus', version: 2, jobId: message.jobId }, { timeoutMs: 8000 })
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_STOP_TRAINING') {
+    sendToNative({ type: 'bellowsStopTraining', version: 2, jobId: message.jobId }, { timeoutMs: 8000 })
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_CLEANUP_STORAGE') {
+    sendToNative({ type: 'bellowsCleanupStorage', version: 2, deleteCache: message.deleteCache !== false, deleteDatasets: message.deleteDatasets !== false }, { timeoutMs: 15000 })
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (message && message.type === 'BELLOWS_FINALIZE_CATEGORY') {
+    (async () => {
+      const area = ext.storage && (ext.storage.sync || ext.storage.local);
+      const existing = area && area.get ? await new Promise((r) => area.get(['ensembleConfigsV2'], (d) => r(d || {}))) : {};
+      const list = Array.isArray(existing.ensembleConfigsV2) ? existing.ensembleConfigsV2 : [];
+      const cid = String(message.classifierId || '');
+      if (!cid) throw new Error('Missing classifierId');
+      const already = list.find((e) => Array.isArray(e.classifiers) && e.classifiers.length === 1 && e.classifiers[0] === cid);
+      if (!already) {
+        const mod = message.modality === 'text' ? 'text' : 'image';
+        const thr = typeof message.threshold === 'number' ? Math.round(message.threshold * 100) / 100 : 0.75;
+        const color = mod === 'text' ? '#10b981' : '#ff6218';
+        list.push({
+          id: `bellows_${cid}`,
+          name: message.modelName || cid,
+          modality: mod,
+          enabled: true,
+          threshold: thr,
+          classifiers: [cid],
+          weights: [1],
+          styles: mod === 'text' ? {
+            text: { applyBlur: true, blurMode: 'hover', blurAmount: 2, applyStrikethrough: true, strikethroughMode: 'hover', strikethroughColor: color, applyUnderline: false, underlineMode: 'off', underlineColor: color, applyHighlight: false, highlightMode: 'off', highlightColor: '#bbf7d0' }
+          } : {
+            image: { applyBlur: true, blurAmount: 3, blurMode: 'hover', applyBorder: false, borderMultiplier: 1, borderColor: color, borderMode: 'off', applyBadge: true, badgeMode: 'always' }
+          }
+        });
+        if (area && area.set) await area.set({ enabled: true, ensembleConfigsV2: list });
+      }
+      sendResponse({ ok: true, ensembles: list });
+    })().catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
   if (message && message.type === 'CANCEL_ALL') {
     sendToNativeFireAndForget({
       version: 2,

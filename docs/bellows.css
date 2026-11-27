@@ -1,0 +1,443 @@
+.bellows-nav {
+  margin-bottom: 24px;
+}
+
+.bellows-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 1.08rem;
+}
+
+.bellows-pill-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  color: #6ee7b7;
+}
+
+.bellows-step-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.step-pill {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.step-pill.active {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #a7f3d0;
+}
+
+.step-pill.done {
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.bellows-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 20px;
+}
+
+.bellows-card {
+  padding: 24px 26px;
+}
+
+.bellows-card.is-complete {
+  border-color: rgba(52, 211, 153, 0.6);
+  background: linear-gradient(135deg, rgba(12, 34, 24, 0.8), rgba(22, 9, 6, 0.78));
+}
+
+.bellows-h2 {
+  font-size: 1.15rem;
+  font-weight: 800;
+  margin-bottom: 12px;
+  color: #fff3eb;
+}
+
+.bellows-bullets,
+.bellows-policy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 18px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.bellows-bullets strong,
+.bellows-policy-list strong {
+  color: #ffffff;
+}
+
+.bellows-muted {
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.bellows-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.bellows-stat-box {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bellows-stat-box.is-ok {
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.bellows-stat-box.is-bad {
+  border-color: rgba(248, 113, 113, 0.6);
+  background: rgba(127, 29, 29, 0.25);
+}
+
+.stat-label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.stat-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.bellows-proc-list {
+  max-height: 165px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bellows-proc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.82rem;
+}
+
+.bellows-alert {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  border: 1px solid rgba(255, 160, 110, 0.35);
+  background: rgba(255, 98, 24, 0.12);
+}
+
+.bellows-alert.is-danger {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(185, 28, 28, 0.22);
+  color: #fecaca;
+}
+
+.bellows-alert.is-ok {
+  border-color: rgba(52, 211, 153, 0.55);
+  background: rgba(6, 95, 70, 0.28);
+  color: #a7f3d0;
+}
+
+.bellows-cta-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.btn-bellows-primary {
+  border: none;
+  border-radius: 12px;
+  padding: 11px 20px;
+  font-weight: 700;
+  font-size: 0.94rem;
+  color: #ffffff;
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.32);
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-bellows-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-bellows-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.bellows-modality-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.bellows-mod-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.bellows-mod-card.active {
+  border-color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.bellows-mod-card div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bellows-mod-card span {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.bellows-input,
+.bellows-textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 0.94rem;
+}
+
+.bellows-bar-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.bellows-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #10b981, #34d399, #3b82f6);
+  transition: width 0.25s ease;
+}
+
+.bellows-bar-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.bellows-dropzone {
+  position: relative;
+  border: 1.5px dashed rgba(52, 211, 153, 0.5);
+  background: rgba(16, 185, 129, 0.08);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.bellows-dropzone.is-hn {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(217, 119, 6, 0.08);
+}
+
+.bellows-dropzone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.bellows-pill-count {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.bellows-pill-count.is-pos {
+  background: rgba(37, 99, 235, 0.25);
+  color: #bfdbfe;
+}
+
+.bellows-pill-count.is-hn {
+  background: rgba(217, 119, 6, 0.25);
+  color: #fde68a;
+}
+
+.bellows-tier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bellows-tier-card {
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.bellows-tier-card.active {
+  border-color: #34d399;
+  background: rgba(16, 185, 129, 0.14);
+}
+
+.bellows-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.bellows-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+}
+
+.cm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.cm-cell {
+  padding: 14px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.cm-cell.is-good {
+  border-color: rgba(52, 211, 153, 0.45);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.cm-cell.is-warn {
+  border-color: rgba(251, 146, 60, 0.45);
+  background: rgba(234, 88, 12, 0.1);
+}
+
+.cm-cell span {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.cm-cell strong {
+  font-size: 1.45rem;
+  font-weight: 800;
+}
+
+.bellows-edu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.edu-card {
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.edu-card strong {
+  display: block;
+  color: #a7f3d0;
+  margin-bottom: 6px;
+}
+
+.bellows-cleanup-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.bellows-badge {
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.bellows-chip-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.82rem;
+  margin-right: 6px;
+  cursor: pointer;
+}

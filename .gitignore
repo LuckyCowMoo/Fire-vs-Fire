@@ -45,6 +45,9 @@ build/
 # Training pipeline & datasets - Internal Research Only (Do not commit to public repo)
 training/
 checkpoints/
+native/bellows_cache/
+native/bellows_jobs/
+native/classifiers/bellows_*
 run_monitor.bat
 run_review_gui.bat
 test_image.py

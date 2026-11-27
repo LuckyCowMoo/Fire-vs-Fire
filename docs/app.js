@@ -249,22 +249,76 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 }
 
 function sendBridgeMessage(action, payload = {}, timeoutMs = 10000) {
-  if (ext && ext.runtime && typeof ext.runtime.sendMessage === 'function') {
+  const hasFirefoxApi =
+    typeof browser !== 'undefined' &&
+    browser.runtime &&
+    browser.runtime.id &&
+    typeof browser.runtime.sendMessage === 'function';
+  if (hasFirefoxApi) {
     return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve({ ok: false, error: 'Extension bridge timeout' });
+        }
+      }, timeoutMs);
+      try {
+        Promise.resolve(browser.runtime.sendMessage(Object.assign({}, payload, { type: action })))
+          .then((resp) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(resp || { ok: true });
+          })
+          .catch((err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve({ ok: false, error: err?.message || String(err) });
+          });
+      } catch (err) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve({ ok: false, error: err?.message || String(err) });
+        }
+      }
+    });
+  }
+
+  const hasChromeApi =
+    typeof chrome !== 'undefined' &&
+    chrome.runtime &&
+    chrome.runtime.id &&
+    typeof chrome.runtime.sendMessage === 'function';
+  if (hasChromeApi) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve({ ok: false, error: 'Extension bridge timeout' });
+        }
+      }, timeoutMs);
       try {
         const msg = Object.assign({}, payload, { type: action });
-        const maybePromise = ext.runtime.sendMessage(msg, (resp) => {
-          if (ext.runtime.lastError) {
-            resolve({ ok: false, error: ext.runtime.lastError.message });
+        chrome.runtime.sendMessage(msg, (resp) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message });
             return;
           }
           resolve(resp || { ok: true });
         });
-        if (maybePromise && typeof maybePromise.then === 'function') {
-          maybePromise.then(resolve).catch((err) => resolve({ ok: false, error: err?.message || String(err) }));
-        }
       } catch (err) {
-        resolve({ ok: false, error: err?.message || String(err) });
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve({ ok: false, error: err?.message || String(err) });
+        }
       }
     });
   }
@@ -737,7 +791,9 @@ function renderModalityQuadrants() {
     `;
 
     const listEl = quadrantEl.querySelector('.quadrant-models-list');
-    const { best, past } = splitModalityShelves(visibleModels, quad.modality);
+    const bellowsModels = visibleModels.filter((m) => m.is_bellows || String(m.id || '').startsWith('bellows_'));
+    const officialModels = visibleModels.filter((m) => !(m.is_bellows || String(m.id || '').startsWith('bellows_')));
+    const { best, past } = splitModalityShelves(officialModels, quad.modality);
 
     if (best) {
       const bestShelf = document.createElement('div');
@@ -748,6 +804,20 @@ function renderModalityQuadrants() {
       `;
       bestShelf.querySelector('.modality-shelf-grid').appendChild(createModelTileElement(best));
       listEl.appendChild(bestShelf);
+    }
+
+    if (bellowsModels.length > 0) {
+      const bellowsShelf = document.createElement('div');
+      bellowsShelf.className = 'modality-shelf';
+      bellowsShelf.innerHTML = `
+        <div class="modality-shelf-label" style="color: #6ee7b7;">Your Bellows Classifiers</div>
+        <div class="modality-shelf-grid"></div>
+      `;
+      const bellowsGrid = bellowsShelf.querySelector('.modality-shelf-grid');
+      bellowsModels.forEach((model) => {
+        bellowsGrid.appendChild(createModelTileElement(model));
+      });
+      listEl.appendChild(bellowsShelf);
     }
 
     if (past.length > 0) {
@@ -997,6 +1067,9 @@ async function uninstallSingleModel(modelId) {
         });
       }
       if (officialCatalog && Array.isArray(officialCatalog.models)) {
+        officialCatalog.models = officialCatalog.models.filter(
+          (m) => !(m.id === modelId && (m.is_bellows || String(m.id || '').startsWith('bellows_')))
+        );
         officialCatalog.models.forEach((m) => {
           m.installed = installedModels.has(m.id);
           if (!m.installed) delete m.disk_size;
@@ -1224,6 +1297,12 @@ function init() {
 
   // Screen 2 buttons
   document.getElementById('back-to-step1-btn')?.addEventListener('click', () => goToScreen(1));
+  document.getElementById('open-bellows-hub-btn')?.addEventListener('click', async () => {
+    const res = await sendBridgeMessage('OPEN_BELLOWS', {}, 4000).catch(() => null);
+    if (!res || res.ok === false) {
+      window.open('./bellows.html', '_blank', 'noopener');
+    }
+  });
   document.getElementById('download-and-continue-btn')?.addEventListener('click', () => {
     goToScreen(4);
   });

@@ -28,3 +28,217 @@ img.ai-detected.fvf-hover-active {
   line-height: 1.25;
   white-space: nowrap;
 }
+
+/* ============================================================================
+   FvF BELLOWS — DATASET GATHERING MODE (GREEN EMBERS + 20% VISIBILITY BLUE MASK)
+   ============================================================================ */
+
+#fvf-bellows-collector-embers {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2147483640;
+  pointer-events: none;
+}
+
+#fvf-bellows-collector-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483641;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 3px rgba(34, 197, 94, 0.72), inset 0 0 38px rgba(16, 185, 129, 0.25);
+}
+
+#fvf-bellows-marquee {
+  position: fixed;
+  z-index: 2147483644;
+  border: 2px dashed #4ade80;
+  background: rgba(34, 197, 94, 0.14);
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.4);
+  border-radius: 8px;
+  pointer-events: none;
+  display: none;
+}
+
+[data-fvf-bellows-state="positive"] {
+  filter: blur(8px) saturate(1.8) brightness(0.65) !important;
+  opacity: 0.2 !important;
+  outline: 3px solid #2563eb !important;
+  background-color: rgba(37, 99, 235, 0.45) !important;
+}
+
+[data-fvf-bellows-state="hard_negative"] {
+  filter: blur(5px) saturate(1.4) brightness(0.7) !important;
+  opacity: 0.35 !important;
+  outline: 3px solid #f59e0b !important;
+  background-color: rgba(245, 158, 11, 0.35) !important;
+}
+
+.fvf-bellows-item-overlay {
+  position: fixed;
+  z-index: 2147483642;
+  pointer-events: none;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.fvf-bellows-item-overlay.is-positive {
+  background: rgba(24, 102, 255, 0.78);
+  border: 2px solid rgba(147, 197, 253, 0.92);
+  box-shadow: 0 4px 18px rgba(24, 102, 255, 0.45);
+}
+
+.fvf-bellows-item-overlay.is-hard-neg {
+  background: rgba(217, 119, 6, 0.72);
+  border: 2px solid rgba(252, 211, 77, 0.92);
+  box-shadow: 0 4px 18px rgba(217, 119, 6, 0.45);
+}
+
+.fvf-bellows-overlay-pill {
+  background: rgba(5, 10, 20, 0.85);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  letter-spacing: 0.02em;
+}
+
+#fvf-bellows-collector-hud {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  width: min(940px, calc(100vw - 28px));
+  background: rgba(8, 18, 14, 0.92);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1.5px solid rgba(52, 211, 153, 0.55);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 32px rgba(16, 185, 129, 0.25);
+  border-radius: 18px;
+  padding: 12px 16px;
+  color: #ecfdf5;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fvf-bellows-hud-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fvf-bellows-hud-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #6ee7b7;
+}
+
+.fvf-bellows-hud-counts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.fvf-bellows-count-pill {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+  background: rgba(37, 99, 235, 0.25);
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  color: #bfdbfe;
+}
+
+.fvf-bellows-count-pill.is-hn {
+  background: rgba(217, 119, 6, 0.25);
+  border-color: rgba(251, 191, 36, 0.55);
+  color: #fde68a;
+}
+
+.fvf-bellows-hud-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fvf-bellows-hud-bar {
+  position: relative;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.fvf-bellows-hud-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #10b981, #34d399, #3b82f6);
+  transition: width 0.2s ease;
+}
+
+.fvf-bellows-hud-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: rgba(209, 250, 229, 0.72);
+}
+
+.fvf-bellows-hud-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fvf-bellows-hud-btns {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.fvf-bellows-btn {
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  background: rgba(16, 185, 129, 0.14);
+  color: #ecfdf5;
+  padding: 6px 11px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fvf-bellows-btn:hover {
+  background: rgba(16, 185, 129, 0.28);
+}
+
+.fvf-bellows-btn.is-active {
+  background: #10b981;
+  color: #052e16;
+  border-color: #6ee7b7;
+}
+
+.fvf-bellows-btn.is-done {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  border-color: #6ee7b7;
+  font-weight: 700;
+}

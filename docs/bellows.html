@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en" data-fvf-onboarding="true">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FvF Bellows — Forge Your Own Local Classifier</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/icon-red.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css?v=2.2.0" />
+    <link rel="stylesheet" href="./bellows.css?v=2.3.0" />
+  </head>
+  <body>
+    <canvas id="ember-webgl-canvas" aria-hidden="true"></canvas>
+
+    <div class="site-shell">
+      <nav class="top-nav bellows-nav">
+        <div class="bellows-brand">
+          <img src="./assets/icon-red.svg" alt="Fire vs Fire" width="28" height="28" />
+          <span>FvF Bellows</span>
+          <span class="bellows-pill-badge">Local Classifier Forge</span>
+        </div>
+        <button type="button" class="btn-ember-outline" id="bellows-back-hub-btn" style="padding: 8px 16px; font-size: 0.85rem;">
+          ← Back to Classifiers
+        </button>
+      </nav>
+
+      <!-- ================================================================
+           STEP 1: PRE-FLIGHT WARNINGS, POWER GATE & HARDWARE INSPECTOR
+           ================================================================ -->
+      <section class="wizard-screen active" id="bellows-screen-1">
+        <div class="screen-header">
+          <h1 class="display-title">Forge Your Own Local AI</h1>
+          <p class="lead-subtitle">
+            Before starting <strong>FvF Bellows</strong>, please review what training an AI on your own hardware involves.
+          </p>
+        </div>
+
+        <div class="bellows-grid-2">
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">Important Warnings &amp; Expectations</h2>
+            <ul class="bellows-bullets" id="preflight-warnings-list">
+              <li>
+                <strong>You are training an AI on your computer -</strong> Everything runs locally, nothing is sent to the cloud.
+              </li>
+              <li>
+                <strong>System lag during training -</strong> Training an AI is an intensive process, it will push your GPU/CPU and RAM near capacity. Your computer will likely feel very sluggish and hard to use for other tasks until finished. While training is running, Bellows will prevent your computer from automatically going to sleep and pauses normal Fire vs Fire page scanning. You can close this tab and reopen live progress anytime from Fire vs Fire Options. Training will not start unless your device is plugged in.
+              </li>
+              <li>
+                <strong>Estimated time on your hardware:</strong>
+                <span id="warn-hw-estimate">Detecting your hardware… (typically between several minutes and a few hours)</span>. For heavy models or CPU-only laptops, consider letting it run for a few hours and doing something else, or use a different device.
+              </li>
+              <li>
+                <strong>Temporary disk space required:</strong>
+                <span id="warn-disk-space">Needs ~1.2 GB free temporarily for Image training or ~0.9 GB for Text</span> to store the base web dataset, ethical guard, and training caches.
+              </li>
+              <li>
+                <strong>Results are not guaranteed:</strong> Depending on your topic and examples, the classifier might make mistakes, have false alarms, or even fail completely to learn the pattern.
+              </li>
+              <li>
+                <strong>Runtime impact per classifier:</strong> Every active classifier you add increases the work each time you open or scroll a page, meaning classification will be slower and use more power.
+              </li>
+            </ul>
+          </div>
+
+          <div class="glass-card-3d bellows-card">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px;">
+              <h2 class="bellows-h2" style="margin: 0;">Live Hardware &amp; Power Status</h2>
+              <button type="button" class="btn-ember-outline" id="preflight-refresh-btn" style="padding: 6px 12px; font-size: 0.8rem;">
+                ↻ Refresh
+              </button>
+            </div>
+
+            <div class="bellows-stats-grid" id="preflight-stats-grid">
+              <div class="bellows-stat-box" id="stat-power-box">
+                <span class="stat-label">Power Source</span>
+                <strong class="stat-val" id="stat-power-val">Checking…</strong>
+              </div>
+              <div class="bellows-stat-box">
+                <span class="stat-label">Training Device</span>
+                <strong class="stat-val" id="stat-hw-val">Checking…</strong>
+              </div>
+              <div class="bellows-stat-box">
+                <span class="stat-label">Available RAM</span>
+                <strong class="stat-val" id="stat-ram-val">Checking…</strong>
+              </div>
+              <div class="bellows-stat-box">
+                <span class="stat-label">Available VRAM</span>
+                <strong class="stat-val" id="stat-vram-val">Checking…</strong>
+              </div>
+              <div class="bellows-stat-box" style="grid-column: span 2;">
+                <span class="stat-label">Free Disk Space</span>
+                <strong class="stat-val" id="stat-disk-val">Checking…</strong>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px;">
+              <div style="font-size: 0.84rem; font-weight: 700; color: #ffd6c2; margin-bottom: 8px;">
+                Heavy Apps Currently Using RAM / VRAM (consider closing before training)
+              </div>
+              <div class="bellows-proc-list" id="preflight-proc-list">
+                <div class="bellows-muted">Scanning running processes…</div>
+              </div>
+            </div>
+
+            <div id="preflight-blocker-msg" class="bellows-alert is-danger" hidden></div>
+            <div class="bellows-cta-row">
+              <button type="button" class="btn-bellows-primary" id="preflight-proceed-btn" disabled>
+                Proceed to FvF Bellows →
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           STEP 2: CHOOSE MODALITY, FILTER PROMPT & ETHICAL GATEKEEPER
+           ================================================================ -->
+      <section class="wizard-screen" id="bellows-screen-2">
+        <div class="screen-header">
+          <h1 class="display-title">What Should Your AI Filter Out?</h1>
+          <p class="lead-subtitle">
+            Choose Images or Text, describe what you want to detect (like <em>spiders</em>, <em>clowns</em>, or <em>deep oceans</em>), and run our local ethical check.
+          </p>
+        </div>
+
+        <div class="bellows-grid-2">
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">1. Select Modality</h2>
+            <div class="bellows-modality-row">
+              <button type="button" class="bellows-mod-card active" data-mod="image">
+                <img src="./assets/modality-image.png" alt="Images" width="44" height="44" />
+                <div>
+                  <strong>Images</strong>
+                  <span>Photos, thumbnails, illustrations &amp; web visuals</span>
+                </div>
+              </button>
+              <button type="button" class="bellows-mod-card" data-mod="text">
+                <img src="./assets/modality-text.png" alt="Text" width="44" height="44" />
+                <div>
+                  <strong>Text</strong>
+                  <span>Paragraphs, posts, comments &amp; articles</span>
+                </div>
+              </button>
+            </div>
+
+            <h2 class="bellows-h2" style="margin-top: 22px;">2. Describe What You Want to Filter Out</h2>
+            <input
+              type="text"
+              id="bellows-prompt-input"
+              class="bellows-input"
+              placeholder="e.g., spiders, clowns, deep ocean underwater, needles, gambling ads..."
+              maxlength="140"
+            />
+            <p class="bellows-muted" style="margin-top: 8px;">
+              Works great for phobias, animals, sensory triggers, brands, clickbait, NSFW, gore, self-harm, or hate speech. Note: if search engines don't show graphic topics cleanly, you can supply your own dataset files in the next step.
+            </p>
+
+            <div id="ethics-status-box" class="bellows-alert" hidden></div>
+
+            <div class="bellows-cta-row">
+              <button type="button" class="btn-ember-outline" id="step2-back-btn">← Back</button>
+              <button type="button" class="btn-bellows-primary" id="ethics-check-btn">
+                Inspect Topic &amp; Continue →
+              </button>
+            </div>
+          </div>
+
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">Ethical Policy (Applies to Images &amp; Text)</h2>
+            <p class="bellows-muted" style="margin-bottom: 12px;">
+              Your computer downloads a compact local guard model (<code>DeBERTa-v3-zeroshot</code>, ~370 MB) to check your prompt offline and unloads it immediately from RAM/VRAM afterwards. FvF Bellows blocks creating filters targeting:
+            </p>
+            <ul class="bellows-policy-list" id="policy-rules-list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           STEP 3: BASE DATASET + TARGET DATASET (COLLECTOR OR BYO)
+           ================================================================ -->
+      <section class="wizard-screen" id="bellows-screen-3">
+        <div class="screen-header">
+          <h1 class="display-title">Build Your Training Dataset</h1>
+          <p class="lead-subtitle">
+            An AI learns by comparing examples of what you <strong>want to block</strong> against a diverse baseline of normal web content.
+          </p>
+        </div>
+
+        <div class="glass-card-3d bellows-card" style="margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
+            <div>
+              <h2 class="bellows-h2" style="margin-bottom: 4px;">Step 3A — Normal Web Baseline Dataset (Automatic from Hugging Face)</h2>
+              <p class="bellows-muted" id="base-dataset-status-text">
+                Preparing baseline web negatives from <code>LuckyCow/fvf-bellows-base</code>…
+              </p>
+            </div>
+            <span class="bellows-badge" id="base-dataset-badge">Preparing…</span>
+          </div>
+          <div class="bellows-bar-track" style="margin-top: 12px;">
+            <div class="bellows-bar-fill" id="base-dataset-progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="bellows-grid-2">
+          <!-- Path 1: Guided 1-Click Browser Collector -->
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">Option 1 — Collect Examples in Your Browser</h2>
+            <p class="bellows-muted" style="margin-bottom: 14px;" id="collector-desc-text">
+              Opens a real search tab inside <strong>FvF Dataset Gathering Mode</strong> (green embers). Left-click items to capture them as targets (hidden behind a blue blur), right-click lookalikes as <strong>Hard Negatives</strong>, drag boxes, or click <strong>Select All Visible</strong>.
+            </p>
+
+            <div id="text-collector-source-row" class="bellows-btn-row" hidden style="margin-bottom: 12px;">
+              <label class="bellows-chip-radio"><input type="radio" name="txt-engine" value="reddit" checked /> Reddit Comments</label>
+              <label class="bellows-chip-radio"><input type="radio" name="txt-engine" value="wikipedia" /> Wikipedia</label>
+              <label class="bellows-chip-radio"><input type="radio" name="txt-engine" value="google" /> Google Search</label>
+            </div>
+
+            <button type="button" class="btn-bellows-primary" id="launch-collector-btn">
+              🟢 Launch Dataset Gathering Tab →
+            </button>
+          </div>
+
+          <!-- Path 2: Bring Your Own Dataset -->
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">Option 2 — Bring Your Own Dataset (BYO)</h2>
+            <p class="bellows-muted" style="margin-bottom: 12px;" id="byo-help-text">
+              Already have a folder of images (or .txt/.csv/.jsonl for text)? Drop them below as <strong>Target Matches</strong> or optional <strong>Hard Negatives</strong>.
+            </p>
+
+            <div class="bellows-byo-controls" id="byo-image-panel">
+              <div class="bellows-dropzone">
+                <input type="file" id="byo-pos-files" multiple accept="image/*" />
+                <strong>+ Upload Target Images</strong>
+                <span>JPG, PNG, WebP (select many files)</span>
+              </div>
+              <div class="bellows-dropzone is-hn">
+                <input type="file" id="byo-hn-files" multiple accept="image/*" />
+                <strong>+ Upload Lookalike Hard Negatives (Optional)</strong>
+                <span>Examples that look similar but shouldn't trigger</span>
+              </div>
+            </div>
+
+            <div class="bellows-byo-controls" id="byo-text-panel" hidden>
+              <div class="bellows-dropzone">
+                <input type="file" id="byo-text-files" multiple accept=".txt,.csv,.jsonl,.json" />
+                <strong>+ Upload Text Dataset (.txt / .csv / .jsonl)</strong>
+                <span>One paragraph per line (min 40 chars each)</span>
+              </div>
+              <textarea
+                id="byo-text-paste"
+                class="bellows-textarea"
+                rows="3"
+                placeholder="Or paste target paragraphs here (separate entries with blank lines)…"
+              ></textarea>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn-ember-outline" id="byo-paste-pos-btn">+ Add as Targets</button>
+                <button type="button" class="btn-ember-outline" id="byo-paste-hn-btn">+ Add as Hard Negatives</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dataset Quality Summary Bar -->
+        <div class="glass-card-3d bellows-card" style="margin-top: 20px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+            <div>
+              <strong>Dataset Quality Readiness:</strong>
+              <span id="ds-quality-label" style="color: #6ee7b7; margin-left: 6px;">0 Targets collected</span>
+            </div>
+            <div style="display: flex; gap: 10px; font-size: 0.85rem;">
+              <span class="bellows-pill-count is-pos" id="ds-pos-count">0 Targets</span>
+              <span class="bellows-pill-count is-hn" id="ds-hn-count">0 Hard Negatives</span>
+              <span class="bellows-pill-count" id="ds-base-count">0 Base Web Negatives</span>
+            </div>
+          </div>
+          <div class="bellows-bar-track" style="margin-top: 10px;">
+            <div class="bellows-bar-fill" id="ds-quality-fill" style="width: 0%;"></div>
+          </div>
+          <div class="bellows-bar-ticks">
+            <span>40 Minimum</span>
+            <span>120 Solid</span>
+            <span>300+ Strong</span>
+          </div>
+          <div class="bellows-cta-row">
+            <button type="button" class="btn-ember-outline" id="step3-back-btn">← Back</button>
+            <button type="button" class="btn-bellows-primary" id="step3-next-btn" disabled>
+              Choose Model Size &amp; Name →
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           STEP 4: MODEL SIZE TIER & CLASSIFIER METADATA
+           ================================================================ -->
+      <section class="wizard-screen" id="bellows-screen-4">
+        <div class="screen-header">
+          <h1 class="display-title">Choose Model Size &amp; Settings</h1>
+          <p class="lead-subtitle">
+            Pick a speed vs. accuracy tradeoff and name your new classifier.
+          </p>
+        </div>
+
+        <div class="bellows-grid-2">
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">1. Model Architecture Tier</h2>
+            <p class="bellows-muted" style="margin-bottom: 12px;">
+              Even fast models use standard pretrained RGB / Transformer backbones because transfer learning converges vastly faster and more accurately than training a tiny 1-channel model from scratch.
+            </p>
+            <div class="bellows-tier-list" id="tier-picker-list"></div>
+          </div>
+
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">2. Classifier Details (BaseClassifier)</h2>
+            <label class="bellows-field">
+              <span>Classifier Name</span>
+              <input type="text" id="cfg-model-name" class="bellows-input" maxlength="60" placeholder="e.g., My Spider Filter" />
+            </label>
+            <label class="bellows-field">
+              <span>UI Badge Label (shown on blurred items)</span>
+              <input type="text" id="cfg-model-label" class="bellows-input" maxlength="40" placeholder="e.g., Spider" />
+            </label>
+            <label class="bellows-field">
+              <span>
+                Suggested Category Threshold:
+                <strong id="cfg-thresh-val" style="color: #6ee7b7;">75%</strong>
+              </span>
+              <input type="range" id="cfg-model-thresh" min="0.25" max="0.95" step="0.01" value="0.75" />
+            </label>
+            <label class="bellows-checkbox">
+              <input type="checkbox" id="cfg-auto-thresh" />
+              <span>Auto-adjust suggested threshold from validation false-positive rate</span>
+            </label>
+
+            <div id="start-error-box" class="bellows-alert is-danger" hidden></div>
+            <div class="bellows-cta-row">
+              <button type="button" class="btn-ember-outline" id="step4-back-btn">← Back</button>
+              <button type="button" class="btn-bellows-primary" id="ignite-training-btn">
+                🔥 Start Local Training →
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           STEP 5: LIVE TRAINING STUDIO, METRICS CHART & EDUCATIONAL CARDS
+           ================================================================ -->
+      <section class="wizard-screen" id="bellows-screen-5">
+        <div class="screen-header">
+          <h1 class="display-title" id="train-hero-title">Forging Your Classifier…</h1>
+          <p class="lead-subtitle" id="train-hero-sub">
+            Training runs in the background Native Host service—you can safely close this tab and reopen it from Fire vs Fire Options anytime.
+          </p>
+        </div>
+
+        <div class="glass-card-3d bellows-card" style="margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+            <div>
+              <div style="font-weight: 800; font-size: 1.08rem;" id="train-phase-detail">Initializing worker…</div>
+              <div class="bellows-muted" id="train-hw-meta">Device: Detecting…</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="bellows-badge" id="train-eta-badge">ETA: Calculating…</span>
+              <button type="button" class="btn-ember-outline" id="train-stop-btn" style="border-color: rgba(248, 113, 113, 0.55); color: #fca5a5;">
+                Save Best &amp; Stop Early
+              </button>
+            </div>
+          </div>
+          <div class="bellows-bar-track" style="margin-top: 14px; height: 14px;">
+            <div class="bellows-bar-fill" id="train-progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="bellows-grid-2">
+          <!-- Loss / Accuracy Curve Canvas -->
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">Learning Curve Over Time</h2>
+            <p class="bellows-muted" style="margin-bottom: 10px;">
+              <span style="color: #34d399;">● Validation Accuracy</span> &nbsp;•&nbsp;
+              <span style="color: #ff6218;">● Train Loss</span> &nbsp;•&nbsp;
+              <span style="color: #60a5fa;">● Validation Loss</span>
+            </p>
+            <canvas id="train-chart-canvas" width="560" height="250" style="width: 100%; height: 240px; border-radius: 12px; background: rgba(0,0,0,0.35);"></canvas>
+          </div>
+
+          <!-- 2x2 Confusion Matrix -->
+          <div class="glass-card-3d bellows-card">
+            <h2 class="bellows-h2">Validation Confusion Matrix</h2>
+            <p class="bellows-muted" style="margin-bottom: 12px;">
+              Shows real mistakes on held-out examples never shown during weight updates:
+            </p>
+            <div class="cm-grid">
+              <div class="cm-cell is-good">
+                <span>True Positives (Caught Targets)</span>
+                <strong id="cm-tp">—</strong>
+              </div>
+              <div class="cm-cell is-warn">
+                <span>False Positives (False Alarms!)</span>
+                <strong id="cm-fp">—</strong>
+              </div>
+              <div class="cm-cell is-warn">
+                <span>False Negatives (Missed Targets)</span>
+                <strong id="cm-fn">—</strong>
+              </div>
+              <div class="cm-cell is-good">
+                <span>True Negatives (Safe Content Left Alone)</span>
+                <strong id="cm-tn">—</strong>
+              </div>
+            </div>
+            <div class="bellows-muted" id="cm-summary-line" style="margin-top: 12px;">
+              Waiting for Epoch 1 validation…
+            </div>
+          </div>
+        </div>
+
+        <!-- Educational Section: How AIs Are Made -->
+        <div class="glass-card-3d bellows-card" style="margin-top: 20px;">
+          <h2 class="bellows-h2">How Your AI Is Being Made</h2>
+          <div class="bellows-edu-grid">
+            <div class="edu-card">
+              <strong>1. Feature Extraction</strong>
+              <p>Instead of starting from zero, Bellows starts with a backbone that already understands edges, textures, shapes, or grammar, and adapts its final representations to your topic.</p>
+            </div>
+            <div class="edu-card">
+              <strong>2. Backpropagation &amp; AFPL</strong>
+              <p>Each batch measures how wrong the prediction was. False alarms on normal web pages receive extra penalty so your classifier stays conservative while browsing.</p>
+            </div>
+            <div class="edu-card">
+              <strong>3. Held-Out Validation</strong>
+              <p>18% of your examples are hidden during gradient updates and tested after every epoch—preventing memorization and picking the checkpoint with the best real-world accuracy.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Post-Training Completion + Storage Cleanup Prompt -->
+        <div class="glass-card-3d bellows-card is-complete" id="train-complete-panel" hidden style="margin-top: 20px;">
+          <h2 class="bellows-h2" style="color: #6ee7b7;" id="complete-heading">Classifier Forged &amp; Category Activated!</h2>
+          <p class="bellows-muted" id="complete-summary-text" style="margin-bottom: 14px;"></p>
+
+          <div class="bellows-cleanup-box" id="cleanup-prompt-box">
+            <div>
+              <strong>Free Up Temporary Storage?</strong>
+              <p class="bellows-muted" id="cleanup-size-text">
+                Bellows keeps the downloaded Hugging Face base dataset &amp; ethical guard cached on disk so future runs start faster. Keep them or delete them now?
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button type="button" class="btn-ember-outline" id="keep-cache-btn">Keep for Next Time</button>
+              <button type="button" class="btn-bellows-primary" id="delete-cache-btn" style="background: linear-gradient(135deg, #f97316, #ea580c);">
+                Delete Bellows Caches &amp; Datasets
+              </button>
+            </div>
+          </div>
+
+          <div class="bellows-cta-row">
+            <button type="button" class="btn-ember-outline" id="goto-hub-shelf-btn">
+              View on FvF Classifiers Shelf →
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="./bellows.js?v=2.3.0"></script>
+  </body>
+</html>

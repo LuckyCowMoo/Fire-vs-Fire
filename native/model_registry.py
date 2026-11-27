@@ -237,6 +237,7 @@ class ModelRegistry:
                 'name': name,
                 'label': label or 'AI generated',
                 'suggested_threshold': suggested_threshold,
+                'is_bellows': bool(getattr(classifier_class, 'IS_BELLOWS_MODEL', False) or classifier_id.startswith('bellows_')),
                 'modalities': modalities or ['image'],
                 'weights_ready': weights_ready,
                 'weight_path': weight_path,

@@ -2133,7 +2133,7 @@ function startDynamicDetection() {
 
   if (scanIntervalId) clearInterval(scanIntervalId);
   scanIntervalId = setInterval(() => {
-    if (scanPaused) return;
+    if (scanPaused || window.__FVF_BELLOWS_COLLECTOR_ACTIVE) return;
     cleanupStaleEntries();
     if (hasActiveModality('image')) {
       const newImages = scanAllImages();
@@ -2151,6 +2151,9 @@ function startDynamicDetection() {
 }
 
 function performInitialExtraction() {
+  if (window.__FVF_BELLOWS_COLLECTOR_ACTIVE) {
+    return;
+  }
   if (document.documentElement && document.documentElement.dataset.fvfOnboarding === 'true') {
     return;
   }
@@ -2194,11 +2197,24 @@ const ALLOWED_ONBOARDING_ACTIONS = new Set([
   'OPEN_OPTIONS_FULLPAGE',
   'OPEN_MODELS_HUB',
   'OPEN_GUIDE_PAGE',
+  'OPEN_BELLOWS',
   'GET_OFFICIAL_CATALOG',
   'DOWNLOAD_OFFICIAL_MODEL',
   'UNINSTALL_OFFICIAL_MODEL',
   'AUTO_SETUP_CATEGORIES',
-  'SAVE_ONBOARDING_ENSEMBLES'
+  'SAVE_ONBOARDING_ENSEMBLES',
+  'BELLOWS_PREFLIGHT',
+  'BELLOWS_CHECK_ETHICS',
+  'BELLOWS_PREPARE_SESSION',
+  'BELLOWS_ADD_SAMPLES',
+  'BELLOWS_REMOVE_SAMPLE',
+  'BELLOWS_START_COLLECTOR',
+  'BELLOWS_STOP_COLLECTOR',
+  'BELLOWS_START_TRAINING',
+  'BELLOWS_GET_STATUS',
+  'BELLOWS_STOP_TRAINING',
+  'BELLOWS_CLEANUP_STORAGE',
+  'BELLOWS_FINALIZE_CATEGORY'
 ]);
 
 window.addEventListener('message', (event) => {
@@ -2488,8 +2504,481 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
       return Promise.resolve({ hasAiTags: false, modality: 'image' });
     }
 
+    if (message && message.type === 'BELLOWS_ACTIVATE_COLLECTOR') {
+      activateBellowsCollector(message);
+      return Promise.resolve({ ok: true });
+    }
+
+    if (message && (message.type === 'BELLOWS_PROGRESS' || message.type === 'BELLOWS_COLLECTOR_COUNTS' || message.type === 'ONBOARDING_DOWNLOAD_PROGRESS')) {
+      window.postMessage({
+        source: 'fvf-extension-bridge',
+        type: message.type,
+        payload: message.payload || message
+      }, '*');
+      return false;
+    }
+
     return false;
   });
+}
+
+// ============================================================================
+// FvF BELLOWS — INTERACTIVE DATASET GATHERING MODE (GREEN EMBERS + 1-CLICK)
+// ============================================================================
+const bellowsCollector = {
+  active: false,
+  paused: false,
+  boxMode: false,
+  jobId: null,
+  modality: 'image',
+  prompt: '',
+  counts: { positives: 0, hard_negatives: 0, base_negatives: 0 },
+  elToRecord: new WeakMap(),
+  trackedEls: new Set(),
+  overlayRefs: new Map(),
+  hudEl: null,
+  emberCanvas: null,
+  emberRaf: null,
+  frameEl: null,
+  marqueeEl: null,
+  dragStart: null
+};
+
+function _extractBellowsImageDataUrl(img) {
+  return new Promise((resolve) => {
+    const src = img.currentSrc || img.src || '';
+    if (src.startsWith('data:image/')) {
+      resolve({ dataUrl: src, url: null });
+      return;
+    }
+    try {
+      const w = Math.min(320, img.naturalWidth || img.clientWidth || 256);
+      const h = Math.min(320, img.naturalHeight || img.clientHeight || 256);
+      if (w >= 48 && h >= 48) {
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const du = c.toDataURL('image/jpeg', 0.88);
+        resolve({ dataUrl: du, url: null });
+        return;
+      }
+    } catch (_) {
+      // Cross-origin tainted canvas: hand URL to background script for CORS-free fetch
+    }
+    resolve({ dataUrl: null, url: src });
+  });
+}
+
+function _repositionBellowsOverlays() {
+  for (const [el, ov] of bellowsCollector.overlayRefs.entries()) {
+    if (!document.contains(el)) {
+      ov.remove();
+      bellowsCollector.overlayRefs.delete(el);
+      continue;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 12 || rect.height < 12 || rect.bottom < 0 || rect.top > window.innerHeight) {
+      ov.style.display = 'none';
+      continue;
+    }
+    ov.style.display = 'flex';
+    ov.style.left = `${rect.left}px`;
+    ov.style.top = `${rect.top}px`;
+    ov.style.width = `${rect.width}px`;
+    ov.style.height = `${rect.height}px`;
+  }
+}
+
+function _applyBellowsItemVisual(el, kind, sampleId) {
+  bellowsCollector.elToRecord.set(el, { kind, sampleId });
+  bellowsCollector.trackedEls.add(el);
+  el.setAttribute('data-fvf-bellows-state', kind);
+
+  let ov = bellowsCollector.overlayRefs.get(el);
+  if (!ov) {
+    ov = document.createElement('div');
+    document.body.appendChild(ov);
+    bellowsCollector.overlayRefs.set(el, ov);
+  }
+  ov.className = `fvf-bellows-item-overlay ${kind === 'positive' ? 'is-positive' : 'is-hard-neg'}`;
+  ov.innerHTML = `<span class="fvf-bellows-overlay-pill">${kind === 'positive' ? '✓ Target (Saved)' : '✕ Hard Negative'}</span>`;
+  _repositionBellowsOverlays();
+}
+
+function _clearBellowsItemVisual(el) {
+  bellowsCollector.elToRecord.delete(el);
+  bellowsCollector.trackedEls.delete(el);
+  el.removeAttribute('data-fvf-bellows-state');
+  const ov = bellowsCollector.overlayRefs.get(el);
+  if (ov) {
+    ov.remove();
+    bellowsCollector.overlayRefs.delete(el);
+  }
+}
+
+function _updateBellowsHud() {
+  if (!bellowsCollector.hudEl) return;
+  const pos = bellowsCollector.counts.positives || 0;
+  const hn = bellowsCollector.counts.hard_negatives || 0;
+  const goalMax = bellowsCollector.modality === 'image' ? 300 : 150;
+  const minNeed = bellowsCollector.modality === 'image' ? 40 : 30;
+  const solidNeed = bellowsCollector.modality === 'image' ? 120 : 80;
+  const pct = Math.min(100, Math.round((pos / goalMax) * 100));
+
+  let tierLabel = `Need ${Math.max(0, minNeed - pos)} more for minimum`;
+  if (pos >= goalMax) tierLabel = 'High-Precision Dataset Ready!';
+  else if (pos >= solidNeed) tierLabel = 'Strong Dataset (keep going or Done)';
+  else if (pos >= minNeed) tierLabel = 'Usable Minimum Reached (more = better)';
+
+  const posPill = bellowsCollector.hudEl.querySelector('[data-bellows-pos]');
+  const hnPill = bellowsCollector.hudEl.querySelector('[data-bellows-hn]');
+  const fill = bellowsCollector.hudEl.querySelector('.fvf-bellows-hud-fill');
+  const statusLbl = bellowsCollector.hudEl.querySelector('[data-bellows-tier]');
+  if (posPill) posPill.textContent = `✓ ${pos} Targets`;
+  if (hnPill) hnPill.textContent = `✕ ${hn} Hard Negatives`;
+  if (fill) fill.style.width = `${pct}%`;
+  if (statusLbl) statusLbl.textContent = tierLabel;
+}
+
+async function _captureBellowsElements(elements, kind = 'positive') {
+  if (!elements.length || !bellowsCollector.active) return;
+
+  if (bellowsCollector.modality === 'image') {
+    const dataPayloads = [];
+    const urlPayloads = [];
+    for (const el of elements) {
+      const res = await _extractBellowsImageDataUrl(el);
+      if (res.dataUrl) {
+        dataPayloads.push({ el, dataUrl: res.dataUrl });
+      } else if (res.url && /^https?:\/\//i.test(res.url)) {
+        urlPayloads.push({ el, url: res.url });
+      }
+    }
+    if (dataPayloads.length > 0) {
+      const resp = await ext.runtime.sendMessage({
+        type: 'BELLOWS_ADD_SAMPLES',
+        jobId: bellowsCollector.jobId,
+        modality: 'image',
+        kind,
+        samples: dataPayloads.map((p) => p.dataUrl)
+      }).catch(() => null);
+      if (resp && resp.ok) {
+        const ids = resp.addedIds || [];
+        dataPayloads.forEach((p, idx) => _applyBellowsItemVisual(p.el, kind, ids[idx] || ''));
+        if (resp.counts) bellowsCollector.counts = resp.counts;
+      }
+    }
+    for (const p of urlPayloads) {
+      const resp = await ext.runtime.sendMessage({
+        type: 'BELLOWS_CAPTURE_IMAGE_URL',
+        jobId: bellowsCollector.jobId,
+        kind,
+        url: p.url
+      }).catch(() => null);
+      if (resp && resp.ok) {
+        const sid = (resp.addedIds && resp.addedIds[0]) || '';
+        _applyBellowsItemVisual(p.el, kind, sid);
+        if (resp.counts) bellowsCollector.counts = resp.counts;
+      }
+    }
+  } else {
+    const pairs = elements
+      .map((el) => ({ el, text: (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim() }))
+      .filter((x) => x.text.length >= 50 && x.text.length <= 2400);
+    if (pairs.length > 0) {
+      const resp = await ext.runtime.sendMessage({
+        type: 'BELLOWS_ADD_SAMPLES',
+        jobId: bellowsCollector.jobId,
+        modality: 'text',
+        kind,
+        samples: pairs.map((x) => ({ text: x.text }))
+      }).catch(() => null);
+      if (resp && resp.ok) {
+        const ids = resp.addedIds || [];
+        pairs.forEach((p, idx) => _applyBellowsItemVisual(p.el, kind, ids[idx] || ''));
+        if (resp.counts) bellowsCollector.counts = resp.counts;
+      }
+    }
+  }
+  _updateBellowsHud();
+}
+
+function _getVisibleEligibleElements() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (bellowsCollector.modality === 'image') {
+    return Array.from(document.querySelectorAll('img')).filter((img) => {
+      if (bellowsCollector.hudEl && bellowsCollector.hudEl.contains(img)) return false;
+      const r = img.getBoundingClientRect();
+      return r.width >= 64 && r.height >= 64 && r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw;
+    });
+  }
+  return Array.from(document.querySelectorAll('p, [data-testid="tweetText"], shreddit-post p, ytd-comment-renderer #content-text')).filter((el) => {
+    if (bellowsCollector.hudEl && bellowsCollector.hudEl.contains(el)) return false;
+    const r = el.getBoundingClientRect();
+    const txt = (el.innerText || el.textContent || '').trim();
+    return txt.length >= 55 && txt.length <= 2400 && r.height >= 16 && r.bottom > 0 && r.top < vh;
+  });
+}
+
+function _findCollectorTarget(target) {
+  if (!target || (bellowsCollector.hudEl && bellowsCollector.hudEl.contains(target))) return null;
+  if (bellowsCollector.modality === 'image') {
+    const img = target.tagName && target.tagName.toLowerCase() === 'img'
+      ? target
+      : target.closest?.('a, div, figure')?.querySelector?.('img');
+    if (img) {
+      const r = img.getBoundingClientRect();
+      if (r.width >= 56 && r.height >= 56) return img;
+    }
+    return null;
+  }
+  const el = target.closest?.('p, [data-testid="tweetText"], #content-text, blockquote');
+  if (el) {
+    const txt = (el.innerText || el.textContent || '').trim();
+    if (txt.length >= 50 && txt.length <= 2400) return el;
+  }
+  return null;
+}
+
+function _startGreenEmbers() {
+  const canvas = document.createElement('canvas');
+  canvas.id = 'fvf-bellows-collector-embers';
+  document.documentElement.appendChild(canvas);
+  bellowsCollector.emberCanvas = canvas;
+  const ctx = canvas.getContext('2d');
+  const resize = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  };
+  resize();
+  window.addEventListener('resize', resize, { passive: true });
+  const embers = Array.from({ length: 42 }, () => ({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    vx: (Math.random() - 0.3) * 0.65,
+    vy: -0.4 - Math.random() * 0.75,
+    r: 1.4 + Math.random() * 2.6,
+    a: 0.25 + Math.random() * 0.55
+  }));
+  const tick = () => {
+    if (!bellowsCollector.active) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const p of embers) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.y < -12) { p.y = canvas.height + 10; p.x = Math.random() * canvas.width; }
+      if (p.x > canvas.width + 12) p.x = -10;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 4);
+      g.addColorStop(0, `rgba(110, 231, 183, ${p.a})`);
+      g.addColorStop(0.5, `rgba(16, 185, 129, ${p.a * 0.45})`);
+      g.addColorStop(1, 'rgba(16, 185, 129, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    bellowsCollector.emberRaf = requestAnimationFrame(tick);
+  };
+  bellowsCollector.emberRaf = requestAnimationFrame(tick);
+}
+
+function activateBellowsCollector(opts = {}) {
+  if (bellowsCollector.active) {
+    if (opts.counts) {
+      bellowsCollector.counts = opts.counts;
+      _updateBellowsHud();
+    }
+    return;
+  }
+  bellowsCollector.active = true;
+  bellowsCollector.jobId = opts.jobId;
+  bellowsCollector.modality = opts.modality === 'text' ? 'text' : 'image';
+  bellowsCollector.prompt = opts.prompt || '';
+  bellowsCollector.counts = opts.counts || { positives: 0, hard_negatives: 0, base_negatives: 0 };
+  window.__FVF_BELLOWS_COLLECTOR_ACTIVE = true;
+  resetObservers();
+
+  _startGreenEmbers();
+  const frame = document.createElement('div');
+  frame.id = 'fvf-bellows-collector-frame';
+  document.documentElement.appendChild(frame);
+  bellowsCollector.frameEl = frame;
+
+  const marquee = document.createElement('div');
+  marquee.id = 'fvf-bellows-marquee';
+  document.documentElement.appendChild(marquee);
+  bellowsCollector.marqueeEl = marquee;
+
+  const hud = document.createElement('div');
+  hud.id = 'fvf-bellows-collector-hud';
+  const minT = bellowsCollector.modality === 'image' ? 40 : 30;
+  const solidT = bellowsCollector.modality === 'image' ? 120 : 80;
+  const strongT = bellowsCollector.modality === 'image' ? 300 : 150;
+  hud.innerHTML = `
+    <div class="fvf-bellows-hud-top">
+      <div class="fvf-bellows-hud-title">
+        <span>🟢 FvF Bellows Dataset Gathering Mode</span>
+        <span style="font-weight:500;color:#a7f3d0;">— Left-click: Target • Right-click: Hard Negative • Drag/Shift+Drag: Box Select</span>
+      </div>
+      <div class="fvf-bellows-hud-counts">
+        <span class="fvf-bellows-count-pill" data-bellows-pos>✓ 0 Targets</span>
+        <span class="fvf-bellows-count-pill is-hn" data-bellows-hn>✕ 0 Hard Negatives</span>
+      </div>
+    </div>
+    <div class="fvf-bellows-hud-progress-wrap">
+      <div class="fvf-bellows-hud-bar"><div class="fvf-bellows-hud-fill" style="width:0%"></div></div>
+      <div class="fvf-bellows-hud-ticks">
+        <span data-bellows-tier>Loading...</span>
+        <span>${minT} Min • ${solidT} Strong • ${strongT}+ High-Precision</span>
+      </div>
+    </div>
+    <div class="fvf-bellows-hud-actions">
+      <div class="fvf-bellows-hud-btns">
+        <button type="button" class="fvf-bellows-btn" id="fvf-bellows-box-btn">⬚ Box Select</button>
+        <button type="button" class="fvf-bellows-btn" id="fvf-bellows-all-btn">Select All Visible</button>
+        <button type="button" class="fvf-bellows-btn" id="fvf-bellows-pause-btn">Pause Capture (Browse)</button>
+      </div>
+      <button type="button" class="fvf-bellows-btn is-done" id="fvf-bellows-done-btn">Done — Return to FvF Bellows →</button>
+    </div>
+  `;
+  document.documentElement.appendChild(hud);
+  bellowsCollector.hudEl = hud;
+  _updateBellowsHud();
+
+  const boxBtn = hud.querySelector('#fvf-bellows-box-btn');
+  const allBtn = hud.querySelector('#fvf-bellows-all-btn');
+  const pauseBtn = hud.querySelector('#fvf-bellows-pause-btn');
+  const doneBtn = hud.querySelector('#fvf-bellows-done-btn');
+
+  boxBtn.addEventListener('click', () => {
+    bellowsCollector.boxMode = !bellowsCollector.boxMode;
+    boxBtn.classList.toggle('is-active', bellowsCollector.boxMode);
+  });
+
+  pauseBtn.addEventListener('click', () => {
+    bellowsCollector.paused = !bellowsCollector.paused;
+    pauseBtn.classList.toggle('is-active', bellowsCollector.paused);
+    pauseBtn.textContent = bellowsCollector.paused ? 'Resume Capture' : 'Pause Capture (Browse)';
+  });
+
+  allBtn.addEventListener('click', async () => {
+    const visible = _getVisibleEligibleElements().filter((el) => !bellowsCollector.elToRecord.has(el));
+    await _captureBellowsElements(visible, 'positive');
+  });
+
+  doneBtn.addEventListener('click', () => {
+    ext.runtime.sendMessage({ type: 'BELLOWS_STOP_COLLECTOR', jobId: bellowsCollector.jobId }).catch(() => {});
+  });
+
+  document.addEventListener('click', async (e) => {
+    if (!bellowsCollector.active || bellowsCollector.paused || e.button !== 0) return;
+    if (bellowsCollector.hudEl && bellowsCollector.hudEl.contains(e.target)) return;
+    const hit = _findCollectorTarget(e.target);
+    if (!hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const existing = bellowsCollector.elToRecord.get(hit);
+    if (existing) {
+      if (existing.sampleId) {
+        const resp = await ext.runtime.sendMessage({
+          type: 'BELLOWS_REMOVE_SAMPLE',
+          jobId: bellowsCollector.jobId,
+          modality: bellowsCollector.modality,
+          sampleId: existing.sampleId
+        }).catch(() => null);
+        if (resp && resp.counts) bellowsCollector.counts = resp.counts;
+      }
+      _clearBellowsItemVisual(hit);
+      _updateBellowsHud();
+      return;
+    }
+    await _captureBellowsElements([hit], 'positive');
+  }, true);
+
+  document.addEventListener('contextmenu', async (e) => {
+    if (!bellowsCollector.active || bellowsCollector.paused) return;
+    if (bellowsCollector.hudEl && bellowsCollector.hudEl.contains(e.target)) return;
+    const hit = _findCollectorTarget(e.target);
+    if (!hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const existing = bellowsCollector.elToRecord.get(hit);
+    if (existing && existing.kind === 'hard_negative') {
+      if (existing.sampleId) {
+        const resp = await ext.runtime.sendMessage({
+          type: 'BELLOWS_REMOVE_SAMPLE',
+          jobId: bellowsCollector.jobId,
+          modality: bellowsCollector.modality,
+          sampleId: existing.sampleId
+        }).catch(() => null);
+        if (resp && resp.counts) bellowsCollector.counts = resp.counts;
+      }
+      _clearBellowsItemVisual(hit);
+      _updateBellowsHud();
+      return;
+    }
+    await _captureBellowsElements([hit], 'hard_negative');
+  }, true);
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!bellowsCollector.active || bellowsCollector.paused || e.button !== 0) return;
+    if (!(bellowsCollector.boxMode || e.shiftKey)) return;
+    if (bellowsCollector.hudEl && bellowsCollector.hudEl.contains(e.target)) return;
+    bellowsCollector.dragStart = { x: e.clientX, y: e.clientY };
+    marquee.style.display = 'block';
+    marquee.style.left = `${e.clientX}px`;
+    marquee.style.top = `${e.clientY}px`;
+    marquee.style.width = '0px';
+    marquee.style.height = '0px';
+    e.preventDefault();
+  }, true);
+
+  document.addEventListener('pointermove', (e) => {
+    if (!bellowsCollector.dragStart) return;
+    const x1 = Math.min(bellowsCollector.dragStart.x, e.clientX);
+    const y1 = Math.min(bellowsCollector.dragStart.y, e.clientY);
+    const w = Math.abs(e.clientX - bellowsCollector.dragStart.x);
+    const h = Math.abs(e.clientY - bellowsCollector.dragStart.y);
+    marquee.style.left = `${x1}px`;
+    marquee.style.top = `${y1}px`;
+    marquee.style.width = `${w}px`;
+    marquee.style.height = `${h}px`;
+  }, true);
+
+  document.addEventListener('pointerup', async (e) => {
+    if (!bellowsCollector.dragStart) return;
+    const x1 = Math.min(bellowsCollector.dragStart.x, e.clientX);
+    const y1 = Math.min(bellowsCollector.dragStart.y, e.clientY);
+    const x2 = Math.max(bellowsCollector.dragStart.x, e.clientX);
+    const y2 = Math.max(bellowsCollector.dragStart.y, e.clientY);
+    bellowsCollector.dragStart = null;
+    marquee.style.display = 'none';
+    if ((x2 - x1) < 16 || (y2 - y1) < 16) return;
+
+    const hits = _getVisibleEligibleElements().filter((el) => {
+      if (bellowsCollector.elToRecord.has(el)) return false;
+      const r = el.getBoundingClientRect();
+      return !(r.right < x1 || r.left > x2 || r.bottom < y1 || r.top > y2);
+    });
+    if (hits.length > 0) {
+      await _captureBellowsElements(hits, 'positive');
+    }
+  }, true);
+
+  window.addEventListener('scroll', _repositionBellowsOverlays, { passive: true });
+  window.addEventListener('resize', _repositionBellowsOverlays, { passive: true });
+}
+
+if (ext && ext.runtime && ext.runtime.sendMessage) {
+  ext.runtime.sendMessage({ type: 'BELLOWS_QUERY_COLLECTOR_TAB' }).then((resp) => {
+    if (resp && resp.active) {
+      activateBellowsCollector(resp);
+    }
+  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

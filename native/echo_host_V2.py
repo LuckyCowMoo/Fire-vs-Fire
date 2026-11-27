@@ -37,8 +37,10 @@ import base64
 import urllib.parse
 from typing import List, Dict, Any, Optional, Tuple, Set
 from PIL import Image
+from datetime import datetime
 import os
 import re
+import shutil
 import ssl
 
 # Suppress noisy tokenizer / HF Hub output before child imports run
@@ -78,6 +80,18 @@ MAX_CACHE_SIZE = 10000
 # Import classifier registry and BaseClassifier
 from model_registry import get_registry
 from classifiers.base_classifier import BaseClassifier
+from bellows_host_handlers import (
+    bellows_preflight,
+    bellows_check_ethics,
+    bellows_prepare_session,
+    bellows_add_samples,
+    bellows_remove_sample,
+    bellows_start_training,
+    bellows_get_status,
+    bellows_stop_training,
+    bellows_cleanup_storage,
+    is_bellows_training_active,
+)
 
 # ============================================================================
 # Native Messaging Protocol (Thread-Safe)
@@ -710,6 +724,12 @@ class ModelMemoryManager:
         with self._lock:
             return [cid for cid in self._active_lru.keys() if self._is_clf_loaded(cid)]
 
+    def unload_all(self) -> None:
+        with self._lock:
+            cids = list(self._active_lru.keys())
+        for cid in cids:
+            self.unload_classifier(cid)
+
 
 # ============================================================================
 # Dynamic Priority Queue & Continuous Single-Item Inference Engine
@@ -1015,6 +1035,25 @@ class PriorityClassificationEngine:
         model_config = item_msg.get("model") or {}
         ensembles = _normalize_ensembles(model_config, modality)
         if not ensembles:
+            return
+
+        if is_bellows_training_active():
+            paused_results = build_ensemble_results(ensembles, {}, duration_ms=0, cached=False)
+            for er in paused_results:
+                er["notes"] = "paused_bellows_training"
+            self._emit_item_results(
+                subscriber={
+                    "sourceId": source_id,
+                    "windowId": window_id,
+                    "tabId": tab_id,
+                    "pageId": page_id,
+                    "itemId": item_id,
+                    "requestId": request_id,
+                    "jobId": job_id,
+                    "modality": modality,
+                },
+                ensemble_results=paused_results,
+            )
             return
         lazy_load = bool(model_config.get("lazyLoad", False))
         inactivity_timeout = float(model_config.get("inactivityTimeout", 15))
@@ -1775,6 +1814,9 @@ DEFAULT_HOST_FILES = (
     "native/echo_host_V2.py",
     "native/model_registry.py",
     "native/official_models.json",
+    "native/bellows_ethics.py",
+    "native/bellows_trainer.py",
+    "native/bellows_host_handlers.py",
     "native/classifiers/base_classifier.py",
     "native/classifiers/_heimdall_arch.py",
     "native/classifiers/mimir_extractor.py",
@@ -2402,6 +2444,8 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
         if matched_id:
             m = models_by_id[matched_id]
             m["installed"] = weights_ready
+            if detail.get("is_bellows"):
+                m["is_bellows"] = True
             if detail.get("suggested_threshold") is not None:
                 m["suggested_threshold"] = detail["suggested_threshold"]
                 m["default_threshold"] = detail["suggested_threshold"]
@@ -2441,6 +2485,7 @@ def _sync_catalog_with_local_folder(catalog: Dict[str, Any]) -> Dict[str, Any]:
                 "label": label,
                 "default_threshold": detail["suggested_threshold"] if detail.get("suggested_threshold") is not None else 0.75,
                 "suggested_threshold": detail.get("suggested_threshold"),
+                "is_bellows": bool(detail.get("is_bellows", False)),
                 "default_color": "#FF1744" if "04" in cid else ("#FF2E00" if "03" in cid else "#FF5722"),
                 "size_mb": detail.get("size_mb", 0.0),
                 "download_size": detail.get("download_size", "Local"),
@@ -2782,6 +2827,22 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
     repo_root = Path(__file__).resolve().parent.parent
     weight_exts = WEIGHT_EXTENSIONS + (".part",)
     candidate_paths: Dict[str, Path] = {}
+    is_bellows_uninstall = bool((target_model and target_model.get("is_bellows")) or (canonical_id or "").startswith("bellows_") or (model_id or "").startswith("bellows_"))
+    bellows_dirs_to_remove: List[Path] = []
+    if is_bellows_uninstall:
+        slug_id = canonical_id or model_id
+        clf_dir = repo_root / "native" / "classifiers"
+        for suffix in (".py", "_classifier.py", "_meta.json", "_int8.onnx", "_int8.onnx.data", "_best.onnx", "_best.pt"):
+            cand = clf_dir / f"{slug_id}{suffix}"
+            if cand.is_file():
+                try:
+                    rel_c = str(cand.resolve().relative_to(repo_root)).replace("\\", "/").lower()
+                except Exception:
+                    rel_c = str(cand).replace("\\", "/").lower()
+                candidate_paths[rel_c] = cand
+        tok_cand = clf_dir / f"{slug_id}_tokenizer"
+        if tok_cand.is_dir():
+            bellows_dirs_to_remove.append(tok_cand)
 
     if target_model and target_model.get("files"):
         for f_entry in target_model["files"]:
@@ -2842,6 +2903,13 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
                 log(f"[Uninstaller] Error deleting {dest_path}: {exc}")
                 break
 
+    for d_path in bellows_dirs_to_remove:
+        try:
+            shutil.rmtree(d_path, ignore_errors=True)
+            removed_files.append(str(d_path.relative_to(repo_root)).replace("\\", "/"))
+        except Exception as exc:
+            log(f"[Uninstaller] Note removing Bellows tokenizer dir {d_path}: {exc}")
+
     # Step 3: Force rediscovery and sync catalog from actual disk state
     if canonical_id:
         _remove_installed_model_version(canonical_id)
@@ -2851,6 +2919,12 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
 
     registry.discover_classifiers(force=True)
     available = [c for c in registry.list_available_details(force_rescan=True) if c.get("weights_ready")]
+
+    if is_bellows_uninstall:
+        catalog["models"] = [
+            m for m in catalog.get("models", [])
+            if m.get("id") not in (model_id, canonical_id)
+        ]
 
     updated_catalog = _sync_catalog_with_local_folder(catalog)
     installed_ids = updated_catalog.get("installed_models", [])
@@ -2872,6 +2946,25 @@ def uninstall_official_model(model_id: str, request_id: Optional[str] = None) ->
     return resp
 
 
+def _is_local_file_newer_than_release(
+    local_path: Optional[Path],
+    release: Optional[Dict[str, Any]],
+    zip_asset: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Return True if local_path exists and was modified more than 60s after the GitHub release asset."""
+    if local_path is None or not local_path.is_file():
+        return False
+    asset = zip_asset if zip_asset is not None else (_find_native_host_zip_asset(release) if release else None)
+    iso_str = (asset or {}).get("updated_at") or (release or {}).get("published_at") or ""
+    if not iso_str:
+        return False
+    try:
+        rel_ts = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00")).timestamp()
+        return local_path.stat().st_mtime > (rel_ts + 60.0)
+    except Exception:
+        return False
+
+
 def _compare_host_with_release(
     release: Optional[Dict[str, Any]],
     zip_manifest: Optional[Dict[str, Any]],
@@ -2883,12 +2976,15 @@ def _compare_host_with_release(
     if not isinstance(manifest_files, dict) or not manifest_files:
         return False, []
 
+    zip_asset = _find_native_host_zip_asset(release)
     changed: List[str] = []
     for rel_path, remote_hash in manifest_files.items():
         if _is_machine_local_host_path(rel_path):
             continue
         local_path = _resolve_safe_repo_path(rel_path)
         if local_path is None:
+            continue
+        if _is_local_file_newer_than_release(local_path, release, zip_asset):
             continue
         local_hash = _get_local_file_sha256(local_path, normalize_eol=_is_text_rel_path(rel_path))
         if local_hash != remote_hash:
@@ -3152,6 +3248,9 @@ def apply_host_updates(request_id: Optional[str] = None) -> Dict[str, Any]:
                     continue
 
                 entry_bytes = zf.read(info.filename)
+                if _is_local_file_newer_than_release(target_path, release, zip_asset):
+                    log(f"[Updater] Preserving newer local file {rel_path}")
+                    continue
                 remote_hash = manifest_files.get(rel_path)
                 local_hash = _get_local_file_sha256(target_path, normalize_eol=_is_text_rel_path(rel_path))
                 if remote_hash and local_hash == remote_hash:
@@ -3406,6 +3505,65 @@ def main() -> None:
                     target=lambda: send_message(uninstall_official_model(model_id, req_id)),
                     daemon=True,
                 ).start()
+                continue
+
+            # ------------------------------------------------------------------
+            # FvF Bellows (Local Bespoke Classifier Forge)
+            # ------------------------------------------------------------------
+            elif mtype == 'bellowsPreflight':
+                req_id = msg.get('requestId')
+                send_message(bellows_preflight(BaseClassifier.get_system_memory_info(), req_id))
+                continue
+
+            elif mtype == 'bellowsCheckEthics':
+                req_id = msg.get('requestId')
+                threading.Thread(
+                    target=lambda m=msg, r=req_id: send_message(bellows_check_ethics(m, send_message, r)),
+                    daemon=True,
+                ).start()
+                continue
+
+            elif mtype == 'bellowsPrepareSession':
+                req_id = msg.get('requestId')
+                threading.Thread(
+                    target=lambda m=msg, r=req_id: send_message(bellows_prepare_session(m, send_message, r)),
+                    daemon=True,
+                ).start()
+                continue
+
+            elif mtype == 'bellowsAddSamples':
+                req_id = msg.get('requestId')
+                send_message(bellows_add_samples(msg, req_id))
+                continue
+
+            elif mtype == 'bellowsRemoveSample':
+                req_id = msg.get('requestId')
+                send_message(bellows_remove_sample(msg, req_id))
+                continue
+
+            elif mtype == 'bellowsStartTraining':
+                req_id = msg.get('requestId')
+                def _pause_and_unload():
+                    priority_engine.cancel_all()
+                    memory_manager.unload_all()
+                send_message(bellows_start_training(msg, _pause_and_unload, req_id))
+                continue
+
+            elif mtype == 'bellowsGetStatus':
+                req_id = msg.get('requestId')
+                def _on_finished():
+                    get_registry().discover_classifiers(force=True)
+                send_message(bellows_get_status(msg, _on_finished, req_id))
+                continue
+
+            elif mtype == 'bellowsStopTraining':
+                req_id = msg.get('requestId')
+                send_message(bellows_stop_training(msg, req_id))
+                continue
+
+            elif mtype == 'bellowsCleanupStorage':
+                req_id = msg.get('requestId')
+                send_message(bellows_cleanup_storage(msg, req_id))
                 continue
 
             # ------------------------------------------------------------------

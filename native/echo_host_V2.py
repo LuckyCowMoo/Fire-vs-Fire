@@ -597,9 +597,9 @@ class ModelMemoryManager:
     - Periodically unloads all models after `inactivity_timeout_minutes` of total queue silence.
     """
 
-    # Reserve at least 1100 MB of system RAM (and 450 MB VRAM when on CUDA) as safety headroom
-    MIN_FREE_RAM_MB = 1100.0
-    MIN_FREE_VRAM_MB = 450.0
+    # Reserve at least 400 MB of system RAM (and 250 MB VRAM when on CUDA) as safety headroom
+    MIN_FREE_RAM_MB = 400.0
+    MIN_FREE_VRAM_MB = 250.0
 
     def __init__(self, inactivity_timeout_minutes: float = 15.0):
         self.registry = get_registry()
@@ -796,8 +796,8 @@ class PriorityClassificationEngine:
                 is_active_tab = True
             elif active_tab is not None and tab_id == active_tab:
                 is_active_tab = True
-            elif win_id is not None and active_tabs_by_win.get(win_id) == tab_id:
-                # Active tab in an open browser window (multi-window support)
+            elif win_id is not None and (win_id not in active_tabs_by_win or active_tabs_by_win.get(win_id) == tab_id):
+                # Active tab in an open browser window (multi-window support, or newly opened window)
                 is_active_tab = True
             else:
                 is_active_tab = False
@@ -1037,6 +1037,16 @@ class PriorityClassificationEngine:
         if not ensembles:
             return
 
+        if window_id is not None and tab_id is not None:
+            with self._cond:
+                ctx = self._source_context.setdefault(
+                    source_id,
+                    {"activeTabId": None, "activeWindowId": None, "activeTabsByWindow": {}},
+                )
+                active_tabs_by_win = ctx.setdefault("activeTabsByWindow", {})
+                if window_id not in active_tabs_by_win:
+                    active_tabs_by_win[window_id] = tab_id
+
         if is_bellows_training_active():
             paused_results = build_ensemble_results(ensembles, {}, duration_ms=0, cached=False)
             for er in paused_results:
@@ -1103,6 +1113,29 @@ class PriorityClassificationEngine:
             )
             self.emit_queue_status()
             return
+
+        # Partial cache hit: if some ensembles are already cached while another category is new,
+        # emit the ready ensemble results immediately so they never wait behind uncached models!
+        ready_cached_ensembles = []
+        for ens in ensembles:
+            ens_ok, ens_res, _ = self.cache.evaluate_ensembles_from_cache(content_hash, [ens], item_id=item_id)
+            if ens_ok and ens_res:
+                ready_cached_ensembles.extend(ens_res)
+        if ready_cached_ensembles:
+            self._emit_item_results(
+                subscriber={
+                    "sourceId": source_id,
+                    "windowId": window_id,
+                    "tabId": tab_id,
+                    "pageId": page_id,
+                    "itemId": item_id,
+                    "requestId": request_id,
+                    "jobId": job_id,
+                    "modality": modality,
+                    "ensembles": ensembles,
+                },
+                ensemble_results=ready_cached_ensembles,
+            )
 
         # Fast-path 2: If decoding failed (e.g. corrupt image or rejected remote URL), return error result immediately
         if decode_error is not None or decoded_input is None:
@@ -1268,7 +1301,17 @@ class PriorityClassificationEngine:
         clf_scores: Dict[str, Dict[str, Any]] = {}
         t0 = time.time()
 
-        for cid in classifier_ids:
+        # Run lightweight / Bellows / already-cached classifiers first so fast filters trigger immediately
+        def _clf_sort_key(cid: str) -> Tuple[int, int]:
+            if self.cache.get_classifier_score(content_hash, cid, item_id=first_item_id) is not None:
+                return (0, 0)
+            if str(cid).startswith("bellows_") or "resnet50" in str(cid).lower() or "spider" in str(cid).lower():
+                return (1, 0)
+            return (2, 0)
+
+        classifier_ids.sort(key=_clf_sort_key)
+
+        for idx_cid, cid in enumerate(classifier_ids):
             # Check if this specific classifier is already cached for this content_hash
             cached_hit = self.cache.get_classifier_score(content_hash, cid, item_id=first_item_id)
             if cached_hit is not None:
@@ -1331,6 +1374,18 @@ class PriorityClassificationEngine:
                     sid = s.get("itemId")
                     if sid:
                         self.cache.register_item_hash(sid, content_hash)
+
+                # If more classifiers remain on this item, stream ONLY the ensemble(s) that just completed on this step
+                if idx_cid < len(classifier_ids) - 1:
+                    for s in current_subs:
+                        s_ens = []
+                        for ens in (s.get("ensembles") or []):
+                            ens_cids = [ens.get("classifiers")] if isinstance(ens.get("classifiers"), str) else (ens.get("classifiers") or [])
+                            if cid in ens_cids and all((c in clf_scores) for c in ens_cids):
+                                s_ens.append(ens)
+                        if s_ens:
+                            partial_res = build_ensemble_results(s_ens, clf_scores, duration_ms=c_ms, cached=False)
+                            self._emit_item_results(s, partial_res)
 
             if lazy_load:
                 self.memory_manager.unload_classifier(cid)

@@ -75,9 +75,16 @@ def _read_latest_status(job_id: Optional[str] = None) -> Optional[Dict[str, Any]
     sp = target_dir / "status.json"
     if not sp.is_file():
         return None
-    try:
-        st = json.loads(sp.read_text(encoding="utf-8"))
-    except Exception:
+    st = None
+    for attempt in range(4):
+        try:
+            st = json.loads(sp.read_text(encoding="utf-8"))
+            break
+        except (PermissionError, OSError, json.JSONDecodeError):
+            if attempt == 3:
+                return None
+            time.sleep(0.025)
+    if st is None:
         return None
 
     st["job_dir"] = str(target_dir)
@@ -97,9 +104,22 @@ def _read_latest_status(job_id: Optional[str] = None) -> Optional[Dict[str, Any]
     return st
 
 
+_bellows_active_cache: Dict[str, Any] = {"ts": 0.0, "active": False}
+
+
+def invalidate_bellows_active_cache() -> None:
+    _bellows_active_cache["ts"] = 0.0
+
+
 def is_bellows_training_active() -> bool:
+    now = time.time()
+    if now - float(_bellows_active_cache.get("ts", 0.0)) < 1.5:
+        return bool(_bellows_active_cache.get("active", False))
     st = _read_latest_status(None)
-    return bool(st and st.get("state") in ACTIVE_JOB_STATES and _pid_alive(st.get("pid")))
+    active = bool(st and st.get("state") in ACTIVE_JOB_STATES and _pid_alive(st.get("pid")))
+    _bellows_active_cache["ts"] = now
+    _bellows_active_cache["active"] = active
+    return active
 
 
 def _dir_size_mb(path: Path) -> float:
@@ -633,6 +653,7 @@ def bellows_start_training(
 
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     ACTIVE_JOB_PTR.write_text(json.dumps({"job_id": job_id, "job_dir": str(job_dir), "pid": proc.pid}), encoding="utf-8")
+    invalidate_bellows_active_cache()
 
     resp = {
         "ok": True,
@@ -652,6 +673,7 @@ def bellows_get_status(msg: Dict[str, Any], on_finished_cb: Callable[[], None], 
     job_id = msg.get("jobId")
     st = _read_latest_status(str(job_id) if job_id else None)
     if st and st.get("state") in ("completed", "stopped_low_battery", "stopped_early"):
+        invalidate_bellows_active_cache()
         try:
             on_finished_cb()
         except Exception:

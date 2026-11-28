@@ -59,23 +59,23 @@ function endClassificationActivity(itemCount = 1) {
 }
 
 function setIconLoading(isLoading) {
-  const filename = isLoading ? 'icon-loading.svg' : 'icon.svg';
-  const fullPath = ext.runtime.getURL('icons/' + filename);
+  const prefix = isLoading ? 'icons/icon-loading-' : 'icons/icon-';
+  const iconPaths = {
+    16: ext.runtime.getURL(`${prefix}16.png`),
+    32: ext.runtime.getURL(`${prefix}32.png`),
+    48: ext.runtime.getURL(`${prefix}48.png`),
+    128: ext.runtime.getURL(`${prefix}128.png`)
+  };
+  const iconApi = ext.action || ext.browserAction;
+  if (!iconApi || typeof iconApi.setIcon !== 'function') return;
 
   try {
-    if (ext.browserAction && typeof ext.browserAction.setIcon === 'function') {
-      ext.browserAction.setIcon({ path: fullPath }, () => {
-        if (ext.runtime.lastError) {
-          console.error('[Icon] setIcon error:', ext.runtime.lastError);
-        }
-      });
-    } else if (ext.action && typeof ext.action.setIcon === 'function') {
-      ext.action.setIcon({ path: fullPath }, () => {
-        if (ext.runtime.lastError) {
-          console.error('[Icon] setIcon error:', ext.runtime.lastError);
-        }
-      });
-    }
+    const p = iconApi.setIcon({ path: iconPaths }, () => {
+      if (ext.runtime.lastError) {
+        console.warn('[Icon] setIcon notice:', ext.runtime.lastError.message || ext.runtime.lastError);
+      }
+    });
+    if (p && typeof p.catch === 'function') p.catch(() => {});
   } catch (e) {
     console.error('[Icon] Exception:', e.message, e.stack);
   }
@@ -91,6 +91,33 @@ function makeRequestId() {
 updateToolbarState();
 
 let nativePort = null;
+let nativeKeepaliveTimer = null;
+
+function stopNativeKeepalive() {
+  if (nativeKeepaliveTimer) {
+    clearInterval(nativeKeepaliveTimer);
+    nativeKeepaliveTimer = null;
+  }
+}
+
+function startNativeKeepalive() {
+  stopNativeKeepalive();
+  nativeKeepaliveTimer = setInterval(() => {
+    if (!nativePort) {
+      stopNativeKeepalive();
+      return;
+    }
+    try {
+      nativePort.postMessage({
+        version: 2,
+        type: 'ping',
+        requestId: 'keepalive-' + Date.now()
+      });
+    } catch (_) {
+      stopNativeKeepalive();
+    }
+  }, 20000);
+}
 const pendingNativeRequests = new Map();
 const pendingJobs = new Map();
 const JOB_STALE_MS = 10 * 60 * 1000;
@@ -204,6 +231,10 @@ function ensureNativePort() {
       return;
     }
 
+    if (reqId && String(reqId).startsWith('keepalive-')) {
+      return;
+    }
+
     let matchedReqId = reqId;
     if (!matchedReqId || !pendingNativeRequests.has(matchedReqId)) {
       if (response && (response.type === 'pong' || response.ok)) {
@@ -216,6 +247,7 @@ function ensureNativePort() {
       }
     }
     if (!matchedReqId || !pendingNativeRequests.has(matchedReqId)) {
+      if (response && response.type === 'pong') return;
       console.warn('[Native] Unmatched response:', response);
       return;
     }
@@ -228,6 +260,7 @@ function ensureNativePort() {
   nativePort.onDisconnect.addListener(() => {
     const err = ext.runtime.lastError;
     console.warn('[Native] Port disconnected', err);
+    stopNativeKeepalive();
     nativePort = null;
 
     for (const [reqId, { reject, timeoutId }] of pendingNativeRequests) {
@@ -240,7 +273,8 @@ function ensureNativePort() {
     setExactRemainingItemCount(0);
   });
 
-  // Sync current active tab context as soon as port connects
+  // Start MV3 Service Worker keepalive heartbeat and sync active tab context
+  startNativeKeepalive();
   syncActiveTabContext();
 
   return nativePort;
@@ -255,6 +289,7 @@ async function restartNativeHost() {
   pendingJobs.clear();
   setExactRemainingItemCount(0);
 
+  stopNativeKeepalive();
   if (nativePort) {
     try {
       nativePort.disconnect();
@@ -453,10 +488,35 @@ async function fetchCrossOriginImageAsBase64(imageUrl, maxDim = 768, quality = 1
 // Single-Item Packet Streaming & Browser Context Priority Sync
 // ============================================================================
 
+const lastSyncedActiveTabByWindow = new Map();
+let lastSyncedGlobalTabKey = '';
+
+function notifyActiveTabContextIfChanged(tabId, windowId, force = false) {
+  if (tabId == null || windowId == null) return;
+  const key = `${windowId}:${tabId}`;
+  if (!force && lastSyncedGlobalTabKey === key && lastSyncedActiveTabByWindow.get(windowId) === tabId) {
+    return;
+  }
+  lastSyncedActiveTabByWindow.set(windowId, tabId);
+  lastSyncedGlobalTabKey = key;
+  sendToNativeFireAndForget({
+    version: 2,
+    type: 'updateTabContext',
+    sourceId: SOURCE_ID,
+    activeTabId: tabId,
+    windowId: windowId,
+    timestamp: Date.now()
+  });
+}
+
 async function handleClassifySingleItem(message, sender) {
   const tabId = sender && sender.tab ? sender.tab.id : (message.tabId ?? null);
   const windowId = sender && sender.tab ? sender.tab.windowId : (message.windowId ?? null);
   const pageId = message.pageId || null;
+
+  if (sender && sender.tab && sender.tab.active && tabId != null && windowId != null) {
+    notifyActiveTabContextIfChanged(tabId, windowId, false);
+  }
   const itemId = message.itemId || message.id;
   const modality = message.modality || 'image';
   const inViewport = Boolean(message.inViewport);
@@ -576,16 +636,15 @@ function handleClassifyJobChunk(message, sender) {
 async function syncActiveTabContext() {
   if (!ext.tabs || !ext.tabs.query) return;
   try {
-    const activeTabs = await ext.tabs.query({ active: true, currentWindow: true });
-    if (activeTabs && activeTabs.length > 0 && activeTabs[0].id != null) {
-      sendToNativeFireAndForget({
-        version: 2,
-        type: 'updateTabContext',
-        sourceId: SOURCE_ID,
-        activeTabId: activeTabs[0].id,
-        windowId: activeTabs[0].windowId,
-        timestamp: Date.now()
-      });
+    let activeTabs = await ext.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!activeTabs || activeTabs.length === 0) {
+      activeTabs = await ext.tabs.query({ active: true });
+    }
+    if (activeTabs && activeTabs.length > 0) {
+      const t = activeTabs[0];
+      if (t && t.id != null) {
+        notifyActiveTabContextIfChanged(t.id, t.windowId, false);
+      }
     }
   } catch (_) {}
 }
@@ -595,20 +654,26 @@ if (ext.tabs) {
   if (ext.tabs.onActivated) {
     ext.tabs.onActivated.addListener((activeInfo) => {
       if (!activeInfo || activeInfo.tabId == null) return;
-      sendToNativeFireAndForget({
-        version: 2,
-        type: 'updateTabContext',
-        sourceId: SOURCE_ID,
-        activeTabId: activeInfo.tabId,
-        windowId: activeInfo.windowId,
-        timestamp: Date.now()
-      });
+      notifyActiveTabContextIfChanged(activeInfo.tabId, activeInfo.windowId, true);
+      if (ext.tabs && ext.tabs.sendMessage) {
+        ext.tabs.sendMessage(activeInfo.tabId, { type: 'TRIGGER_DOM_SCAN' }).catch(() => {});
+      }
+    });
+  }
+
+  if (ext.tabs.onCreated) {
+    ext.tabs.onCreated.addListener((tab) => {
+      if (tab && tab.active) {
+        setTimeout(syncActiveTabContext, 150);
+      }
     });
   }
 
   if (ext.tabs.onRemoved) {
     ext.tabs.onRemoved.addListener((tabId) => {
-      bellowsCollectorTabs.delete(tabId);
+      if (bellowsCollectorTabs.delete(tabId)) {
+        persistBellowsCollectorTabs();
+      }
       tabLastUrl.delete(tabId);
       sendToNativeFireAndForget({
         version: 2,
@@ -622,48 +687,53 @@ if (ext.tabs) {
 
   if (ext.tabs.onUpdated) {
     ext.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-      if (changeInfo.status === 'loading' && changeInfo.url) {
-        const prevUrl = tabLastUrl.get(tabId);
-        // Strip hash to only purge on real page navigations, not in-page anchor jumps
-        const cleanPrev = prevUrl ? prevUrl.split('#')[0] : null;
-        const cleanNew = changeInfo.url.split('#')[0];
+      if (changeInfo.url) {
         tabLastUrl.set(tabId, changeInfo.url);
-        if (cleanPrev && cleanPrev !== cleanNew) {
-          sendToNativeFireAndForget({
-            version: 2,
-            type: 'dropContext',
-            sourceId: SOURCE_ID,
-            tabId,
-            timestamp: Date.now()
-          });
-        }
       } else if (tab && tab.url && !tabLastUrl.has(tabId)) {
         tabLastUrl.set(tabId, tab.url);
+      }
+      // Note: Do NOT send tab-wide dropContext without pageId here!
+      // On initial page load (with redirects/query changes) or YouTube SPA pushState navigations,
+      // tabs.onUpdated fires after content.js has already queued images for the new page,
+      // which previously wiped out the new page's pending queue in echo_host_V2.py.
+      // Specific pageId drops are handled cleanly by content.js on pagehide/resetState.
+
+      if (changeInfo.status === 'complete' || changeInfo.url) {
+        if (tab && tab.active) {
+          syncActiveTabContext();
+        }
+        if (ext.tabs && ext.tabs.sendMessage) {
+          ext.tabs.sendMessage(tabId, { type: 'TRIGGER_DOM_SCAN' }).catch(() => {});
+          setTimeout(() => {
+            ext.tabs.sendMessage(tabId, { type: 'TRIGGER_DOM_SCAN' }).catch(() => {});
+          }, 700);
+        }
       }
     });
   }
 }
 
-if (ext.windows && ext.windows.onFocusChanged) {
-  ext.windows.onFocusChanged.addListener((windowId) => {
-    if (windowId === ext.windows.WINDOW_ID_NONE || windowId < 0) return;
-    if (ext.tabs && ext.tabs.query) {
-      ext.tabs.query({ active: true, windowId })
-        .then((tabs) => {
-          if (tabs && tabs.length > 0 && tabs[0].id != null) {
-            sendToNativeFireAndForget({
-              version: 2,
-              type: 'updateTabContext',
-              sourceId: SOURCE_ID,
-              activeTabId: tabs[0].id,
-              windowId,
-              timestamp: Date.now()
-            });
-          }
-        })
-        .catch(() => {});
-    }
-  });
+if (ext.windows) {
+  if (ext.windows.onCreated) {
+    ext.windows.onCreated.addListener(() => {
+      setTimeout(syncActiveTabContext, 200);
+    });
+  }
+
+  if (ext.windows.onFocusChanged) {
+    ext.windows.onFocusChanged.addListener((windowId) => {
+      if (windowId === ext.windows.WINDOW_ID_NONE || windowId < 0) return;
+      if (ext.tabs && ext.tabs.query) {
+        ext.tabs.query({ active: true, windowId })
+          .then((tabs) => {
+            if (tabs && tabs.length > 0 && tabs[0].id != null) {
+              notifyActiveTabContextIfChanged(tabs[0].id, windowId, true);
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }
 }
 
 let powerSettings = {
@@ -768,6 +838,31 @@ async function openOnboardingExperience(targetScreen = 1) {
 }
 
 const bellowsCollectorTabs = new Map();
+const BELLOWS_COLLECTOR_TABS_KEY = 'fvfBellowsCollectorTabsV1';
+
+function persistBellowsCollectorTabs() {
+  try {
+    if (ext.storage && ext.storage.local && ext.storage.local.set) {
+      Promise.resolve(
+        ext.storage.local.set({ [BELLOWS_COLLECTOR_TABS_KEY]: Array.from(bellowsCollectorTabs.entries()) })
+      ).catch(() => {});
+    }
+  } catch (_) {}
+}
+
+const collectorTabsReady = (async () => {
+  try {
+    if (ext.storage && ext.storage.local && ext.storage.local.get) {
+      const res = await ext.storage.local.get([BELLOWS_COLLECTOR_TABS_KEY]);
+      const entries = res && Array.isArray(res[BELLOWS_COLLECTOR_TABS_KEY]) ? res[BELLOWS_COLLECTOR_TABS_KEY] : [];
+      for (const [tid, st] of entries) {
+        if (tid != null && st && !bellowsCollectorTabs.has(Number(tid))) {
+          bellowsCollectorTabs.set(Number(tid), st);
+        }
+      }
+    }
+  } catch (_) {}
+})();
 async function openBellowsWorkspace(opts = {}) {
   const qs = [];
   if (opts.modality) qs.push(`modality=${encodeURIComponent(opts.modality)}`);
@@ -1087,7 +1182,10 @@ if (ext.contextMenus && ext.contextMenus.onClicked) {
               const modality = response.modality || 'this';
               title = modality === 'text' ? 'Blur this text' : 'Blur this image';
             }
-            ext.contextMenus.update('toggle-blur', { title }).catch(() => {});
+            try {
+              const p = ext.contextMenus.update('toggle-blur', { title }, () => { void ext.runtime.lastError; });
+              if (p && typeof p.catch === 'function') p.catch(() => {});
+            } catch (_) {}
           }
         })
         .catch(() => {});
@@ -1392,7 +1490,10 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const modality = message.modality || 'image';
         title = modality === 'text' ? 'Blur this text' : 'Blur this image';
       }
-      ext.contextMenus.update('toggle-blur', { title }).catch(() => {});
+      try {
+        const p = ext.contextMenus.update('toggle-blur', { title }, () => { void ext.runtime.lastError; });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (_) {}
     }
     sendResponse({ ok: true });
     return false;
@@ -1480,6 +1581,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (res && res.counts && sender?.tab?.id != null && bellowsCollectorTabs.has(sender.tab.id)) {
           const info = bellowsCollectorTabs.get(sender.tab.id);
           info.counts = res.counts;
+          persistBellowsCollectorTabs();
           if (info.sourceTabId != null) ext.tabs.sendMessage(info.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: res.counts } }).catch(() => {});
         }
         sendResponse(res);
@@ -1493,6 +1595,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (res && res.counts && sender?.tab?.id != null && bellowsCollectorTabs.has(sender.tab.id)) {
           const info = bellowsCollectorTabs.get(sender.tab.id);
           info.counts = res.counts;
+          persistBellowsCollectorTabs();
           if (info.sourceTabId != null) ext.tabs.sendMessage(info.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: res.counts } }).catch(() => {});
         }
         sendResponse(res);
@@ -1513,6 +1616,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (nativeRes && nativeRes.counts && sender?.tab?.id != null && bellowsCollectorTabs.has(sender.tab.id)) {
         const info = bellowsCollectorTabs.get(sender.tab.id);
         info.counts = nativeRes.counts;
+        persistBellowsCollectorTabs();
         if (info.sourceTabId != null) ext.tabs.sendMessage(info.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: nativeRes.counts } }).catch(() => {});
       }
       sendResponse(nativeRes);
@@ -1521,6 +1625,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message && message.type === 'BELLOWS_START_COLLECTOR') {
     (async () => {
+      await collectorTabsReady;
       const modality = message.modality === 'text' ? 'text' : 'image';
       const q = encodeURIComponent(String(message.prompt || '').trim());
       const sourceEngine = String(message.engine || (modality === 'image' ? 'google_images' : 'reddit'));
@@ -1533,6 +1638,7 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = await ext.tabs.create({ url: targetUrl, active: true });
       const state = { jobId: message.jobId, modality, prompt: message.prompt || '', counts: message.counts || { positives: 0, hard_negatives: 0, base_negatives: 0 }, sourceTabId: sender?.tab?.id ?? null };
       bellowsCollectorTabs.set(tab.id, state);
+      persistBellowsCollectorTabs();
       setTimeout(() => {
         ext.tabs.sendMessage(tab.id, { type: 'BELLOWS_ACTIVATE_COLLECTOR', ...state }).catch(() => {});
       }, 1500);
@@ -1541,24 +1647,29 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message && message.type === 'BELLOWS_QUERY_COLLECTOR_TAB') {
-    const tid = sender?.tab?.id;
-    const state = (tid != null && bellowsCollectorTabs.has(tid)) ? bellowsCollectorTabs.get(tid) : null;
-    sendResponse(state ? { active: true, ...state } : { active: false });
-    return false;
+    collectorTabsReady.then(() => {
+      const tid = sender?.tab?.id;
+      const state = (tid != null && bellowsCollectorTabs.has(tid)) ? bellowsCollectorTabs.get(tid) : null;
+      sendResponse(state ? { active: true, ...state } : { active: false });
+    }).catch(() => sendResponse({ active: false }));
+    return true;
   }
   if (message && message.type === 'BELLOWS_STOP_COLLECTOR') {
-    const tid = sender?.tab?.id;
-    const state = (tid != null && bellowsCollectorTabs.has(tid)) ? bellowsCollectorTabs.get(tid) : null;
-    if (tid != null) {
-      bellowsCollectorTabs.delete(tid);
-      ext.tabs.remove(tid).catch(() => {});
-    }
-    if (state && state.sourceTabId != null) {
-      ext.tabs.update(state.sourceTabId, { active: true }).catch(() => {});
-      ext.tabs.sendMessage(state.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: state.counts, closed: true } }).catch(() => {});
-    }
-    sendResponse({ ok: true });
-    return false;
+    collectorTabsReady.then(() => {
+      const tid = sender?.tab?.id;
+      const state = (tid != null && bellowsCollectorTabs.has(tid)) ? bellowsCollectorTabs.get(tid) : null;
+      if (tid != null) {
+        bellowsCollectorTabs.delete(tid);
+        persistBellowsCollectorTabs();
+        ext.tabs.remove(tid).catch(() => {});
+      }
+      if (state && state.sourceTabId != null) {
+        ext.tabs.update(state.sourceTabId, { active: true }).catch(() => {});
+        ext.tabs.sendMessage(state.sourceTabId, { type: 'BELLOWS_COLLECTOR_COUNTS', payload: { jobId: message.jobId, counts: state.counts, closed: true } }).catch(() => {});
+      }
+      sendResponse({ ok: true });
+    }).catch(() => sendResponse({ ok: true }));
+    return true;
   }
   if (message && message.type === 'BELLOWS_START_TRAINING') {
     sendToNative({ ...message, type: 'bellowsStartTraining', version: 2 }, { timeoutMs: 20000 })
@@ -1586,19 +1697,35 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message && message.type === 'BELLOWS_FINALIZE_CATEGORY') {
     (async () => {
-      const area = ext.storage && (ext.storage.sync || ext.storage.local);
-      const existing = area && area.get ? await new Promise((r) => area.get(['ensembleConfigsV2'], (d) => r(d || {}))) : {};
-      const list = Array.isArray(existing.ensembleConfigsV2) ? existing.ensembleConfigsV2 : [];
+      await sendToNative({ type: 'listModels', version: 2 }, { timeoutMs: 8000 }).catch(() => {});
+      const syncArea = ext.storage && ext.storage.sync;
+      const localArea = ext.storage && ext.storage.local;
+      const syncData = syncArea && syncArea.get ? await new Promise((r) => syncArea.get(['ensembleConfigsV2'], (d) => r(d || {}))) : {};
+      const localData = localArea && localArea.get ? await new Promise((r) => localArea.get(['ensembleConfigsV2'], (d) => r(d || {}))) : {};
+      let list = Array.isArray(syncData.ensembleConfigsV2) && syncData.ensembleConfigsV2.length > 0
+        ? syncData.ensembleConfigsV2
+        : (Array.isArray(localData.ensembleConfigsV2) && localData.ensembleConfigsV2.length > 0 ? localData.ensembleConfigsV2 : []);
+      if (list.length === 0) {
+        try {
+          const built = await buildAndSaveAutoCategories([], 0.75);
+          if (Array.isArray(built) && built.length > 0) list = built;
+        } catch (_) {}
+      }
       const cid = String(message.classifierId || '');
       if (!cid) throw new Error('Missing classifierId');
-      const already = list.find((e) => Array.isArray(e.classifiers) && e.classifiers.length === 1 && e.classifiers[0] === cid);
-      if (!already) {
-        const mod = message.modality === 'text' ? 'text' : 'image';
-        const thr = typeof message.threshold === 'number' ? Math.round(message.threshold * 100) / 100 : 0.75;
-        const color = mod === 'text' ? '#10b981' : '#ff6218';
+      const mod = message.modality === 'text' ? 'text' : 'image';
+      const thr = typeof message.threshold === 'number' ? Math.round(message.threshold * 100) / 100 : 0.75;
+      const color = mod === 'text' ? '#10b981' : '#ff6218';
+      const catName = message.label || message.modelName || cid;
+      const already = list.find((e) => (Array.isArray(e.classifiers) && e.classifiers.length === 1 && e.classifiers[0] === cid) || e.id === `bellows_${cid}`);
+      if (already) {
+        already.enabled = true;
+        already.name = catName;
+        already.threshold = thr;
+      } else {
         list.push({
           id: `bellows_${cid}`,
-          name: message.label || message.modelName || cid,
+          name: catName,
           modality: mod,
           enabled: true,
           threshold: thr,
@@ -1610,7 +1737,17 @@ ext.runtime.onMessage.addListener((message, sender, sendResponse) => {
             image: { applyBlur: true, blurAmount: 3, blurMode: 'hover', applyBorder: false, borderMultiplier: 1, borderColor: color, borderMode: 'off', applyBadge: true, badgeMode: 'always' }
           }
         });
-        if (area && area.set) await area.set({ enabled: true, ensembleConfigsV2: list });
+      }
+      if (syncArea && syncArea.set) await syncArea.set({ enabled: true, ensembleConfigsV2: list });
+      if (localArea && localArea.set) await localArea.set({ enabled: true, ensembleConfigsV2: list });
+      if (ext.tabs && ext.tabs.query) {
+        ext.tabs.query({}).then((tabs) => {
+          for (const t of (tabs || [])) {
+            if (t && t.id != null) {
+              ext.tabs.sendMessage(t.id, { type: 'RECLASSIFY_ALL' }).catch(() => {});
+            }
+          }
+        }).catch(() => {});
       }
       sendResponse({ ok: true, ensembles: list });
     })().catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
@@ -1706,7 +1843,7 @@ async function syncCommunityReportContextMenu() {
         id: 'report-misclassification',
         title: 'Report incorrect FvF classification',
         contexts: ['all']
-      });
+      }, () => { void ext.runtime.lastError; });
     } catch (e) {
       console.warn('[CommunityReport] Context menu create failed:', e);
     }
@@ -1747,7 +1884,7 @@ async function syncBlurContextMenu() {
         id: 'toggle-blur',
         title: 'Toggle AI blur',
         contexts: ['all']
-      });
+      }, () => { void ext.runtime.lastError; });
     } catch (e) {
       console.warn('Context menu create failed:', e);
     }

@@ -50,6 +50,7 @@ native/bellows_jobs/
 native/classifiers/bellows_*
 native/.local_file_hashes.json
 native/.release_cache.json
+native/.installed_versions.json
 run_monitor.bat
 run_review_gui.bat
 run_weekly_retrain.bat

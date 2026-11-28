@@ -303,6 +303,12 @@ def _llm_screen(
             })
 
         tokenizer = AutoTokenizer.from_pretrained(GATEKEEPER_MODEL_ID, cache_dir=str(gatekeeper_dir))
+        if progress_cb:
+            progress_cb({
+                "phase": "loading_weights",
+                "message": "Loading local ethical guard weights...",
+                "percent": 55,
+            })
         model = AutoModelForSequenceClassification.from_pretrained(
             GATEKEEPER_MODEL_ID,
             cache_dir=str(gatekeeper_dir),
@@ -408,6 +414,8 @@ def check_bellows_ethics(
     if det is not None:
         det["modality"] = clean_mod
         det["prompt"] = clean_prompt
+        if progress_cb:
+            progress_cb({"phase": "done", "message": "Deterministic policy check complete.", "percent": 100})
         return det
 
     res = _llm_screen(clean_mod, clean_prompt, cache_dir, progress_cb=progress_cb)

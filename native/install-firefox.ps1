@@ -7,6 +7,7 @@
 param(
   [string]$HostName,
   [string]$ExtensionId,
+  [string]$ChromeExtensionId,
   [string]$PythonPath
 )
 
@@ -53,6 +54,26 @@ function Resolve-ExtensionId {
     catch {}
   }
   return 'template@example.com'
+}
+
+function Resolve-ChromeExtensionId {
+  param([string]$ManifestPath, [string]$ExplicitChromeId)
+  if ($ExplicitChromeId) { return $ExplicitChromeId }
+  if (Test-Path $ManifestPath) {
+    try {
+      $extManifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
+      $pubKeyB64 = $extManifest.key
+      if ($pubKeyB64) {
+        $derBytes = [Convert]::FromBase64String($pubKeyB64)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hash = $sha.ComputeHash($derBytes)
+        $hex32 = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
+        return -join ($hex32.ToCharArray() | ForEach-Object { [char]([int][char]'a' + [Convert]::ToInt32($_, 16)) })
+      }
+    }
+    catch {}
+  }
+  return 'cmdmojmleokgadmlmanljfnodkklfjdh'
 }
 
 function Ensure-Venv {
@@ -193,9 +214,11 @@ reg add $regKeyFirefox /ve /d "$manifestPath" /f | Out-Null
 # Update Chrome/Chromium manifest JSON
 $chromeManifestPath = Join-Path $scriptRoot 'manifest.chrome.json'
 if (Test-Path $chromeManifestPath) {
+  $resolvedChromeId = Resolve-ChromeExtensionId -ManifestPath $extensionManifestPath -ExplicitChromeId $ChromeExtensionId
   $chromeManifest = Get-Content -Raw -Path $chromeManifestPath | ConvertFrom-Json
   $chromeManifest.name = $HostName
   $chromeManifest.path = $runHostPath
+  $chromeManifest.allowed_origins = @("chrome-extension://$resolvedChromeId/")
   if ($chromeManifest.PSObject.Properties.Name -contains 'arguments') {
     $chromeManifest.PSObject.Properties.Remove('arguments')
   }
@@ -204,14 +227,18 @@ if (Test-Path $chromeManifestPath) {
   $chromeJson = $chromeManifest | ConvertTo-Json -Depth 5
   [System.IO.File]::WriteAllText($chromeManifestPath, $chromeJson, $utf8NoBom)
 
-  # Register in HKCU for Chrome and Edge
-  $regKeyChrome = "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName"
-  $regKeyEdge = "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"
-  Write-Host "Registering Chrome: $regKeyChrome -> $chromeManifestPath"
-  reg add $regKeyChrome /ve /d "$chromeManifestPath" /f | Out-Null
-  Write-Host "Registering Edge: $regKeyEdge -> $chromeManifestPath"
-  reg add $regKeyEdge /ve /d "$chromeManifestPath" /f | Out-Null
+  # Register in HKCU for Chrome, Edge, Brave, and Chromium/Opera/Vivaldi
+  $chromiumRegKeys = @(
+    @{ Name = 'Chrome'; Key = "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName" },
+    @{ Name = 'Edge'; Key = "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$HostName" },
+    @{ Name = 'Brave'; Key = "HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$HostName" },
+    @{ Name = 'Chromium'; Key = "HKCU\Software\Chromium\NativeMessagingHosts\$HostName" }
+  )
+  foreach ($entry in $chromiumRegKeys) {
+    Write-Host "Registering $($entry.Name): $($entry.Key) -> $chromeManifestPath"
+    reg add $entry.Key /ve /d "$chromeManifestPath" /f | Out-Null
+  }
 }
 
-Write-Host "Done. Registered native messaging bridge for Firefox, Chrome, and Edge."
+Write-Host "Done. Registered native messaging bridge for Firefox, Chrome, Edge, Brave, Opera, and Vivaldi."
 Write-Host "Restart your browser, load the extension, and return to the onboarding tab."

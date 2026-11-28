@@ -202,9 +202,31 @@ class _SleepInhibitor:
 
 def _write_status(status_path: Path, data: Dict[str, Any]) -> None:
     data["updated_at"] = time.time()
-    tmp = status_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(status_path)
+    payload = json.dumps(data, indent=2)
+    tmp = status_path.with_name(f".{status_path.stem}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        for attempt in range(15):
+            try:
+                tmp.replace(status_path)
+                return
+            except PermissionError:
+                time.sleep(min(0.12, 0.025 * (attempt + 1)))
+            except OSError:
+                time.sleep(min(0.12, 0.025 * (attempt + 1)))
+        # Windows fallback if a concurrent reader/AV holds a non-share-delete lock on status.json
+        for attempt in range(8):
+            try:
+                status_path.write_text(payload, encoding="utf-8")
+                return
+            except (PermissionError, OSError):
+                time.sleep(0.05)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
 
 
 def _slugify(name: str) -> str:

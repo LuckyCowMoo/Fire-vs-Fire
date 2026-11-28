@@ -96,7 +96,7 @@ const MUTATION_FLUSH_MS = 120;
 const TEXT_STREAM_SETTLE_MS = 650;
 const TEXT_GROWTH_RECLASSIFY_DELTA = 40;
 const MAX_ITEM_RESULTS = 3000;
-const PERIODIC_SCAN_MS = 30000;
+const PERIODIC_SCAN_MS = 3500;
 
 let processedTextElements = new WeakSet();
 let streamingTextElements = new Map(); // Element -> { timerId, lastMutatedAt }
@@ -205,6 +205,33 @@ function getEnsembleById(ensembleId) {
   return ensembleByIdCache.get(ensembleId);
 }
 
+function extractCanonicalResponsiveImageKey(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return '';
+  try {
+    // BBC iChef responsive URLs: https://ichef.bbci.co.uk/ace/standard/<width>/cpsprodpb/...
+    const bbcMatch = urlStr.match(/^(https?:\/\/ichef\.bbci\.co\.uk\/(?:ace\/(?:standard|ws)|news)\/)\d+(\/.*)$/i);
+    if (bbcMatch) {
+      return (bbcMatch[1] + '*' + bbcMatch[2]).replace(/\.webp($|\?)/i, '$1');
+    }
+  } catch (_) {}
+  return '';
+}
+
+function isSameResponsiveImageAsset(urlA, urlB, el = null) {
+  if (!urlA || !urlB) return false;
+  if (urlA === urlB) return true;
+  const keyA = extractCanonicalResponsiveImageKey(urlA);
+  const keyB = extractCanonicalResponsiveImageKey(urlB);
+  if (keyA && keyB && keyA === keyB) return true;
+  if (el && el.tagName && el.tagName.toLowerCase() === 'img') {
+    const rawSrcset = (el.getAttribute && (el.getAttribute('srcset') || el.getAttribute('data-srcset'))) || '';
+    if (rawSrcset && rawSrcset.includes(urlA) && rawSrcset.includes(urlB)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function trackElement(itemId, element) {
   if (!itemId || !element) return;
   const existing = elementMap.get(itemId);
@@ -311,6 +338,10 @@ function releaseElementTracking(el) {
       aiDetectedImageCount = Math.max(0, aiDetectedImageCount - 1);
       VE.clearImageStyles(el);
       updateHoverHandlerAttachment();
+    }
+    if (el.dataset) {
+      delete el.dataset.aiLoadListenerAttached;
+      delete el.dataset.aiLoadListenerSrc;
     }
     unobserveImage(el);
     processedImages.delete(el);
@@ -712,7 +743,20 @@ function dispatchSingleImageItem(imgObj, modelConfig) {
     }
   }
 
-  ext.runtime.sendMessage(messagePayload).catch((err) => {
+  ext.runtime.sendMessage(messagePayload).then((resp) => {
+    if (resp && resp.ok === false && resp.error !== 'paused_by_power_policy') {
+      pendingItemIds.delete(itemId);
+      seenImageUrls.delete(imgObj.src);
+      processedImages.delete(imgObj.element);
+      if (imgObj.element && imgObj.element.dataset) {
+        delete imgObj.element.dataset.aiLoadListenerAttached;
+        delete imgObj.element.dataset.aiLoadListenerSrc;
+      }
+    }
+  }).catch((err) => {
+    pendingItemIds.delete(itemId);
+    seenImageUrls.delete(imgObj.src);
+    processedImages.delete(imgObj.element);
     if (settings.verboseLogs) {
       console.warn('[AI Detector] Failed to send single image item:', err);
     }
@@ -774,11 +818,7 @@ function scheduleClassification(images) {
       dispatchSingleImageItem(items[i], modelConfig);
     }
     if (end < items.length) {
-      if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(() => dispatchBatch(items, end), { timeout: 100 });
-      } else {
-        setTimeout(() => dispatchBatch(items, end), 20);
-      }
+      setTimeout(() => dispatchBatch(items, end), 16);
     }
   };
 
@@ -946,6 +986,7 @@ function checkAlreadyProcessedTextMutation(block) {
 }
 
 function processMutationBatch(mutations) {
+  if (scanPaused && !document.hidden) scanPaused = false;
   if (isBellowsCollectorActive() || !settings.enabled || scanPaused) return;
 
   const hasImages = hasActiveModality('image');
@@ -964,22 +1005,33 @@ function processMutationBatch(mutations) {
 
     mutation.removedNodes.forEach((node) => cleanupRemovedSubtree(node));
 
-    if (hasImages && mutation.type === 'attributes' && mutation.attributeName === 'src') {
+    if (hasImages && mutation.type === 'attributes' && (mutation.attributeName === 'src' || mutation.attributeName === 'srcset')) {
       const el = mutation.target;
       if (el.tagName && el.tagName.toLowerCase() === 'img') {
+        const newSrc = el.currentSrc || el.src || el.getAttribute('src') || '';
         const oldItemId = elementToItemId.get(el);
-        if (oldItemId) {
-          elementMap.delete(oldItemId);
-          itemResults.delete(oldItemId);
-          seenImageUrls.delete(oldItemId);
-          pendingItemIds.delete(oldItemId);
+        if (processedImages.has(el)) {
+          if (
+            (oldItemId && isSameResponsiveImageAsset(oldItemId, newSrc, el)) ||
+            (!oldItemId && newSrc && seenImageUrls.has(newSrc))
+          ) {
+            if (oldItemId && newSrc && oldItemId !== newSrc) {
+              trackElement(newSrc, el);
+              trackElement(oldItemId, el);
+              if (itemResults.has(oldItemId) && !itemResults.has(newSrc)) {
+                itemResults.set(newSrc, itemResults.get(oldItemId));
+                applyStylesForItem(oldItemId);
+              }
+            }
+            return;
+          }
         }
-        processedImages.delete(el);
+        releaseElementTracking(el);
         const img = processImageElement(el);
         if (img) {
           newImages.push(img);
           if (settings.verboseLogs) {
-            console.log(`[AI Detector] Image src changed, re-processing:`, el.src.substring(0, 80));
+            console.log(`[AI Detector] Image src changed, re-processing:`, (newSrc || '').substring(0, 80));
           }
         }
       }
@@ -1124,7 +1176,7 @@ function initMutationObserver() {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['src'],
+    attributeFilter: ['src', 'srcset'],
     characterData: true
   });
 }
@@ -1161,6 +1213,12 @@ function initIntersectionObserver() {
             if (settings.verboseLogs) {
               console.log(`[AI Detector] IntersectionObserver: Lazy image entered viewport:`, el.src.substring(0, 80));
             }
+          }
+        } else {
+          const img = processImageElement(el, true);
+          if (img) {
+            img.inViewport = true;
+            newImages.push(img);
           }
         }
       }
@@ -1240,19 +1298,41 @@ function getRenderedImageDimensions(el) {
   return { width, height };
 }
 
+function isYoutubeVideoThumbnailElement(el) {
+  if (!el || typeof el.closest !== 'function') return false;
+  if (el.closest('#avatar, #avatar-link, #author-thumbnail, yt-avatar-shape, .yt-spec-avatar-shape')) {
+    return false;
+  }
+  return Boolean(
+    el.closest(
+      'ytd-thumbnail, yt-thumbnail-view-model, ytd-compact-video-renderer, yt-lockup-view-model, ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-reel-item-renderer, ytd-playlist-panel-video-renderer'
+    )
+  );
+}
+
 function isPhysicallySmallImage(el, nw, nh) {
   if (!settings.ignoreSmallImages) return false;
   const minDim = getMinImageDimension();
-  if (nw < minDim || nh < minDim) {
+  const shortSideFloor = Math.min(54, Math.round(minDim * 0.6));
+
+  // Rectangular/widescreen thumbnails (e.g. 16:9 YouTube sidebar 168x94) are valid if longer side >= minDim and shorter side >= floor
+  if (Math.max(nw, nh) < minDim || Math.min(nw, nh) < shortSideFloor) {
     return true;
   }
 
-  const rendered = getRenderedImageDimensions(el);
-  if (rendered.width > 0 && rendered.width < minDim) {
-    return true;
+  // Known YouTube video thumbnail containers (excluding channel avatars)
+  if (isYoutubeVideoThumbnailElement(el) && nw >= 100 && nh >= 54) {
+    return false;
   }
-  if (rendered.height > 0 && rendered.height < minDim) {
-    return true;
+
+  const rendered = getRenderedImageDimensions(el);
+  if (rendered.width > 0 && rendered.height > 0) {
+    if (Math.max(rendered.width, rendered.height) < minDim) {
+      return true;
+    }
+    if (Math.min(rendered.width, rendered.height) < shortSideFloor) {
+      return true;
+    }
   }
 
   return false;
@@ -1588,27 +1668,81 @@ function processImageElement(el, isLazy = false) {
   if (isBellowsCollectorActive()) return null;
   if (!el || el.tagName.toLowerCase() !== 'img') return null;
   if (typeof el.closest === 'function' && el.closest('#fvf-community-report-backdrop')) return null;
-  if (processedImages.has(el)) return null;
 
-  const src = el.currentSrc || el.src || el.getAttribute('src');
-  if (!src) return null;
+  const src = el.currentSrc || el.src || el.getAttribute('src') || '';
+  const prevTrackedId = elementToItemId.get(el);
+  if (processedImages.has(el)) {
+    if (src && prevTrackedId && !isSameResponsiveImageAsset(prevTrackedId, src, el)) {
+      releaseElementTracking(el);
+    } else {
+      if (prevTrackedId && itemResults.has(prevTrackedId) && !el.classList.contains('ai-detected')) {
+        applyStylesForItem(prevTrackedId);
+      }
+      return null;
+    }
+  }
+
+  if (!src) {
+    observeImage(el);
+    return null;
+  }
 
   const nw = el.naturalWidth || 0;
   const nh = el.naturalHeight || 0;
   if (nw === 0 || nh === 0) {
-    if (!el.dataset.aiLoadListenerAttached) {
+    if (el.dataset.aiLoadListenerSrc !== src) {
+      el.dataset.aiLoadListenerSrc = src;
       el.dataset.aiLoadListenerAttached = 'true';
-      el.addEventListener('load', () => {
-        if (settings.verboseLogs) {
-          console.log(`[AI Detector] Image load event:`, (el.currentSrc || el.src || '').substring(0, 80));
-        }
+
+      const onImageReady = () => {
+        if (!el.isConnected) return;
+        const curNw = el.naturalWidth || 0;
+        const curNh = el.naturalHeight || 0;
+        if (curNw === 0 || curNh === 0) return;
         processedImages.delete(el);
         unobserveImage(el);
         const img = processImageElement(el);
         if (img) scheduleClassification([img]);
-      }, { once: true });
+      };
+
+      el.addEventListener('load', onImageReady, { once: true });
+      el.addEventListener('error', () => { unobserveImage(el); }, { once: true });
+
+      if (typeof el.decode === 'function') {
+        el.decode().then(onImageReady).catch(() => {});
+      }
+
+      // Fast and staggered checks for lazy/virtualized images (e.g. YouTube sidebar & scroll feed)
+      requestAnimationFrame(() => {
+        if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+          onImageReady();
+        } else {
+          setTimeout(onImageReady, 200);
+          setTimeout(onImageReady, 650);
+          setTimeout(onImageReady, 1500);
+          setTimeout(onImageReady, 2800);
+        }
+      });
     }
     observeImage(el);
+    return null;
+  }
+
+  // If element has natural dimensions >= minDim but its DOM box is still 0x0 or mid-transition (<24px), retry shortly
+  const renderedNow = getRenderedImageDimensions(el);
+  if (
+    nw >= getMinImageDimension() &&
+    nh >= 54 &&
+    ((renderedNow.width > 0 && renderedNow.width < 24) || (renderedNow.height > 0 && renderedNow.height < 24)) &&
+    !el.dataset.aiLayoutRetryScheduled
+  ) {
+    el.dataset.aiLayoutRetryScheduled = 'true';
+    setTimeout(() => {
+      if (el.dataset) delete el.dataset.aiLayoutRetryScheduled;
+      if (!el.isConnected || processedImages.has(el)) return;
+      const img = processImageElement(el);
+      if (img) scheduleClassification([img]);
+    }, 300);
     return null;
   }
 
@@ -1619,11 +1753,37 @@ function processImageElement(el, isLazy = false) {
 
   if (settings.altTextOnly) {
     const alt = el.alt || el.getAttribute('alt') || '';
+    const host = (typeof window !== 'undefined' && window.location && window.location.hostname)
+      ? window.location.hostname.toLowerCase()
+      : '';
+    const hasSrcset = Boolean(
+      (el.getAttribute && (el.getAttribute('srcset') || el.getAttribute('data-srcset'))) ||
+      (el.parentElement && el.parentElement.tagName && el.parentElement.tagName.toLowerCase() === 'picture')
+    );
+    const inContentContainer = Boolean(
+      typeof el.closest === 'function' &&
+      el.closest('article, figure, picture, main, [data-testid*="card"], [data-testid*="media"], [data-testid*="image"], [class*="promo"], [class*="media"], [class*="card"]')
+    );
     const isExemptAltTextRule =
-      src.includes('i.ytimg.com/vi/') ||
-      src.includes('i.ytimg.com/vi_webp/') ||
+      hasSrcset ||
+      inContentContainer ||
+      host.includes('youtube.com') ||
+      host.includes('bbc.co.uk') ||
+      host.includes('bbc.com') ||
+      (el.classList && el.classList.contains('yt-core-image')) ||
+      isYoutubeVideoThumbnailElement(el) ||
+      src.includes('ichef.bbci.co.uk/') ||
+      src.includes('ytimg.com/') ||
+      src.includes('ggpht.com/') ||
+      src.includes('googleusercontent.com/') ||
       src.includes('encrypted-tbn') ||
-      src.includes('gstatic.com');
+      src.includes('gstatic.com') ||
+      src.includes('pbs.twimg.com/') ||
+      src.includes('redd.it/') ||
+      src.includes('redditmedia.com/') ||
+      src.includes('pinimg.com/') ||
+      src.includes('imgur.com/') ||
+      src.includes('wikimedia.org/');
 
     if (!isExemptAltTextRule && (!alt || !alt.trim().length)) {
       return null;
@@ -1632,20 +1792,35 @@ function processImageElement(el, isLazy = false) {
 
   processedImages.add(el);
   unobserveImage(el);
-
-  if (seenImageUrls.has(src)) {
-    trackElement(src, el);
-    if (itemResults.has(src)) {
-      applyStylesForItem(src);
-    }
-    return null;
+  trackElement(src, el);
+  const rawAttrSrc = (el.getAttribute && el.getAttribute('src')) || '';
+  if (rawAttrSrc && rawAttrSrc !== src) {
+    trackElement(rawAttrSrc, el);
+  }
+  const canonicalKey = extractCanonicalResponsiveImageKey(src);
+  if (canonicalKey) {
+    trackElement(canonicalKey, el);
   }
 
   if (itemResults.has(src)) {
     seenImageUrls.add(src);
-    trackElement(src, el);
     applyStylesForItem(src);
     return null;
+  }
+  if (canonicalKey && itemResults.has(canonicalKey)) {
+    seenImageUrls.add(src);
+    itemResults.set(src, itemResults.get(canonicalKey));
+    applyStylesForItem(src);
+    return null;
+  }
+
+  if (seenImageUrls.has(src)) {
+    // If already pending in Native Host, trackElement(src, el) above has attached this hydrated DOM node
+    // so when CLASSIFY_ITEM_RESULT arrives for `src`, it will style `el`.
+    // However, if it is NEITHER in itemResults NOR in pendingItemIds, re-queue it!
+    if (pendingItemIds.has(src)) {
+      return null;
+    }
   }
 
   seenImageUrls.add(src);
@@ -1844,9 +2019,20 @@ function applyStylesForItem(itemId) {
   const elements = getElementsForItem(itemId).filter((el) => el && el.isConnected && !(typeof el.closest === 'function' && el.closest('#fvf-community-report-backdrop')));
   if (!elements.length) {
     if (entry.modality === 'image') {
-      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => (img.currentSrc === itemId || img.src === itemId) && !(typeof img.closest === 'function' && img.closest('#fvf-community-report-backdrop')));
+      const liveImgs = Array.from(document.querySelectorAll('img')).filter((img) => {
+        if (typeof img.closest === 'function' && img.closest('#fvf-community-report-backdrop')) return false;
+        const cSrc = img.currentSrc || '';
+        const sSrc = img.src || (img.getAttribute && img.getAttribute('src')) || '';
+        if (cSrc === itemId || sSrc === itemId) return true;
+        if (isSameResponsiveImageAsset(itemId, cSrc || sSrc, img)) return true;
+        const srcset = (img.getAttribute && (img.getAttribute('srcset') || img.getAttribute('data-srcset'))) || '';
+        return Boolean(srcset && srcset.includes(itemId));
+      });
       if (liveImgs.length) {
-        liveImgs.forEach((img) => trackElement(itemId, img));
+        liveImgs.forEach((img) => {
+          trackElement(itemId, img);
+          processedImages.add(img);
+        });
         elements.push(...liveImgs);
       }
     }
@@ -1922,6 +2108,17 @@ function applyResultChunk(response) {
 
   response.results.forEach((result) => {
     if (!result || !result.id) return;
+    if (result.notes === 'paused_bellows_training') {
+      pendingItemIds.delete(result.id);
+      seenImageUrls.delete(result.id);
+      getElementsForItem(result.id).forEach((el) => {
+        processedImages.delete(el);
+      });
+      return;
+    }
+    if (result.notes === 'classifier_unavailable') {
+      return;
+    }
     const entry = itemResults.get(result.id) || { modality: result.modality, ensembles: {} };
     entry.modality = result.modality || entry.modality;
     const ensembleId = result.ensembleId || response.ensembleId || 'default';
@@ -1934,6 +2131,10 @@ function applyResultChunk(response) {
       classifiers: finalResult.classifiers || {}
     };
     itemResults.set(result.id, entry);
+    const respCanonKey = extractCanonicalResponsiveImageKey(result.id);
+    if (respCanonKey) {
+      itemResults.set(respCanonKey, entry);
+    }
     pendingItemIds.delete(result.id);
     if (hoverPriorityItemId === result.id) {
       if (hoverPriorityTimer) {
@@ -2034,13 +2235,7 @@ function extractLongText() {
 
 async function loadSettings() {
   try {
-    const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
-    if (!storageArea || !storageArea.get) {
-      console.warn('[Extension] Storage API not available');
-      return;
-    }
-
-    const res = await storageArea.get([
+    const keys = [
       'enabled',
       'altTextOnly',
       'ignoreSmallImages',
@@ -2060,7 +2255,50 @@ async function loadSettings() {
       'minTextLength',
       'minImageDimension',
       'ensembleConfigsV2'
+    ];
+
+    const safeStorageGet = (area, k) => {
+      if (!area || typeof area.get !== 'function') return Promise.resolve({});
+      return new Promise((resolve) => {
+        let settled = false;
+        const done = (val) => {
+          if (!settled) {
+            settled = true;
+            resolve(val && typeof val === 'object' ? val : {});
+          }
+        };
+        try {
+          const ret = area.get(k, (data) => done(data));
+          if (ret && typeof ret.then === 'function') {
+            ret.then(done).catch(() => done({}));
+          }
+        } catch (_) {
+          done({});
+        }
+        setTimeout(() => done({}), 1500);
+      });
+    };
+
+    const syncArea = ext.storage && ext.storage.sync;
+    const localArea = ext.storage && ext.storage.local;
+    if (!syncArea && !localArea) {
+      console.warn('[Extension] Storage API not available');
+      return;
+    }
+
+    const [syncRes, localRes] = await Promise.all([
+      safeStorageGet(syncArea, keys),
+      safeStorageGet(localArea, keys)
     ]);
+
+    let res = { ...localRes, ...syncRes };
+    if (!Array.isArray(res.ensembleConfigsV2) || !res.ensembleConfigsV2.length) {
+      if (Array.isArray(localRes.ensembleConfigsV2) && localRes.ensembleConfigsV2.length) {
+        res.ensembleConfigsV2 = localRes.ensembleConfigsV2;
+      } else if (Array.isArray(syncRes.ensembleConfigsV2) && syncRes.ensembleConfigsV2.length) {
+        res.ensembleConfigsV2 = syncRes.ensembleConfigsV2;
+      }
+    }
 
     if (res && typeof res.enabled === 'boolean') settings.enabled = res.enabled;
     if (res && typeof res.altTextOnly === 'boolean') settings.altTextOnly = res.altTextOnly;
@@ -2106,9 +2344,20 @@ function bindPageLifecycleCleanup() {
   });
 }
 
+let bootstrapStarted = false;
+
 async function _bootstrapNormalScanningIfNotCollector() {
   if (isBellowsCollectorActive()) return;
-  if (ext && ext.runtime && ext.runtime.sendMessage) {
+  if (bootstrapStarted) return;
+  bootstrapStarted = true;
+
+  const isCandidateCollector = Boolean(
+    typeof window !== 'undefined' &&
+    window.location &&
+    typeof window.location.hash === 'string' &&
+    window.location.hash.includes('fvf_bellows_collector=1')
+  );
+  if (isCandidateCollector && ext && ext.runtime && ext.runtime.sendMessage) {
     try {
       const resp = await ext.runtime.sendMessage({ type: 'BELLOWS_QUERY_COLLECTOR_TAB' });
       if (resp && resp.active) {
@@ -2117,20 +2366,66 @@ async function _bootstrapNormalScanningIfNotCollector() {
       }
     } catch (_) {}
   }
+
+  // Start observers immediately so no early DOM mutations are missed while storage loads
+  initMutationObserver();
+  initIntersectionObserver();
+
   await loadSettings();
   if (isBellowsCollectorActive()) return;
+
+  scanPaused = false;
   startDynamicDetection();
   performInitialExtraction();
+
+  // Schedule staggered follow-up sweeps AFTER settings have loaded so lazy/SPA feeds (e.g. YouTube) are caught reliably
+  [250, 750, 1600, 3000, 5000].forEach((delayMs) => {
+    setTimeout(() => {
+      if (!document.hidden && settings.enabled && !isBellowsCollectorActive()) {
+        scanPaused = false;
+        performInitialExtraction();
+      }
+    }, delayMs);
+  });
 }
 
 function initAutoExtract() {
   bindPageLifecycleCleanup();
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      _bootstrapNormalScanningIfNotCollector();
-    });
-  } else {
+  const runBootstrap = () => {
     _bootstrapNormalScanningIfNotCollector();
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', runBootstrap, { once: true });
+    window.addEventListener('load', runBootstrap, { once: true });
+  } else {
+    runBootstrap();
+  }
+  window.addEventListener('load', () => {
+    if (!document.hidden && settings.enabled && !isBellowsCollectorActive()) {
+      scanPaused = false;
+      performInitialExtraction();
+    }
+  }, { once: true });
+}
+
+let scrollScanThrottleTimer = null;
+let scrollScanTrailingTimer = null;
+
+function triggerLightweightDomScan() {
+  if (scanPaused && !document.hidden) scanPaused = false;
+  if (scanPaused || !settings.enabled || isBellowsCollectorActive()) return;
+  if (hasActiveModality('image')) {
+    const newImages = scanAllImages();
+    if (newImages.length > 0) {
+      scheduleClassification(newImages);
+    }
+  }
+  if (hasActiveModality('text')) {
+    const newText = extractLongText();
+    if (newText.length > 0) {
+      scheduleTextClassification(newText);
+    }
   }
 }
 
@@ -2145,28 +2440,60 @@ function startDynamicDetection() {
 
   if (!document.__aiDetectorVisibilityBound) {
     document.__aiDetectorVisibilityBound = true;
-    document.addEventListener('visibilitychange', () => {
-      scanPaused = document.hidden;
+    scanPaused = Boolean(document.hidden);
+
+    const onVisibilityOrFocusChange = () => {
+      scanPaused = Boolean(document.hidden);
       if (scanPaused && mutationFlushTimer) {
         clearTimeout(mutationFlushTimer);
         mutationFlushTimer = null;
         pendingMutations = [];
       } else if (!scanPaused && settings.enabled && !isBellowsCollectorActive()) {
-        if (hasActiveModality('image')) {
-          const imgs = scanAllImages();
-          if (imgs.length > 0) scheduleClassification(imgs);
-        }
-        if (hasActiveModality('text')) {
-          const txts = extractLongText();
-          if (txts.length > 0) scheduleTextClassification(txts);
-        }
+        triggerLightweightDomScan();
       }
       updateHoverHandlerAttachment();
-    });
+    };
+
+    const onScrollActivity = () => {
+      if (scanPaused || !settings.enabled || isBellowsCollectorActive()) return;
+      if (!scrollScanThrottleTimer) {
+        scrollScanThrottleTimer = setTimeout(() => {
+          scrollScanThrottleTimer = null;
+          triggerLightweightDomScan();
+        }, 300);
+      }
+      if (scrollScanTrailingTimer) clearTimeout(scrollScanTrailingTimer);
+      scrollScanTrailingTimer = setTimeout(() => {
+        scrollScanTrailingTimer = null;
+        triggerLightweightDomScan();
+      }, 260);
+    };
+
+    const onSpaNavigation = () => {
+      if (!settings.enabled || isBellowsCollectorActive()) return;
+      triggerLightweightDomScan();
+      [200, 700, 1600, 3000].forEach((ms) => {
+        setTimeout(() => {
+          if (!scanPaused && settings.enabled && !isBellowsCollectorActive()) {
+            triggerLightweightDomScan();
+          }
+        }, ms);
+      });
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityOrFocusChange);
+    window.addEventListener('focus', onVisibilityOrFocusChange);
+    window.addEventListener('pageshow', onVisibilityOrFocusChange);
+    window.addEventListener('scroll', onScrollActivity, { capture: true, passive: true });
+    window.addEventListener('popstate', onSpaNavigation);
+    window.addEventListener('yt-navigate-finish', onSpaNavigation);
+    document.addEventListener('yt-navigate-finish', onSpaNavigation);
+    document.addEventListener('yt-page-data-updated', onSpaNavigation);
   }
 
   if (scanIntervalId) clearInterval(scanIntervalId);
   scanIntervalId = setInterval(() => {
+    if (scanPaused && !document.hidden) scanPaused = false;
     if (scanPaused || isBellowsCollectorActive()) return;
     cleanupStaleEntries();
     if (hasActiveModality('image')) {
@@ -2625,7 +2952,7 @@ document.addEventListener('contextmenu', (evt) => {
 
 // Listen for streamed classification results
 if (ext && ext.runtime && ext.runtime.onMessage) {
-  ext.runtime.onMessage.addListener((message) => {
+  ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || !message.type) return false;
 
     if (message.type === 'ONBOARDING_DOWNLOAD_PROGRESS') {
@@ -2670,7 +2997,22 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 
     if (message.type === 'RECLASSIFY_ALL') {
       reloadSettingsAndRescan();
-      return Promise.resolve({ success: true });
+      if (typeof sendResponse === 'function') sendResponse({ success: true });
+      return false;
+    }
+
+    if (message.type === 'TRIGGER_DOM_SCAN') {
+      if (!isBellowsCollectorActive()) {
+        loadSettings().then(() => {
+          if (settings.enabled && !isBellowsCollectorActive()) {
+            scanPaused = false;
+            startDynamicDetection();
+            performInitialExtraction();
+          }
+        }).catch(() => {});
+      }
+      if (typeof sendResponse === 'function') sendResponse({ ok: true });
+      return false;
     }
 
     if (message.type === 'CANCEL_ALL_CLASSIFICATIONS') {
@@ -2690,7 +3032,8 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
       }).catch(() => {});
 
       console.log('[AI Detector] All classifications cancelled');
-      return Promise.resolve({ success: true });
+      if (typeof sendResponse === 'function') sendResponse({ success: true });
+      return false;
     }
 
     if (message.type === 'TOGGLE_BLUR') {
@@ -2717,7 +3060,8 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
           if (currentHoverEl === targetImage) {
             currentHoverEl = null;
           }
-          return Promise.resolve({ hasAiTags: false, label: badgeLabel, modality: 'image' });
+          if (typeof sendResponse === 'function') sendResponse({ hasAiTags: false, label: badgeLabel, modality: 'image' });
+          return false;
         } else {
           applyManualBlurStyles(itemId, targetImage, {
             id: 'manual_blur',
@@ -2741,7 +3085,8 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
               }
             }
           });
-          return Promise.resolve({ hasAiTags: true, label: 'Blur', modality: 'image' });
+          if (typeof sendResponse === 'function') sendResponse({ hasAiTags: true, label: 'Blur', modality: 'image' });
+          return false;
         }
       }
 
@@ -2760,7 +3105,8 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
               itemResults.delete(itemId);
             }
             VE.clearTextStyles(targetText);
-            return Promise.resolve({ hasAiTags: false, label: label, modality: 'text' });
+            if (typeof sendResponse === 'function') sendResponse({ hasAiTags: false, label: label, modality: 'text' });
+            return false;
           } else {
             applyManualBlurStyles(itemId, targetText, {
               id: 'manual_blur_text',
@@ -2781,21 +3127,25 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
                 }
               }
             });
-            return Promise.resolve({ hasAiTags: true, label: 'Blur', modality: 'text' });
+            if (typeof sendResponse === 'function') sendResponse({ hasAiTags: true, label: 'Blur', modality: 'text' });
+            return false;
           }
         }
       }
-      return Promise.resolve({ hasAiTags: false, modality: 'image' });
+      if (typeof sendResponse === 'function') sendResponse({ hasAiTags: false, modality: 'image' });
+      return false;
     }
 
     if (message.type === 'OPEN_COMMUNITY_REPORT_MODAL') {
       openCommunityReportModal(message.srcUrl || null);
-      return Promise.resolve({ ok: true });
+      if (typeof sendResponse === 'function') sendResponse({ ok: true });
+      return false;
     }
 
     if (message && message.type === 'BELLOWS_ACTIVATE_COLLECTOR') {
       activateBellowsCollector(message);
-      return Promise.resolve({ ok: true });
+      if (typeof sendResponse === 'function') sendResponse({ ok: true });
+      return false;
     }
 
     if (message && (message.type === 'BELLOWS_PROGRESS' || message.type === 'BELLOWS_COLLECTOR_COUNTS' || message.type === 'ONBOARDING_DOWNLOAD_PROGRESS')) {
@@ -3412,8 +3762,8 @@ if (ext && ext.storage && ext.storage.onChanged) {
         : [];
       const newSig = computeEnsembleSignature(newEnsembles, false);
       const newStyleSig = computeEnsembleSignature(newEnsembles, true);
-      const classifierChanged = prevSig && newSig && prevSig !== newSig;
-      const styleChanged = !prevStyleSig || !newStyleSig || prevStyleSig !== newStyleSig;
+      const classifierChanged = prevSig !== newSig;
+      const styleChanged = prevStyleSig !== newStyleSig;
 
       if (classifierChanged) {
         reloadSettingsAndRescan();
@@ -3422,6 +3772,7 @@ if (ext && ext.storage && ext.storage.onChanged) {
 
       if (styleChanged) {
         applyLatestVisualSettings({ recalculateScores: true });
+        return;
       }
 
       handledByEnsemble = true;

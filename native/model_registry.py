@@ -304,6 +304,10 @@ class ModelRegistry:
 
         resolved_id = self._resolve_classifier_id(classifier_id)
         if resolved_id is None:
+            # Rescan classifiers/ directory in case a new Bellows or custom model was just forged
+            self.discover_classifiers(force=True)
+            resolved_id = self._resolve_classifier_id(classifier_id)
+        if resolved_id is None:
             print(f"[Registry] Unknown classifier: {classifier_id}", file=sys.stderr)
             return None
         classifier_id = resolved_id

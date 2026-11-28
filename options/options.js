@@ -997,9 +997,15 @@ function getCategoryDisplayName(ensemble, index) {
 
 async function saveEnsembles() {
   try {
+    const payload = { ensembleConfigsV2: ensembleConfigs };
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
     if (storageArea && storageArea.set) {
-      await storageArea.set({ ensembleConfigsV2: ensembleConfigs });
+      await storageArea.set(payload).catch((err) => {
+        console.warn('Failed to save ensemble configs to primary storage:', err);
+      });
+    }
+    if (ext.storage && ext.storage.local && ext.storage.local !== storageArea) {
+      await ext.storage.local.set(payload).catch(() => {});
     }
   } catch (e) {
     console.error('Failed to save ensemble configs:', e);
@@ -2242,37 +2248,48 @@ async function load() {
   try {
     const prevUiSignature = JSON.stringify({ ensembleConfigs, availableClassifiers });
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
-    const res = storageArea && storageArea.get
-      ? await storageArea.get([
-          'enabled',
-          'altTextOnly',
-          'ignoreSmallImages',
-          'investigator',
-          'minImageDimension',
-          'pauseOnBattery',
-          'pauseBelowThreshold',
-          'batteryThreshold',
-          'classificationDelay',
-          'imageCaptureQuality',
-          'verboseLogs',
-          'lazyLoad',
-          'disableUpdateNotifications',
-          'enableManualBlurContextMenu',
-          'minTextLength',
-          'classifierTimings',
-          'ensembleConfigsV2'
-        ])
-      : {};
+    const keys = [
+      'enabled',
+      'altTextOnly',
+      'ignoreSmallImages',
+      'investigator',
+      'minImageDimension',
+      'pauseOnBattery',
+      'pauseBelowThreshold',
+      'batteryThreshold',
+      'classificationDelay',
+      'imageCaptureQuality',
+      'verboseLogs',
+      'lazyLoad',
+      'disableUpdateNotifications',
+      'enableManualBlurContextMenu',
+      'minTextLength',
+      'classifierTimings',
+      'ensembleConfigsV2'
+    ];
+    let res = storageArea && storageArea.get ? await storageArea.get(keys) : {};
+    if (!res) res = {};
+
+    if (!Array.isArray(res.ensembleConfigsV2) || !res.ensembleConfigsV2.length) {
+      if (ext.storage && ext.storage.local && ext.storage.local !== storageArea) {
+        try {
+          const localRes = await ext.storage.local.get(keys);
+          if (Array.isArray(localRes?.ensembleConfigsV2) && localRes.ensembleConfigsV2.length) {
+            res = { ...localRes, ...res, ensembleConfigsV2: localRes.ensembleConfigsV2 };
+          }
+        } catch (_) {}
+      }
+    }
 
     applySettingsToUI(res || {}, { render: false });
     settingsLoaded = true;
 
-    if (!res || !Array.isArray(res.ensembleConfigsV2) || !res.ensembleConfigsV2.length) {
-      if (!res || !Array.isArray(res.ensembleConfigsV2)) {
-        ensembleConfigs = [];
+    if (!res || !Array.isArray(res.ensembleConfigsV2) || res.ensembleConfigsV2.length === 0) {
+      if (initialSnapshot && Array.isArray(initialSnapshot.ensembleConfigsV2) && initialSnapshot.ensembleConfigsV2.length) {
+        ensembleConfigs = initialSnapshot.ensembleConfigsV2;
         await saveEnsembles();
-      } else {
-        ensembleConfigs = [];
+      } else if (!res || !Array.isArray(res.ensembleConfigsV2)) {
+        ensembleConfigs = ENS.buildDefaultEnsembles();
       }
     }
 
@@ -2288,9 +2305,13 @@ async function load() {
 
 async function saveSetting(key, value) {
   try {
+    const payload = { [key]: value };
     const storageArea = ext.storage && (ext.storage.sync || ext.storage.local);
     if (storageArea && storageArea.set) {
-      await storageArea.set({ [key]: value });
+      await storageArea.set(payload);
+    }
+    if (ext.storage && ext.storage.local && ext.storage.local !== storageArea && ext.storage.local.set) {
+      await ext.storage.local.set(payload).catch(() => {});
     }
   } catch (e) {
     console.error(`Failed to save ${key}:`, e);
@@ -2451,6 +2472,19 @@ if (ext && ext.storage && ext.storage.onChanged) {
     if (Object.prototype.hasOwnProperty.call(changes, 'classifierTimings')) {
       classifierTimings = changes.classifierTimings.newValue || {};
       updateClassifierRateLabels();
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, 'ensembleConfigsV2')) {
+      const nextEnsembles = changes.ensembleConfigsV2.newValue;
+      if (Array.isArray(nextEnsembles)) {
+        const prevStr = JSON.stringify(ensembleConfigs);
+        const nextStr = JSON.stringify(nextEnsembles);
+        if (prevStr !== nextStr) {
+          ensembleConfigs = nextEnsembles;
+          normalizeSelectedIndex();
+          renderEnsembles();
+          writeUiSnapshotCache();
+        }
+      }
     }
   });
 }

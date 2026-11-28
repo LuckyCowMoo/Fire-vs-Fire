@@ -43,7 +43,9 @@ $targets = @(
   @{ Path = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName" },
   @{ Path = "HKLM:\Software\Google\Chrome\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Google\Chrome\NativeMessagingHosts\$HostName" },
   @{ Path = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$HostName" },
-  @{ Path = "HKLM:\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Microsoft\Edge\NativeMessagingHosts\$HostName" }
+  @{ Path = "HKLM:\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"; Reg = "HKLM\Software\Microsoft\Edge\NativeMessagingHosts\$HostName" },
+  @{ Path = "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$HostName" },
+  @{ Path = "HKCU:\Software\Chromium\NativeMessagingHosts\$HostName"; Reg = "HKCU\Software\Chromium\NativeMessagingHosts\$HostName" }
 )
 
 foreach ($target in $targets) {

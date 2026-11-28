@@ -39,7 +39,7 @@
         id: 'auto_image_fvf_heimdall04',
         name: 'AI generated',
         modality: 'image',
-        enabled: true,
+        enabled: false,
         threshold: settings.imageAiThreshold ?? 0.75,
         classifiers: ['fvf_heimdall04'],
         weights: null,

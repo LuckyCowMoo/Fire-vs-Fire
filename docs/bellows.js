@@ -136,16 +136,35 @@ function sendBridge(action, payload = {}, timeoutMs = 15000) {
   });
 }
 
+let ethicsCurrentPct = 0;
+let ethicsTrickleTimer = null;
+
+function setEthicsProgress(percent, message) {
+  const wrap = document.getElementById('ethics-progress-wrap');
+  const fill = document.getElementById('ethics-progress-fill');
+  const pctEl = document.getElementById('ethics-progress-pct');
+  const labelEl = document.getElementById('ethics-progress-label');
+  const clamped = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  ethicsCurrentPct = Math.max(ethicsCurrentPct, clamped);
+  if (wrap) wrap.hidden = false;
+  if (fill) fill.style.width = `${ethicsCurrentPct}%`;
+  if (pctEl) pctEl.textContent = `${ethicsCurrentPct}%`;
+  if (labelEl && message) labelEl.textContent = message;
+}
+
 function handleBridgePush(msg) {
   if (!msg) return;
   if (msg.type === 'BELLOWS_PROGRESS' && msg.payload) {
     const p = msg.payload;
     if (p.stage === 'ethics') {
+      const pct = typeof p.percent === 'number' ? p.percent : ethicsCurrentPct;
+      const text = p.message || 'Inspecting, this may take a minute…';
+      setEthicsProgress(pct, text);
       const box = document.getElementById('ethics-status-box');
-      if (box) {
+      if (box && !box.classList.contains('is-danger') && !box.classList.contains('is-ok')) {
         box.hidden = false;
         box.className = 'bellows-alert';
-        box.textContent = 'Inspecting, this may take a minute…';
+        box.textContent = text;
       }
     } else if (p.stage === 'base_dataset') {
       const fill = document.getElementById('base-dataset-progress-fill');
@@ -261,6 +280,8 @@ async function handleEthicsCheck() {
   const prompt = (document.getElementById('bellows-prompt-input')?.value || '').trim();
   const box = document.getElementById('ethics-status-box');
   const btn = document.getElementById('ethics-check-btn');
+  const wrap = document.getElementById('ethics-progress-wrap');
+  const fill = document.getElementById('ethics-progress-fill');
   bellowsState.prompt = prompt;
 
   btn.disabled = true;
@@ -268,15 +289,40 @@ async function handleEthicsCheck() {
   box.className = 'bellows-alert';
   box.textContent = 'Inspecting, this may take a minute…';
 
-  const res = await sendBridge('BELLOWS_CHECK_ETHICS', { modality: bellowsState.modality, prompt }, 240000);
-  btn.disabled = false;
+  if (ethicsTrickleTimer) {
+    clearInterval(ethicsTrickleTimer);
+    ethicsTrickleTimer = null;
+  }
+  ethicsCurrentPct = 0;
+  if (fill) fill.classList.add('is-pulsing');
+  setEthicsProgress(8, 'Running deterministic policy check…');
+  ethicsTrickleTimer = setInterval(() => {
+    const cap = ethicsCurrentPct < 55 ? 50 : 90;
+    if (ethicsCurrentPct < cap) {
+      setEthicsProgress(ethicsCurrentPct + 1);
+    }
+  }, 650);
+
+  let res = null;
+  try {
+    res = await sendBridge('BELLOWS_CHECK_ETHICS', { modality: bellowsState.modality, prompt }, 240000);
+  } finally {
+    if (ethicsTrickleTimer) {
+      clearInterval(ethicsTrickleTimer);
+      ethicsTrickleTimer = null;
+    }
+    if (fill) fill.classList.remove('is-pulsing');
+    btn.disabled = false;
+  }
 
   if (!res || !res.ok || !res.allowed) {
+    if (wrap) wrap.hidden = true;
     box.className = 'bellows-alert is-danger';
     box.textContent = res?.reason || 'This filter target is not permitted under the FvF Bellows ethical policy.';
     return;
   }
 
+  setEthicsProgress(100, 'Ethical check complete.');
   box.className = 'bellows-alert is-ok';
   box.textContent = `✓ Approved (${res.source || 'guard'}): ${res.reason || 'Safe to build!'}`;
 
@@ -297,6 +343,18 @@ function updateModalityDatasetUI() {
   document.getElementById('byo-image-panel').hidden = isText;
   document.getElementById('byo-text-panel').hidden = !isText;
   document.getElementById('text-collector-source-row').hidden = !isText;
+
+  const promptPreview = document.getElementById('collector-prompt-preview');
+  if (promptPreview) promptPreview.textContent = bellowsState.prompt || 'your topic';
+  const mediaNoun = document.getElementById('collector-media-noun');
+  if (mediaNoun) mediaNoun.textContent = isText ? 'examples' : 'images';
+
+  const byoHelp = document.getElementById('byo-help-text');
+  if (byoHelp) {
+    byoHelp.textContent = isText
+      ? 'Accepted text formats: .txt, .csv, .jsonl, .json files, or pasted paragraphs (min 40 chars each).'
+      : 'Accepted image formats: JPG, PNG, WebP, GIF, BMP.';
+  }
 }
 
 async function prepareBaseDatasetSession() {
@@ -328,25 +386,19 @@ async function prepareBaseDatasetSession() {
 function updateDatasetCountsUI() {
   const pos = bellowsState.counts.positives || 0;
   const hn = bellowsState.counts.hard_negatives || 0;
-  const base = bellowsState.counts.base_negatives || 0;
-  const minNeed = bellowsState.modality === 'image' ? 40 : 30;
-  const solidNeed = bellowsState.modality === 'image' ? 120 : 80;
   const maxGoal = bellowsState.modality === 'image' ? 300 : 150;
 
-  document.getElementById('ds-pos-count').textContent = `${pos} Targets`;
-  document.getElementById('ds-hn-count').textContent = `${hn} Hard Negatives`;
-  document.getElementById('ds-base-count').textContent = `${base} Base Web Negatives`;
+  const posEl = document.getElementById('ds-pos-count');
+  if (posEl) posEl.textContent = `${pos} Targets`;
+  const hnEl = document.getElementById('ds-hn-count');
+  if (hnEl) hnEl.textContent = `${hn} Hard Negatives`;
 
   const pct = Math.min(100, Math.round((pos / maxGoal) * 100));
-  document.getElementById('ds-quality-fill').style.width = `${pct}%`;
+  const fillEl = document.getElementById('ds-quality-fill');
+  if (fillEl) fillEl.style.width = `${pct}%`;
 
-  const lbl = document.getElementById('ds-quality-label');
-  if (pos >= maxGoal) lbl.textContent = 'High-precision dataset ready!';
-  else if (pos >= solidNeed) lbl.textContent = 'Solid dataset ready (or keep adding more)';
-  else if (pos >= minNeed) lbl.textContent = 'Minimum reached — more examples improve accuracy';
-  else lbl.textContent = `Add ${Math.max(0, minNeed - pos)} more targets (or ≥15 absolute minimum) to continue`;
-
-  document.getElementById('step3-next-btn').disabled = pos < 15;
+  const nextBtn = document.getElementById('step3-next-btn');
+  if (nextBtn) nextBtn.disabled = pos < 15;
 }
 
 async function uploadImageFiles(fileList, kind) {
@@ -404,7 +456,7 @@ function renderTiers() {
         <strong>${info.name}</strong>
         <div class="bellows-muted">${info.epochs} epochs • ~${info.disk_mb} MB temp cache</div>
       </div>
-      <span class="bellows-badge">${info.est_text}</span>
+      <div class="bellows-tier-speed-row">Est. Training Time: ${info.est_text}</div>
     `;
     card.addEventListener('click', () => {
       bellowsState.tier = key;
@@ -443,7 +495,7 @@ async function igniteTraining() {
   bellowsState.finalizedCategory = false;
   const stopBtn = document.getElementById('train-stop-btn');
   if (stopBtn) {
-    stopBtn.hidden = false;
+    stopBtn.hidden = true;
     stopBtn.disabled = false;
     stopBtn.innerHTML = '<span>✓</span> I\'m Happy with This — Stop &amp; Use Best Model';
   }
@@ -749,12 +801,25 @@ function startStatusPolling() {
     drawTrainingChart(st.history || [], st.loss_history || [], st.total_steps || 1, st.total_epochs || 1);
 
     const hist = Array.isArray(st.history) ? st.history : [];
+    const lastEp = hist.length > 0 ? hist[hist.length - 1] : null;
+    const completedEpochs = lastEp ? Number(lastEp.epoch || hist.length) : 0;
+    const rawThresh = typeof st.suggested_threshold === 'number' && Number.isFinite(st.suggested_threshold)
+      ? st.suggested_threshold
+      : 0.75;
+    const accThreshold = Math.max(0.75, rawThresh);
+    const currentAcc = lastEp && typeof lastEp.val_acc === 'number' ? lastEp.val_acc : 0;
+    const canOfferEarlyStop = st.state === 'running' && completedEpochs >= 2 && currentAcc >= accThreshold;
+
+    const stopBtn = document.getElementById('train-stop-btn');
+    if (stopBtn) {
+      stopBtn.hidden = !canOfferEarlyStop;
+    }
+
     const happyBanner = document.getElementById('epoch-happy-banner');
     if (happyBanner) {
-      if (hist.length > 0 && st.state === 'running') {
+      if (canOfferEarlyStop && lastEp) {
         happyBanner.hidden = false;
-        const lastEp = hist[hist.length - 1];
-        const accPct = Math.round((lastEp.val_acc || 0) * 100);
+        const accPct = Math.round(currentAcc * 100);
         const titleEl = document.getElementById('epoch-happy-title');
         if (titleEl) {
           titleEl.textContent = `Epoch ${lastEp.epoch}/${st.total_epochs || hist.length} Complete — ${accPct}% Validation Accuracy!`;
@@ -803,7 +868,8 @@ function startStatusPolling() {
       document.getElementById('train-complete-panel').hidden = false;
       const bestAcc = st.best_metrics?.acc ? ` (Validation Accuracy: ${(st.best_metrics.acc * 100).toFixed(1)}%)` : '';
       document.getElementById('complete-summary-text').textContent = `${st.model_name} (${st.classifier_id}) was exported locally and activated as a new Fire vs Fire category at ${Math.round((st.suggested_threshold || 0.75) * 100)}% threshold${bestAcc}.`;
-      document.getElementById('cleanup-size-text').textContent = `Bellows is currently using ~${res.cache_size_mb || 0} MB for its cached gatekeeper & Hugging Face base dataset (+ ~${res.jobs_size_mb || 0} MB raw training samples). Keep them or delete them now?`;
+      document.getElementById('cleanup-size-text').textContent = `Bellows is currently using ~${res.cache_size_mb || 0} MB for the gatekeeper & Hugging Face base dataset (+ ~${res.jobs_size_mb || 0} MB raw training samples). Now that your model is trained, you can delete these, or choose to keep them here so you don't have to download again next time.`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
 
       if (!bellowsState.finalizedCategory && st.classifier_id) {
         bellowsState.finalizedCategory = true;
@@ -874,8 +940,18 @@ function initBellows() {
   document.getElementById('bellows-back-hub-btn')?.addEventListener('click', () => {
     window.location.href = './index.html?screen=2';
   });
-  document.getElementById('goto-hub-shelf-btn')?.addEventListener('click', () => {
-    window.location.href = './index.html?screen=2';
+  document.getElementById('close-bellows-tab-btn')?.addEventListener('click', () => {
+    if (ext && ext.tabs && typeof ext.tabs.getCurrent === 'function' && typeof ext.tabs.remove === 'function') {
+      ext.tabs.getCurrent((tab) => {
+        if (tab && tab.id != null) {
+          ext.tabs.remove(tab.id);
+        } else {
+          window.close();
+        }
+      });
+    } else {
+      window.close();
+    }
   });
 
   document.getElementById('preflight-refresh-btn')?.addEventListener('click', runPreflight);
@@ -960,9 +1036,9 @@ function initBellows() {
     }
     const failedActions = document.getElementById('train-failed-actions');
     if (failedActions) failedActions.hidden = true;
-    document.getElementById('train-stop-btn').hidden = false;
     const stopBtn = document.getElementById('train-stop-btn');
     if (stopBtn) {
+      stopBtn.hidden = true;
       stopBtn.disabled = false;
       stopBtn.innerHTML = '<span>✓</span> I\'m Happy with This — Stop &amp; Use Best Model';
     }

@@ -1,35 +1,59 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Fire Vs Fire",
   "description": "Local, hardware-accelerated AI & custom content detector powered by Fire vs Fire classifiers.",
   "version": "0.1.0",
   "icons": {
-    "128": "icons/icon.svg"
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
   },
-  "browser_action": {
+  "action": {
     "default_title": "Open Options",
     "default_popup": "options/options.html",
-    "default_icon": "icons/icon.svg"
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "web_accessible_resources": [
-    "icons/icon.svg",
-    "icons/icon-loading.svg",
-    "options/preview-fire.jpg",
-    "options/assets/*",
-    "docs/*"
+    {
+      "resources": [
+        "icons/icon.svg",
+        "icons/icon-loading.svg",
+        "icons/icon-16.png",
+        "icons/icon-32.png",
+        "icons/icon-48.png",
+        "icons/icon-128.png",
+        "icons/icon-loading-16.png",
+        "icons/icon-loading-32.png",
+        "icons/icon-loading-48.png",
+        "icons/icon-loading-128.png",
+        "options/preview-fire.jpg",
+        "options/assets/*",
+        "docs/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
   ],
-"background": {
+  "background": {
+    "service_worker": "background/background.js",
     "scripts": ["background/background.js"]
   },
-"permissions": [
-  "storage",
-  "tabs",
-  "activeTab",
-  "contextMenus",
-  "nativeMessaging",
-  "<all_urls>"
-],
-"content_scripts": [
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "contextMenus",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["shared/visualEffects.js", "shared/ensembles.js", "shared/textUtils.js", "content/content.js"],
@@ -37,14 +61,15 @@
       "run_at": "document_idle"
     }
   ],
-"options_ui": {
+  "options_ui": {
     "page": "options/options.html",
     "open_in_tab": true
   },
-"browser_specific_settings": {
+  "browser_specific_settings": {
     "gecko": {
       "id": "template@example.com",
-      "strict_min_version": "57.0"
+      "strict_min_version": "109.0"
     }
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5oNd4nUC6sXAbKQ3yT8Efuglm5rvGlh0jsroay+m6jTb6a8YyjIGRcM9k+BKj5shakZlLZiivRXJNVapy1etRZ9nGKmJ46n4k+l9jcms/QAfHRuecvWxxeTJBOxiD3WWJnSbgsv6q4JVx6KQqcZAcb+7a2J4421ShBkvK1GDak3gklZtmg5oyIHz10+3mdbEaXPfp4DyHQX7AxyAcatMmPKmRILI1pQBMzTxoA6hI/FieS2EEBcWlgXxDq9pRxkkvEaiwVMc5O/0BMZk1AD9UX8z+0ayimWnNubHDXgTXml8+lS71X9dotD4M3JxeUseogK93m2L5QxOqsbl+J15TQIDAQAB"
 }

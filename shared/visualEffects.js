@@ -322,26 +322,14 @@
         }
 
         const badgeEntries = [];
-        matched.forEach(({ cfg, score, displayLabel, classifiers }) => {
-          const classifierEntries = classifiers && typeof classifiers === 'object'
-            ? Object.entries(classifiers)
-            : [];
-
-          if (classifierEntries.length) {
-            classifierEntries.forEach(([, classifierData]) => {
-              badgeEntries.push({
-                label: classifierData?.label || classifierData?.displayLabel || displayLabel || badgeLabel,
-                score: typeof classifierData?.score === 'number' ? classifierData.score : score,
-                color: cfg.styles?.image?.borderColor || borderColor
-              });
-            });
-          } else {
-            badgeEntries.push({
-              label: displayLabel || badgeLabel,
-              score,
-              color: cfg.styles?.image?.borderColor || borderColor
-            });
-          }
+        matched.forEach(({ cfg, score, displayLabel }) => {
+          const catLabel = cfg?.name || displayLabel || badgeLabel || 'AI generated';
+          const catColor = cfg?.styles?.image?.borderColor || borderColor;
+          badgeEntries.push({
+            label: catLabel,
+            score,
+            color: catColor
+          });
         });
 
         const badgeIds = [];

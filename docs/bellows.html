@@ -141,11 +141,7 @@
             </div>
 
             <div id="ethics-progress-wrap" class="bellows-ethics-progress" hidden>
-              <div class="bellows-ethics-progress-head">
-                <span id="ethics-progress-label">Inspecting topic…</span>
-                <span id="ethics-progress-pct">0%</span>
-              </div>
-              <div class="bellows-bar-track">
+              <div class="bellows-bar-track" style="height: 12px;">
                 <div class="bellows-bar-fill" id="ethics-progress-fill" style="width: 0%;"></div>
               </div>
             </div>
@@ -336,7 +332,19 @@
            STEP 5: LIVE TRAINING STUDIO, METRICS CHART & EDUCATIONAL CARDS
            ================================================================ -->
       <section class="wizard-screen" id="bellows-screen-5">
-        <!-- Post-Training Completion + Storage Cleanup Prompt (Spawns at Top of Page) -->
+        <div class="screen-header">
+          <h1 class="display-title" id="train-hero-title">Forging Your Classifier…</h1>
+          <p class="lead-subtitle" id="train-hero-sub">
+            Training runs in the background Native Host service—you can safely close this tab and reopen it from Fire vs Fire Options anytime.
+          </p>
+          <div id="train-failed-actions" hidden style="margin-top: 14px;">
+            <button type="button" class="btn-bellows-primary" id="train-retry-btn">
+              ↻ Retry Training with Saved Dataset
+            </button>
+          </div>
+        </div>
+
+        <!-- Post-Training Completion + Storage Cleanup Prompt (Spawns Below Header) -->
         <div class="glass-card-3d bellows-card is-complete" id="train-complete-panel" hidden style="margin-bottom: 22px;">
           <h2 class="bellows-h2" style="color: #6ee7b7;" id="complete-heading">Classifier Forged &amp; Category Activated!</h2>
           <p class="bellows-muted" id="complete-summary-text" style="margin-bottom: 16px;"></p>
@@ -356,18 +364,6 @@
                 Delete Temporary Files to Free Up Space
               </button>
             </div>
-          </div>
-        </div>
-
-        <div class="screen-header">
-          <h1 class="display-title" id="train-hero-title">Forging Your Classifier…</h1>
-          <p class="lead-subtitle" id="train-hero-sub">
-            Training runs in the background Native Host service—you can safely close this tab and reopen it from Fire vs Fire Options anytime.
-          </p>
-          <div id="train-failed-actions" hidden style="margin-top: 14px;">
-            <button type="button" class="btn-bellows-primary" id="train-retry-btn">
-              ↻ Retry Training with Saved Dataset
-            </button>
           </div>
         </div>
 
@@ -418,7 +414,6 @@
           <div class="glass-card-3d bellows-card">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;">
               <h2 class="bellows-h2" style="margin: 0;">Learning Curve Over Time</h2>
-              <span class="bellows-muted" style="font-size: 0.78rem; color: #94a3b8;" id="chart-update-rate-badge">● Updates live every ~10s</span>
             </div>
             <p class="bellows-muted" style="margin-bottom: 10px;">
               <span style="color: #34d399;">● Validation Accuracy</span> &nbsp;•&nbsp;

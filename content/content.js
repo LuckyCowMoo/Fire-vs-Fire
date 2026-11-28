@@ -13,8 +13,30 @@ if (typeof window !== 'undefined' && window.location && typeof window.location.h
   window.__FVF_BELLOWS_COLLECTOR_ACTIVE = true;
 }
 
+// ============================================================================
+// FvF BELLOWS — INTERACTIVE DATASET GATHERING MODE (GREEN EMBERS + 1-CLICK)
+// ============================================================================
+const bellowsCollector = {
+  active: false,
+  paused: false,
+  boxMode: false,
+  jobId: null,
+  modality: 'image',
+  prompt: '',
+  counts: { positives: 0, hard_negatives: 0, base_negatives: 0 },
+  elToRecord: new WeakMap(),
+  trackedEls: new Set(),
+  overlayRefs: new Map(),
+  hudEl: null,
+  emberCanvas: null,
+  emberRaf: null,
+  frameEl: null,
+  marqueeEl: null,
+  dragStart: null
+};
+
 function isBellowsCollectorActive() {
-  return Boolean(window.__FVF_BELLOWS_COLLECTOR_ACTIVE || (typeof bellowsCollector !== 'undefined' && bellowsCollector && bellowsCollector.active));
+  return Boolean(window.__FVF_BELLOWS_COLLECTOR_ACTIVE || bellowsCollector.active);
 }
 
 // Unique page context identifier for this page instance (used by Native Host to drop stale items on navigation)
@@ -64,6 +86,7 @@ let hoverPrioritySentId = null;  // Pending itemId currently boosted on Native H
 let hoverPriorityTimer = null;   // Dwell timer before elevating hovered item to P0
 const HOVER_PRIORITY_DWELL_MS = 120;
 let scanPaused = false;            // Pause periodic scans while tab is hidden
+let settingsLoaded = false;        // Guard against classifying with unloaded default ensembles
 let processedImages = new WeakSet(); // WeakSet: elements automatically GC'd when removed from DOM
 let activeJobIds = new Set();    // Legacy job ID tracking
 let itemResults = new Map();     // itemId -> { modality, ensembles: { ensembleId: { score, label, displayLabel } } }
@@ -986,6 +1009,7 @@ function checkAlreadyProcessedTextMutation(block) {
 }
 
 function processMutationBatch(mutations) {
+  if (!settingsLoaded) return;
   if (scanPaused && !document.hidden) scanPaused = false;
   if (isBellowsCollectorActive() || !settings.enabled || scanPaused) return;
 
@@ -1186,7 +1210,7 @@ function initIntersectionObserver() {
   if (intersectionObserver) return;
 
   intersectionObserver = new IntersectionObserver((entries) => {
-    if (isBellowsCollectorActive()) return;
+    if (isBellowsCollectorActive() || !settingsLoaded) return;
     const newImages = [];
     const boostItemIds = [];
 
@@ -1665,6 +1689,7 @@ function resolveInvestigatorImageUrl(el, baseSrc, nw, nh) {
 }
 
 function processImageElement(el, isLazy = false) {
+  if (!settingsLoaded) return null;
   if (isBellowsCollectorActive()) return null;
   if (!el || el.tagName.toLowerCase() !== 'img') return null;
   if (typeof el.closest === 'function' && el.closest('#fvf-community-report-backdrop')) return null;
@@ -2210,6 +2235,7 @@ function acceptCohesiveTextSection(sec) {
 }
 
 function extractLongText() {
+  if (!settingsLoaded) return [];
   if (!hasActiveModality('text')) return [];
   try {
     if (typeof TU.extractCohesiveTextSections === 'function') {
@@ -2283,6 +2309,7 @@ async function loadSettings() {
     const localArea = ext.storage && ext.storage.local;
     if (!syncArea && !localArea) {
       console.warn('[Extension] Storage API not available');
+      settingsLoaded = true;
       return;
     }
 
@@ -2323,10 +2350,12 @@ async function loadSettings() {
       settings.minImageDimension = Math.max(16, Math.min(512, res.minImageDimension));
     }
     if (res && Array.isArray(res.ensembleConfigsV2)) settings.ensembles = res.ensembleConfigsV2;
+    settingsLoaded = true;
     updateEnsembleSignatures();
     updateHoverHandlerAttachment();
   } catch (e) {
     console.warn('[Extension] Error loading settings:', e);
+    settingsLoaded = true;
   }
 }
 
@@ -2413,6 +2442,7 @@ let scrollScanThrottleTimer = null;
 let scrollScanTrailingTimer = null;
 
 function triggerLightweightDomScan() {
+  if (!settingsLoaded) return;
   if (scanPaused && !document.hidden) scanPaused = false;
   if (scanPaused || !settings.enabled || isBellowsCollectorActive()) return;
   if (hasActiveModality('image')) {
@@ -2512,6 +2542,7 @@ function startDynamicDetection() {
 }
 
 function performInitialExtraction() {
+  if (!settingsLoaded) return;
   if (isBellowsCollectorActive()) {
     return;
   }
@@ -3162,26 +3193,8 @@ if (ext && ext.runtime && ext.runtime.onMessage) {
 }
 
 // ============================================================================
-// FvF BELLOWS — INTERACTIVE DATASET GATHERING MODE (GREEN EMBERS + 1-CLICK)
+// FvF BELLOWS — INTERACTIVE DATASET GATHERING MODE HELPERS
 // ============================================================================
-const bellowsCollector = {
-  active: false,
-  paused: false,
-  boxMode: false,
-  jobId: null,
-  modality: 'image',
-  prompt: '',
-  counts: { positives: 0, hard_negatives: 0, base_negatives: 0 },
-  elToRecord: new WeakMap(),
-  trackedEls: new Set(),
-  overlayRefs: new Map(),
-  hudEl: null,
-  emberCanvas: null,
-  emberRaf: null,
-  frameEl: null,
-  marqueeEl: null,
-  dragStart: null
-};
 
 function _extractBellowsImageDataUrl(img) {
   return new Promise((resolve) => {

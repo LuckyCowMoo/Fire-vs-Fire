@@ -158,13 +158,10 @@ function handleBridgePush(msg) {
     const p = msg.payload;
     if (p.stage === 'ethics') {
       const pct = typeof p.percent === 'number' ? p.percent : ethicsCurrentPct;
-      const text = p.message || 'Inspecting, this may take a minute…';
-      setEthicsProgress(pct, text);
+      setEthicsProgress(pct);
       const box = document.getElementById('ethics-status-box');
       if (box && !box.classList.contains('is-danger') && !box.classList.contains('is-ok')) {
-        box.hidden = false;
-        box.className = 'bellows-alert';
-        box.textContent = text;
+        box.hidden = true;
       }
     } else if (p.stage === 'base_dataset') {
       const fill = document.getElementById('base-dataset-progress-fill');
@@ -285,9 +282,8 @@ async function handleEthicsCheck() {
   bellowsState.prompt = prompt;
 
   btn.disabled = true;
-  box.hidden = false;
+  box.hidden = true;
   box.className = 'bellows-alert';
-  box.textContent = 'Inspecting, this may take a minute…';
 
   if (ethicsTrickleTimer) {
     clearInterval(ethicsTrickleTimer);
@@ -295,7 +291,7 @@ async function handleEthicsCheck() {
   }
   ethicsCurrentPct = 0;
   if (fill) fill.classList.add('is-pulsing');
-  setEthicsProgress(8, 'Running deterministic policy check…');
+  setEthicsProgress(8);
   ethicsTrickleTimer = setInterval(() => {
     const cap = ethicsCurrentPct < 55 ? 50 : 90;
     if (ethicsCurrentPct < cap) {
@@ -317,12 +313,14 @@ async function handleEthicsCheck() {
 
   if (!res || !res.ok || !res.allowed) {
     if (wrap) wrap.hidden = true;
+    box.hidden = false;
     box.className = 'bellows-alert is-danger';
     box.textContent = res?.reason || 'This filter target is not permitted under the FvF Bellows ethical policy.';
     return;
   }
 
-  setEthicsProgress(100, 'Ethical check complete.');
+  setEthicsProgress(100);
+  box.hidden = false;
   box.className = 'bellows-alert is-ok';
   box.textContent = `✓ Approved (${res.source || 'guard'}): ${res.reason || 'Safe to build!'}`;
 
